@@ -17,12 +17,18 @@ const common_1 = require("@nestjs/common");
 const auth_guard_1 = require("../auth/auth.guard");
 const migration_service_1 = require("./migration.service");
 const generic_migration_service_1 = require("./generic-migration.service");
+const seed_service_1 = require("./seed.service");
 let MigrationController = class MigrationController {
     svc;
     generic;
-    constructor(svc, generic) {
+    seed;
+    constructor(svc, generic, seed) {
         this.svc = svc;
         this.generic = generic;
+        this.seed = seed;
+    }
+    seedDemo() {
+        return this.seed.seedAll();
     }
     counts() {
         return this.svc.counts();
@@ -77,6 +83,13 @@ let MigrationController = class MigrationController {
     }
 };
 exports.MigrationController = MigrationController;
+__decorate([
+    (0, common_1.Post)('seed-demo'),
+    (0, common_1.HttpCode)(200),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], MigrationController.prototype, "seedDemo", null);
 __decorate([
     (0, common_1.Get)('counts'),
     __metadata("design:type", Function),
@@ -193,6 +206,7 @@ exports.MigrationController = MigrationController = __decorate([
     (0, common_1.Controller)('admin/mongo'),
     (0, auth_guard_1.RequireAuth)('admin'),
     __metadata("design:paramtypes", [migration_service_1.MigrationService,
-        generic_migration_service_1.GenericMigrationService])
+        generic_migration_service_1.GenericMigrationService,
+        seed_service_1.SeedService])
 ], MigrationController);
 //# sourceMappingURL=migration.controller.js.map

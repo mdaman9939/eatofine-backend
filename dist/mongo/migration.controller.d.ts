@@ -1,9 +1,12 @@
 import { MigrationService } from './migration.service';
 import { GenericMigrationService } from './generic-migration.service';
+import { SeedService } from './seed.service';
 export declare class MigrationController {
     private readonly svc;
     private readonly generic;
-    constructor(svc: MigrationService, generic: GenericMigrationService);
+    private readonly seed;
+    constructor(svc: MigrationService, generic: GenericMigrationService, seed: SeedService);
+    seedDemo(): Promise<import("./seed.service").SeedReport>;
     counts(): Promise<{
         users: number;
         vendors: number;

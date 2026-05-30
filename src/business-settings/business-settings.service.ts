@@ -1,5 +1,13 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { MongoDataService } from '../mongo/mongo-data.service';
+
+interface MongoBusinessSettingDoc {
+  mysql_id?: number;
+  key?: string;
+  value?: string | null;
+  key_value?: string | null;
+}
 
 @Injectable()
 export class BusinessSettingsService implements OnModuleInit {
@@ -7,13 +15,44 @@ export class BusinessSettingsService implements OnModuleInit {
   private cachedAt = 0;
   private readonly ttlMs = 30_000;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mongo: MongoDataService,
+  ) {}
+
+  /** Feature flag — when "1", business settings are read from MongoDB. */
+  private useMongo(): boolean {
+    const v = (process.env.USE_MONGO_BUSINESS_SETTINGS ?? '').toLowerCase();
+    return v === '1' || v === 'true' || v === 'yes';
+  }
 
   async onModuleInit() {
-    await this.refresh();
+    // Don't block module init on a refresh failure — settings will load lazily.
+    try {
+      await this.refresh();
+    } catch {
+      // ignored: first read after init will retry
+    }
   }
 
   private async refresh() {
+    if (this.useMongo()) {
+      const rows = await this.mongo.findMany<MongoBusinessSettingDoc>(
+        'business_settings',
+        {},
+        { projection: { key: 1, value: 1, key_value: 1 } },
+      );
+      this.cache.clear();
+      for (const r of rows) {
+        const k = r.key;
+        if (!k) continue;
+        // Prefer `value`; fall back to `key_value` for docs that use that field.
+        const v = (r.value ?? r.key_value ?? null) as string | null;
+        this.cache.set(k, v);
+      }
+      this.cachedAt = Date.now();
+      return;
+    }
     const rows = await this.prisma.business_settings.findMany({
       select: { key: true, value: true },
     });

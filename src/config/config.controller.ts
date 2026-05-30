@@ -2,13 +2,35 @@ import { Controller, Get, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { BusinessSettingsService } from '../business-settings/business-settings.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { MongoDataService } from '../mongo/mongo-data.service';
+
+interface MongoCurrencyDoc {
+  mysql_id?: number;
+  country?: string | null;
+  currency_code?: string | null;
+  currency_symbol?: string | null;
+  exchange_rate?: number | string | null;
+}
+
+interface MongoZoneDoc {
+  mysql_id?: number;
+  name?: string | null;
+  status?: boolean | number | null;
+}
 
 @Controller('config')
 export class ConfigController {
   constructor(
     private readonly bs: BusinessSettingsService,
     private readonly prisma: PrismaService,
+    private readonly mongo: MongoDataService,
   ) {}
+
+  /** Feature flag — when "1", config reads route to MongoDB instead of MySQL. */
+  private useMongo(): boolean {
+    const v = (process.env.USE_MONGO_CONFIG ?? '').toLowerCase();
+    return v === '1' || v === 'true' || v === 'yes';
+  }
 
   @Get()
   async getConfig(@Req() req: Request) {
@@ -21,6 +43,9 @@ export class ConfigController {
       (async () => {
         const code = await this.bs.get('currency');
         if (!code) return null;
+        if (this.useMongo()) {
+          return this.mongo.findOne<MongoCurrencyDoc>('currencies', { currency_code: code });
+        }
         return this.prisma.currencies.findFirst({ where: { currency_code: code } });
       })(),
     ]);
@@ -241,6 +266,19 @@ export class ConfigController {
       // zone_id must be a JSON-encoded STRING, not an array. zone_data is
       // already iterated as an array.
       return { zone_id: '[]', zone_data: [] };
+    }
+    if (this.useMongo()) {
+      const rows = await this.mongo.findMany<MongoZoneDoc>(
+        'zones',
+        { status: true },
+        { sort: { mysql_id: 1 }, limit: 1, projection: { mysql_id: 1, name: 1 } },
+      );
+      const fallback = rows[0] ?? null;
+      const fbId = fallback ? Number(fallback.mysql_id) : null;
+      return {
+        zone_id: JSON.stringify(fbId !== null ? [fbId] : []),
+        zone_data: fbId !== null ? [{ id: fbId, name: fallback?.name ?? null }] : [],
+      };
     }
     const fallback = await this.prisma.zones.findFirst({
       where: { status: true },

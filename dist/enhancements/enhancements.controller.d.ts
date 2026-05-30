@@ -15,8 +15,8 @@ export declare class EnhancementsController {
         extra_charge: number;
         gst_rate: number;
         gst_on_extra: boolean;
-        status: boolean;
         effective_from: Date | null;
+        status: boolean;
         created_at: Date | null;
     }[]>;
     createSlab(body: Parameters<EnhancementsService['createSlab']>[0]): Promise<{
@@ -35,14 +35,14 @@ export declare class EnhancementsController {
     }>;
     taxes(): Promise<{
         id: number;
+        charge_head: string;
         gst_rate: number;
         cgst: number;
         sgst: number;
         igst: number;
+        hsn_sac: string | null;
         status: boolean;
         configurable: boolean;
-        charge_head: string;
-        hsn_sac: string | null;
     }[]>;
     createTax(body: Parameters<EnhancementsService['createTax']>[0]): Promise<{
         ok: boolean;
@@ -84,14 +84,14 @@ export declare class EnhancementsController {
     }>;
     listAdditionalCharges(): Promise<{
         id: number;
-        amount: number;
-        gst_rate: number;
-        gst_applicable: boolean;
-        status: boolean;
         charge_head: string;
         charge_type: "fixed" | "percentage";
+        amount: number;
+        gst_applicable: boolean;
+        gst_rate: number;
         hsn_sac: string | null;
         description: string | null;
+        status: boolean;
     }[]>;
     createAdditionalCharge(body: Parameters<EnhancementsService['createAdditionalCharge']>[0]): Promise<{
         ok: boolean;
@@ -118,7 +118,7 @@ export declare class EnhancementsController {
             } | null;
             restaurant: {
                 id: bigint;
-                name: string;
+                name: string | null;
             } | null;
             subtotal: number;
             tax: number;
@@ -220,12 +220,12 @@ export declare class EnhancementsController {
     }>;
     dmSurcharges(): Promise<{
         id: number;
-        amount: number;
-        status: boolean;
-        config_json: any;
         surcharge_type: "weekend" | "festival" | "late_night";
         label: string;
+        config_json: any;
         surcharge_type_value: "fixed" | "percentage";
+        amount: number;
+        status: boolean;
         effective_from: Date | null;
     }[]>;
     dmCreateSurcharge(body: Parameters<DmChargesService['createSurcharge']>[0]): Promise<{
@@ -284,13 +284,13 @@ export declare class EnhancementsController {
     }>;
     userSurcharges(): Promise<{
         id: number;
+        surcharge_type: "weekend" | "festival" | "late_night" | "surge";
+        label: string;
+        config_json: any;
+        surcharge_type_value: "fixed" | "percentage" | "multiplier";
         amount: number;
         gst_rate: number;
         status: boolean;
-        config_json: any;
-        surcharge_type: "weekend" | "festival" | "late_night" | "surge";
-        label: string;
-        surcharge_type_value: "fixed" | "percentage" | "multiplier";
     }[]>;
     userCreateSurcharge(body: Parameters<UserDeliveryChargesService['createSurcharge']>[0]): Promise<{
         ok: boolean;

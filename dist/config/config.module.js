@@ -9,10 +9,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ConfigModule = void 0;
 const common_1 = require("@nestjs/common");
 const config_controller_1 = require("./config.controller");
+const migration_module_1 = require("../mongo/migration.module");
 let ConfigModule = class ConfigModule {
 };
 exports.ConfigModule = ConfigModule;
 exports.ConfigModule = ConfigModule = __decorate([
-    (0, common_1.Module)({ controllers: [config_controller_1.ConfigController] })
+    (0, common_1.Module)({
+        imports: [migration_module_1.MigrationModule],
+        controllers: [config_controller_1.ConfigController],
+    })
 ], ConfigModule);
 //# sourceMappingURL=config.module.js.map

@@ -6,14 +6,14 @@ export declare class DocumentsController {
     constructor(svc: DocumentsService);
     listCategories(role?: TargetRole): Promise<{
         id: number;
-        max_size_mb: number;
-        sort_order: number;
-        is_mandatory: boolean;
-        status: boolean;
         name: string;
-        target_role: "vendor" | "restaurant" | "delivery_man";
+        target_role: "vendor" | "delivery_man" | "restaurant";
         allowed_formats: string;
+        max_size_mb: number;
+        is_mandatory: boolean;
         description: string | null;
+        status: boolean;
+        sort_order: number;
         created_at: Date | null;
         updated_at: Date | null;
     }[]>;
@@ -36,20 +36,20 @@ export declare class DocumentsController {
         id: number;
     }>;
     listSubmitted(status?: 'pending' | 'approved' | 'rejected', ownerType?: TargetRole, ownerId?: string, limit?: string): Promise<{
+        is_mandatory: boolean | null;
         id: number;
         category_id: number;
-        owner_id: number;
-        file_size_bytes: number | null;
-        is_mandatory: boolean | null;
-        reviewed_by: number | null;
         category_name: string | null;
-        owner_type: "vendor" | "restaurant" | "delivery_man";
+        owner_type: "vendor" | "delivery_man" | "restaurant";
+        owner_id: number;
         owner_name: string | null;
         file_path: string;
         original_name: string | null;
         mime_type: string | null;
+        file_size_bytes: number | null;
         status: "approved" | "pending" | "rejected";
         remarks: string | null;
+        reviewed_by: number | null;
         reviewed_at: Date | null;
         created_at: Date | null;
         updated_at: Date | null;

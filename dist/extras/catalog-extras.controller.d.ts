@@ -1,7 +1,11 @@
 import { PrismaService } from '../prisma/prisma.service';
+import { MongoDataService } from '../mongo/mongo-data.service';
 export declare class CatalogExtrasController {
     private readonly prisma;
-    constructor(prisma: PrismaService);
+    private readonly mongo;
+    constructor(prisma: PrismaService, mongo: MongoDataService);
+    private useMongo;
+    private num;
     couponList(): Promise<{
         id: number;
         restaurant_id: number | null;
@@ -9,20 +13,6 @@ export declare class CatalogExtrasController {
         max_discount: number;
         discount: number;
         total_uses: number;
-        created_at: Date | null;
-        updated_at: Date | null;
-        status: boolean;
-        limit: number | null;
-        data: string | null;
-        slug: string | null;
-        discount_type: string;
-        title: string | null;
-        start_date: Date | null;
-        code: string | null;
-        expire_date: Date | null;
-        coupon_type: string;
-        created_by: string | null;
-        customer_id: string | null;
     }[]>;
     couponApply(code?: string, amountStr?: string): Promise<{
         code: string;
@@ -34,8 +24,8 @@ export declare class CatalogExtrasController {
         max_discount?: undefined;
     } | {
         code: string;
-        title: string | null;
-        coupon_code: string | null;
+        title: unknown;
+        coupon_code: unknown;
         discount: number;
         min_purchase: number;
         max_discount: number;
@@ -48,26 +38,12 @@ export declare class CatalogExtrasController {
         max_discount: number;
         discount: number;
         total_uses: number;
-        created_at: Date | null;
-        updated_at: Date | null;
-        status: boolean;
-        limit: number | null;
-        data: string | null;
-        slug: string | null;
-        discount_type: string;
-        title: string | null;
-        start_date: Date | null;
-        code: string | null;
-        expire_date: Date | null;
-        coupon_type: string;
-        created_by: string | null;
-        customer_id: string | null;
     }[]>;
     cuisineAlias(): Promise<{
         id: number;
-        name: string;
-        image: string | null;
-        slug: string | null;
+        name: unknown;
+        image: unknown;
+        slug: unknown;
     }[]>;
     cuisineRestaurants(idStr?: string): Promise<{
         restaurants: never[];
@@ -75,19 +51,24 @@ export declare class CatalogExtrasController {
     }>;
     addonCategoryList(): Promise<{
         id: number;
-        name: string;
-        status: boolean;
-        slug: string | null;
+        name: unknown;
+        status: unknown;
+        slug: unknown;
     }[]>;
     basicCampaigns(): Promise<{
         id: number;
-        title: string | null;
-        description: string | null;
-        image: string | null;
-        start_date: Date | null;
-        end_date: Date | null;
+        title: unknown;
+        description: unknown;
+        image: unknown;
+        start_date: unknown;
+        end_date: unknown;
     }[]>;
     basicCampaignDetails(idStr?: string): Promise<{
+        campaign: {
+            id: number;
+        } | null;
+        restaurants: never[];
+    } | {
         campaign: {
             id: number;
             created_at: Date | null;
@@ -111,19 +92,6 @@ export declare class CatalogExtrasController {
     };
     cashbackList(): Promise<{
         id: number;
-        created_at: Date | null;
-        updated_at: Date | null;
-        status: boolean;
-        title: string;
-        start_date: Date | null;
-        end_date: Date | null;
-        min_purchase: number;
-        max_discount: number;
-        customer_id: string | null;
-        cashback_type: string;
-        same_user_limit: number;
-        total_used: number;
-        cashback_amount: number;
     }[]>;
     getCashback(): {
         cashback_amount: number;
@@ -131,9 +99,9 @@ export declare class CatalogExtrasController {
     };
     offlinePaymentMethods(): Promise<{
         id: number;
-        method_name: string;
-        method_fields: string;
-        method_informations: string;
+        method_name: unknown;
+        method_fields: unknown;
+        method_informations: unknown;
     }[]>;
     search(name?: string, limitStr?: string): Promise<{
         products: {
@@ -160,33 +128,6 @@ export declare class CatalogExtrasController {
                 discount: number;
                 restaurant_id: number;
                 category_id: number | null;
-                add_ons: string | null;
-                attributes: string | null;
-                variations: string | null;
-                created_at: Date | null;
-                updated_at: Date | null;
-                name: string | null;
-                status: boolean;
-                image: string | null;
-                order_count: number;
-                rating: string | null;
-                veg: boolean;
-                slug: string | null;
-                description: string | null;
-                discount_type: string;
-                recommended: boolean;
-                avg_rating: number;
-                item_stock: number;
-                stock_type: string;
-                category_ids: string | null;
-                choice_options: string | null;
-                tax_type: string;
-                available_time_starts: Date | null;
-                available_time_ends: Date | null;
-                rating_count: number;
-                maximum_cart_quantity: number | null;
-                is_halal: boolean;
-                sell_count: number;
             }[];
         };
         restaurants: {
@@ -201,57 +142,6 @@ export declare class CatalogExtrasController {
                 minimum_order: number;
                 minimum_shipping_charge: number;
                 comission: number | null;
-                created_at: Date | null;
-                updated_at: Date | null;
-                name: string;
-                status: boolean;
-                logo: string | null;
-                address: string | null;
-                phone: string;
-                schedule_order: boolean;
-                footer_text: string | null;
-                take_away: boolean;
-                per_km_shipping_charge: number | null;
-                maximum_shipping_charge: number | null;
-                email: string | null;
-                order_count: number;
-                latitude: string | null;
-                longitude: string | null;
-                opening_time: Date | null;
-                closeing_time: Date | null;
-                free_delivery: boolean;
-                rating: string | null;
-                cover_photo: string | null;
-                delivery: boolean;
-                food_section: boolean;
-                reviews_section: boolean;
-                active: boolean;
-                off_day: string;
-                gst: string | null;
-                self_delivery_system: boolean;
-                pos_system: boolean;
-                delivery_time: string | null;
-                veg: boolean;
-                non_veg: boolean;
-                total_order: number;
-                restaurant_model: string | null;
-                slug: string | null;
-                order_subscription_active: boolean | null;
-                cutlery: boolean;
-                meta_title: string | null;
-                meta_description: string | null;
-                meta_image: string | null;
-                meta_data: string | null;
-                announcement: boolean;
-                announcement_message: string | null;
-                qr_code: string | null;
-                free_delivery_distance: string | null;
-                additional_data: string | null;
-                additional_documents: string | null;
-                package_id: bigint | null;
-                tin: string | null;
-                tin_expire_date: Date | null;
-                tin_certificate_image: string | null;
             }[];
         };
     }>;
@@ -263,12 +153,12 @@ export declare class CatalogExtrasController {
         id: number;
         food_id: number;
         user_id: number;
-        comment: string | null;
-        rating: number;
-        attachment: string | null;
-        created_at: Date | null;
-        reply: string | null;
-        reply_at: Date | null;
+        comment: unknown;
+        rating: unknown;
+        attachment: unknown;
+        created_at: unknown;
+        reply: unknown;
+        reply_at: unknown;
     }[]>;
     submitProductReview(): {
         message: string;
@@ -281,42 +171,15 @@ export declare class CatalogExtrasController {
             discount: number;
             restaurant_id: number;
             category_id: number | null;
-            add_ons: string | null;
-            attributes: string | null;
-            variations: string | null;
-            created_at: Date | null;
-            updated_at: Date | null;
-            name: string | null;
-            status: boolean;
-            image: string | null;
-            order_count: number;
-            rating: string | null;
-            veg: boolean;
-            slug: string | null;
-            description: string | null;
-            discount_type: string;
-            recommended: boolean;
-            avg_rating: number;
-            item_stock: number;
-            stock_type: string;
-            category_ids: string | null;
-            choice_options: string | null;
-            tax_type: string;
-            available_time_starts: Date | null;
-            available_time_ends: Date | null;
-            rating_count: number;
-            maximum_cart_quantity: number | null;
-            is_halal: boolean;
-            sell_count: number;
         }[];
     }>;
     restaurantReviews(idStr?: string): Promise<{
         id: number;
         food_id: number;
         user_id: number;
-        comment: string | null;
-        rating: number;
-        created_at: Date | null;
+        comment: unknown;
+        rating: unknown;
+        created_at: unknown;
     }[]>;
     dineInRestaurants(): {
         restaurants: never[];
@@ -327,47 +190,15 @@ export declare class CatalogExtrasController {
         id: number;
         restaurant_id: number;
         created_by_id: number;
-        created_at: Date | null;
-        updated_at: Date | null;
-        status: import("@prisma/client").$Enums.advertisements_status;
-        description: string | null;
-        priority: number | null;
-        title: string | null;
-        add_type: import("@prisma/client").$Enums.advertisements_add_type;
-        start_date: Date;
-        end_date: Date;
-        pause_note: string | null;
-        cancellation_note: string | null;
-        cover_image: string | null;
-        profile_image: string | null;
-        video_attachment: string | null;
-        is_rating_active: boolean;
-        is_review_active: boolean;
-        is_paid: boolean;
-        is_updated: boolean;
-        created_by_type: string;
     }[]>;
     allergies(): Promise<{
         id: number;
-        created_at: Date | null;
-        updated_at: Date | null;
-        allergy: string;
     }[]>;
     nutritions(): Promise<{
         id: number;
-        created_at: Date | null;
-        updated_at: Date | null;
-        nutrition: string;
     }[]>;
     vehicles(): Promise<{
         id: number;
-        created_at: Date | null;
-        updated_at: Date | null;
-        status: boolean;
-        type: string;
-        starting_coverage_area: number;
-        maximum_coverage_area: number;
-        extra_charges: number;
     }[]>;
     vehicleExtraCharge(): {
         extra_charges: number;
@@ -375,13 +206,6 @@ export declare class CatalogExtrasController {
     mostTips(): number[];
     dmShifts(): Promise<{
         id: number;
-        created_at: Date | null;
-        updated_at: Date | null;
-        name: string;
-        status: boolean;
-        start_time: Date | null;
-        end_time: Date | null;
-        is_full_day: boolean;
     }[]>;
     taxList(): never[];
     newsletter(): {

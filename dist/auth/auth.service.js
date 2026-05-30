@@ -72,6 +72,30 @@ let AuthService = class AuthService {
         return bcrypt.compare(plain, phpStyle);
     }
     async customerLoginByEmail(email, password) {
+        if (this.useMongo()) {
+            const user = await this.mongo.findOne('users', { email });
+            if (!user || !(await this.verifyPassword(password, user.password))) {
+                throw new common_1.UnauthorizedException({
+                    errors: [{ code: 'auth-001', message: 'User_credential_does_not_match' }],
+                });
+            }
+            if (user.status === false || user.status === 0) {
+                throw new common_1.UnauthorizedException({
+                    errors: [{ code: 'auth-003', message: 'your_account_is_blocked' }],
+                });
+            }
+            const token = this.generateToken();
+            await this.mongo.updateOne('users', { mysql_id: user.mysql_id }, { auth_token: token, login_medium: 'manual' });
+            return {
+                token,
+                is_phone_verified: 1,
+                is_email_verified: 1,
+                is_personal_info: user.f_name ? 1 : 0,
+                is_exist_user: null,
+                login_type: 'manual',
+                email: user.email ?? null,
+            };
+        }
         const user = await this.prisma.users.findFirst({ where: { email } });
         if (!user || !(await this.verifyPassword(password, user.password))) {
             throw new common_1.UnauthorizedException({
@@ -96,6 +120,30 @@ let AuthService = class AuthService {
         };
     }
     async customerLoginByPhone(phone, password) {
+        if (this.useMongo()) {
+            const user = await this.mongo.findOne('users', { phone });
+            if (!user || !(await this.verifyPassword(password, user.password))) {
+                throw new common_1.UnauthorizedException({
+                    errors: [{ code: 'auth-001', message: 'User_credential_does_not_match' }],
+                });
+            }
+            if (user.status === false || user.status === 0) {
+                throw new common_1.UnauthorizedException({
+                    errors: [{ code: 'auth-003', message: 'your_account_is_blocked' }],
+                });
+            }
+            const token = this.generateToken();
+            await this.mongo.updateOne('users', { mysql_id: user.mysql_id }, { auth_token: token, login_medium: 'manual' });
+            return {
+                token,
+                is_phone_verified: 1,
+                is_email_verified: 1,
+                is_personal_info: user.f_name ? 1 : 0,
+                is_exist_user: null,
+                login_type: 'manual',
+                email: user.email ?? null,
+            };
+        }
         const user = await this.prisma.users.findFirst({ where: { phone } });
         if (!user || !(await this.verifyPassword(password, user.password))) {
             throw new common_1.UnauthorizedException({
@@ -121,6 +169,40 @@ let AuthService = class AuthService {
     }
     async customerRegister(input) {
         const passwordHash = (await bcrypt.hash(input.password, 10)).replace(/^\$2b\$/, '$2y$');
+        if (this.useMongo()) {
+            const existing = await this.mongo.findOne('users', { phone: input.phone });
+            if (existing) {
+                throw new common_1.UnauthorizedException({
+                    errors: [{ code: 'phone', message: 'phone_already_taken' }],
+                });
+            }
+            const token = this.generateToken();
+            const nextId = await this.mongo.nextMysqlId('users');
+            const now = new Date();
+            await this.mongo.insertOne('users', {
+                mysql_id: nextId,
+                f_name: input.f_name,
+                l_name: input.l_name ?? '',
+                phone: input.phone,
+                email: input.email ?? null,
+                password: passwordHash,
+                status: true,
+                is_phone_verified: true,
+                auth_token: token,
+                login_medium: 'manual',
+                created_at: now,
+                updated_at: now,
+            });
+            return {
+                token,
+                is_phone_verified: 1,
+                is_email_verified: 1,
+                is_personal_info: 1,
+                is_exist_user: null,
+                login_type: 'manual',
+                email: input.email ?? null,
+            };
+        }
         const existing = await this.prisma.users.findFirst({ where: { phone: input.phone } });
         if (existing) {
             throw new common_1.UnauthorizedException({
@@ -152,6 +234,23 @@ let AuthService = class AuthService {
         };
     }
     async vendorLogin(email, password) {
+        if (this.useMongo()) {
+            const vendor = await this.mongo.findOne('vendors', { email });
+            if (!vendor || !(await this.verifyPassword(password, vendor.password))) {
+                throw new common_1.UnauthorizedException({
+                    errors: [{ code: 'auth-001', message: 'Credential do not match, please try again' }],
+                });
+            }
+            if (vendor.status === false || vendor.status === 0) {
+                throw new common_1.UnauthorizedException({
+                    errors: [{ code: 'auth-003', message: 'your_account_has_been_suspended' }],
+                });
+            }
+            const token = this.generateToken();
+            await this.mongo.updateOne('vendors', { mysql_id: vendor.mysql_id }, { auth_token: token });
+            const restaurant = await this.mongo.findOne('restaurants', { mysql_vendor_id: vendor.mysql_id });
+            return { token, restaurant_id: restaurant?.mysql_id ?? null, role: 'owner' };
+        }
         const vendor = await this.prisma.vendors.findFirst({ where: { email } });
         if (!vendor || !(await this.verifyPassword(password, vendor.password))) {
             throw new common_1.UnauthorizedException({
@@ -169,6 +268,29 @@ let AuthService = class AuthService {
         return { token, restaurant_id: restaurant?.id ?? null, role: 'owner' };
     }
     async deliveryManLogin(phone, password) {
+        if (this.useMongo()) {
+            const dm = await this.mongo.findOne('delivery_men', { phone });
+            if (!dm || !(await this.verifyPassword(password, dm.password))) {
+                throw new common_1.UnauthorizedException({
+                    errors: [{ code: 'auth-001', message: 'User credentials does not match.' }],
+                });
+            }
+            if (dm.application_status !== 'approved') {
+                throw new common_1.UnauthorizedException({
+                    errors: [{ code: 'auth-003', message: 'your_application_is_not_approved_yet' }],
+                });
+            }
+            if (dm.status === false || dm.status === 0) {
+                throw new common_1.UnauthorizedException({
+                    errors: [{ code: 'auth-003', message: 'your_account_has_been_suspended' }],
+                });
+            }
+            const token = this.generateToken();
+            await this.mongo.updateOne('delivery_men', { mysql_id: dm.mysql_id }, { auth_token: token });
+            const zoneId = dm.zone_id ?? dm.mysql_zone_id ?? 'unknown';
+            const topic = [`zone_${zoneId}_delivery_man`];
+            return { token, topic };
+        }
         const dm = await this.prisma.delivery_men.findFirst({ where: { phone } });
         if (!dm || !(await this.verifyPassword(password, dm.password))) {
             throw new common_1.UnauthorizedException({
@@ -191,6 +313,18 @@ let AuthService = class AuthService {
         return { token, topic };
     }
     async createGuest(input) {
+        if (this.useMongo()) {
+            const nextId = await this.mongo.nextMysqlId('guests');
+            const now = new Date();
+            await this.mongo.insertOne('guests', {
+                mysql_id: nextId,
+                ip_address: input.ip_address ?? null,
+                fcm_token: input.fcm_token ?? null,
+                created_at: now,
+                updated_at: now,
+            });
+            return { guest_id: nextId };
+        }
         const created = await this.prisma.guests.create({
             data: {
                 ip_address: input.ip_address ?? null,
@@ -243,6 +377,18 @@ let AuthService = class AuthService {
             }
         }
         catch {
+        }
+        if (this.useMongo()) {
+            const u = await this.mongo.findOne('users', { auth_token: token });
+            if (u)
+                return { kind: 'customer', id: BigInt(u.mysql_id) };
+            const v = await this.mongo.findOne('vendors', { auth_token: token });
+            if (v)
+                return { kind: 'vendor', id: BigInt(v.mysql_id) };
+            const d = await this.mongo.findOne('delivery_men', { auth_token: token });
+            if (d)
+                return { kind: 'deliveryman', id: BigInt(d.mysql_id) };
+            return null;
         }
         const u = await this.prisma.users.findFirst({ where: { auth_token: token }, select: { id: true } });
         if (u)

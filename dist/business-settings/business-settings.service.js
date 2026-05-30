@@ -12,18 +12,42 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.BusinessSettingsService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
+const mongo_data_service_1 = require("../mongo/mongo-data.service");
 let BusinessSettingsService = class BusinessSettingsService {
     prisma;
+    mongo;
     cache = new Map();
     cachedAt = 0;
     ttlMs = 30_000;
-    constructor(prisma) {
+    constructor(prisma, mongo) {
         this.prisma = prisma;
+        this.mongo = mongo;
+    }
+    useMongo() {
+        const v = (process.env.USE_MONGO_BUSINESS_SETTINGS ?? '').toLowerCase();
+        return v === '1' || v === 'true' || v === 'yes';
     }
     async onModuleInit() {
-        await this.refresh();
+        try {
+            await this.refresh();
+        }
+        catch {
+        }
     }
     async refresh() {
+        if (this.useMongo()) {
+            const rows = await this.mongo.findMany('business_settings', {}, { projection: { key: 1, value: 1, key_value: 1 } });
+            this.cache.clear();
+            for (const r of rows) {
+                const k = r.key;
+                if (!k)
+                    continue;
+                const v = (r.value ?? r.key_value ?? null);
+                this.cache.set(k, v);
+            }
+            this.cachedAt = Date.now();
+            return;
+        }
         const rows = await this.prisma.business_settings.findMany({
             select: { key: true, value: true },
         });
@@ -72,6 +96,7 @@ let BusinessSettingsService = class BusinessSettingsService {
 exports.BusinessSettingsService = BusinessSettingsService;
 exports.BusinessSettingsService = BusinessSettingsService = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        mongo_data_service_1.MongoDataService])
 ], BusinessSettingsService);
 //# sourceMappingURL=business-settings.service.js.map

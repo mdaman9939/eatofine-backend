@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, Param, Post } from '@nestjs/co
 import { RequireAuth } from '../auth/auth.guard';
 import { MigrationService } from './migration.service';
 import { GenericMigrationService } from './generic-migration.service';
+import { SeedService } from './seed.service';
 
 @Controller('admin/mongo')
 @RequireAuth('admin')
@@ -9,7 +10,15 @@ export class MigrationController {
   constructor(
     private readonly svc: MigrationService,
     private readonly generic: GenericMigrationService,
+    private readonly seed: SeedService,
   ) {}
+
+  /** Seed realistic Indian demo data across all major collections. */
+  @Post('seed-demo')
+  @HttpCode(200)
+  seedDemo() {
+    return this.seed.seedAll();
+  }
 
   /** Quick health check — counts on each MongoDB collection. */
   @Get('counts')

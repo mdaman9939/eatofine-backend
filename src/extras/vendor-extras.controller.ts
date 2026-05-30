@@ -2,6 +2,134 @@ import { Body, Controller, Delete, Get, Post, Query, Req, UseGuards, HttpCode } 
 import { AuthGuard, RequireAuth } from '../auth/auth.guard';
 import type { AuthedRequest } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
+import { MongoDataService } from '../mongo/mongo-data.service';
+
+// Mongo doc shapes (only fields we read).
+interface MongoVendorDoc {
+  mysql_id: number;
+  f_name?: string | null;
+  l_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  image?: string | null;
+  status?: boolean | null;
+}
+
+interface MongoRestaurantDoc {
+  mysql_id: number;
+  mysql_vendor_id?: number | null;
+  mysql_zone_id?: number | null;
+  zone_id?: number | null;
+  name?: string | null;
+  logo?: string | null;
+  status?: boolean | null;
+  active?: boolean | null;
+  address?: string | null;
+  phone?: string | null;
+  comission?: number | string | null;
+  minimum_order?: number | string | null;
+  delivery?: boolean | null;
+  take_away?: boolean | null;
+  restaurant_model?: string | null;
+}
+
+interface MongoOrderDoc {
+  mysql_id: number;
+  mysql_user_id?: number | null;
+  mysql_restaurant_id?: number | null;
+  order_status?: string | null;
+  order_amount?: number | string | null;
+  legacy?: Record<string, unknown>;
+}
+
+interface MongoFoodDoc {
+  mysql_id: number;
+  name?: string | null;
+  description?: string | null;
+  image?: string | null;
+  price?: number | string | null;
+  tax?: number | string | null;
+  discount?: number | string | null;
+  mysql_restaurant_id?: number | null;
+  mysql_category_id?: number | null;
+  legacy?: Record<string, unknown>;
+}
+
+interface MongoReviewDoc {
+  mysql_id: number;
+  mysql_food_id?: number | null;
+  mysql_user_id?: number | null;
+  comment?: string | null;
+  rating?: number | null;
+  reply?: string | null;
+}
+
+interface MongoCategoryDoc {
+  mysql_id: number;
+  parent_id?: number | null;
+  name?: string | null;
+  image?: string | null;
+  status?: boolean | null;
+}
+
+interface MongoAddonDoc {
+  mysql_id: number;
+  mysql_restaurant_id?: number | null;
+  mysql_addon_category_id?: number | null;
+  name?: string | null;
+  price?: number | string | null;
+  legacy?: Record<string, unknown>;
+}
+
+interface MongoAttributeDoc {
+  mysql_id: number;
+  name?: string | null;
+}
+
+interface MongoDeliveryManDoc {
+  mysql_id: number;
+  mysql_zone_id?: number | null;
+  f_name?: string | null;
+  l_name?: string | null;
+  phone?: string | null;
+  status?: boolean | null;
+  application_status?: string | null;
+}
+
+interface MongoWithdrawalMethodDoc {
+  mysql_id: number;
+  method_name?: string | null;
+  method_fields?: unknown;
+  is_default?: boolean | number | null;
+  is_active?: boolean | number | null;
+}
+
+interface MongoNotificationDoc {
+  mysql_id: number;
+  title?: string | null;
+  description?: string | null;
+  status?: boolean | null;
+}
+
+interface MongoAdDoc {
+  mysql_id: number;
+  mysql_restaurant_id?: number | null;
+  mysql_created_by_id?: number | null;
+  legacy?: Record<string, unknown>;
+}
+
+interface MongoScheduleDoc {
+  mysql_id: number;
+  mysql_restaurant_id?: number | null;
+  legacy?: Record<string, unknown>;
+}
+
+const toNum = (v: unknown): number => {
+  if (v === null || v === undefined) return 0;
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string') return Number(v) || 0;
+  return Number(v) || 0;
+};
 
 // Vendor (restaurant app) endpoints beyond order management. For the demo
 // we expose the resources the app reads and stub the writes/reports so the
@@ -10,11 +138,50 @@ import { PrismaService } from '../prisma/prisma.service';
 @UseGuards(AuthGuard)
 @RequireAuth('vendor')
 export class VendorExtrasController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mongo: MongoDataService,
+  ) {}
+
+  /** Feature flag — when set, extras read/write Mongo first. */
+  private useMongo(): boolean {
+    const v = (process.env.USE_MONGO_EXTRAS ?? '').toLowerCase();
+    return v === '1' || v === 'true' || v === 'yes';
+  }
 
   // ── Profile ───────────────────────────────────────────────────────
   @Get('profile')
   async profile(@Req() req: AuthedRequest) {
+    if (this.useMongo()) {
+      const v = await this.mongo.findByMysqlId<MongoVendorDoc>('vendors', Number(req.actor!.id));
+      if (!v) return {};
+      const restaurants = await this.mongo.findMany<MongoRestaurantDoc>(
+        'restaurants',
+        { mysql_vendor_id: Number(v.mysql_id) },
+      );
+      return {
+        id: Number(v.mysql_id),
+        f_name: v.f_name ?? null,
+        l_name: v.l_name ?? null,
+        email: v.email ?? null,
+        phone: v.phone ?? null,
+        image: v.image ?? null,
+        status: v.status ?? null,
+        restaurants: restaurants.map((r) => ({
+          id: Number(r.mysql_id),
+          name: r.name ?? null,
+          logo: r.logo ?? null,
+          status: r.status ?? null,
+          address: r.address ?? null,
+          phone: r.phone ?? null,
+          comission: r.comission !== null && r.comission !== undefined ? toNum(r.comission) : null,
+          minimum_order: toNum(r.minimum_order),
+          delivery: r.delivery ?? null,
+          take_away: r.take_away ?? null,
+          restaurant_model: r.restaurant_model ?? null,
+        })),
+      };
+    }
     const v = await this.prisma.vendors.findUnique({ where: { id: req.actor!.id } });
     if (!v) return {};
     const restaurants = await this.prisma.restaurants.findMany({
@@ -38,6 +205,14 @@ export class VendorExtrasController {
   async updateProfile(@Req() req: AuthedRequest, @Body() body: { f_name?: string; l_name?: string; email?: string; phone?: string }) {
     const data: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(body)) if (v !== undefined) data[k] = v;
+
+    if (this.useMongo()) {
+      if (Object.keys(data).length) {
+        await this.mongo.updateOne('vendors', { mysql_id: Number(req.actor!.id) }, data);
+      }
+      return { message: 'Profile updated' };
+    }
+
     if (Object.keys(data).length) {
       await this.prisma.vendors.update({ where: { id: req.actor!.id }, data });
     }
@@ -51,6 +226,13 @@ export class VendorExtrasController {
   @HttpCode(200)
   @Post('update-active-status')
   async toggleActive(@Req() req: AuthedRequest, @Body() body: { status?: boolean }) {
+    if (this.useMongo()) {
+      const r = await this.mongo.findOne<MongoRestaurantDoc>('restaurants', { mysql_vendor_id: Number(req.actor!.id) });
+      if (r && body.status !== undefined) {
+        await this.mongo.updateOne('restaurants', { mysql_id: r.mysql_id }, { active: body.status });
+      }
+      return { message: 'updated' };
+    }
     const r = await this.prisma.restaurants.findFirst({ where: { vendor_id: req.actor!.id }, select: { id: true } });
     if (r && body.status !== undefined) {
       await this.prisma.restaurants.update({ where: { id: r.id }, data: { active: body.status } });
@@ -89,6 +271,23 @@ export class VendorExtrasController {
   // ── Orders summary ───────────────────────────────────────────────
   @Get('current-orders')
   async currentOrders(@Req() req: AuthedRequest) {
+    if (this.useMongo()) {
+      const restaurant = await this.mongo.findOne<MongoRestaurantDoc>('restaurants', { mysql_vendor_id: Number(req.actor!.id) });
+      if (!restaurant) return [];
+      const rows = await this.mongo.findMany<MongoOrderDoc>(
+        'orders',
+        { mysql_restaurant_id: Number(restaurant.mysql_id), order_status: { $in: ['accepted', 'confirmed', 'processing'] } },
+        { sort: { mysql_id: -1 } },
+      );
+      return rows.map((r) => ({
+        ...(r.legacy ?? {}),
+        ...r,
+        id: Number(r.mysql_id),
+        user_id: r.mysql_user_id !== null && r.mysql_user_id !== undefined ? Number(r.mysql_user_id) : null,
+        restaurant_id: r.mysql_restaurant_id !== null && r.mysql_restaurant_id !== undefined ? Number(r.mysql_restaurant_id) : 0,
+        order_amount: toNum(r.order_amount),
+      }));
+    }
     const restaurant = await this.prisma.restaurants.findFirst({ where: { vendor_id: req.actor!.id }, select: { id: true } });
     if (!restaurant) return [];
     const rows = await this.prisma.orders.findMany({
@@ -100,6 +299,26 @@ export class VendorExtrasController {
 
   @Get('completed-orders')
   async completedOrders(@Req() req: AuthedRequest) {
+    if (this.useMongo()) {
+      const restaurant = await this.mongo.findOne<MongoRestaurantDoc>('restaurants', { mysql_vendor_id: Number(req.actor!.id) });
+      if (!restaurant) return { orders: [], total_size: 0 };
+      const rows = await this.mongo.findMany<MongoOrderDoc>(
+        'orders',
+        { mysql_restaurant_id: Number(restaurant.mysql_id), order_status: { $in: ['delivered', 'canceled', 'refunded'] } },
+        { sort: { mysql_id: -1 }, limit: 50 },
+      );
+      return {
+        orders: rows.map((r) => ({
+          ...(r.legacy ?? {}),
+          ...r,
+          id: Number(r.mysql_id),
+          user_id: r.mysql_user_id !== null && r.mysql_user_id !== undefined ? Number(r.mysql_user_id) : null,
+          restaurant_id: r.mysql_restaurant_id !== null && r.mysql_restaurant_id !== undefined ? Number(r.mysql_restaurant_id) : 0,
+          order_amount: toNum(r.order_amount),
+        })),
+        total_size: rows.length,
+      };
+    }
     const restaurant = await this.prisma.restaurants.findFirst({ where: { vendor_id: req.actor!.id }, select: { id: true } });
     if (!restaurant) return { orders: [], total_size: 0 };
     const rows = await this.prisma.orders.findMany({
@@ -114,6 +333,21 @@ export class VendorExtrasController {
   async vendorOrder(@Query('order_id') idStr?: string) {
     const id = parseInt(idStr ?? '', 10);
     if (!Number.isFinite(id)) return null;
+
+    if (this.useMongo()) {
+      const o = await this.mongo.findByMysqlId<MongoOrderDoc>('orders', id);
+      return o
+        ? {
+            ...(o.legacy ?? {}),
+            ...o,
+            id: Number(o.mysql_id),
+            user_id: o.mysql_user_id !== null && o.mysql_user_id !== undefined ? Number(o.mysql_user_id) : null,
+            restaurant_id: o.mysql_restaurant_id !== null && o.mysql_restaurant_id !== undefined ? Number(o.mysql_restaurant_id) : 0,
+            order_amount: toNum(o.order_amount),
+          }
+        : null;
+    }
+
     const o = await this.prisma.orders.findUnique({ where: { id: BigInt(id) } });
     return o ? { ...o, id: Number(o.id), user_id: o.user_id ? Number(o.user_id) : null, restaurant_id: Number(o.restaurant_id), order_amount: Number(o.order_amount) } : null;
   }
@@ -135,6 +369,32 @@ export class VendorExtrasController {
   async products(@Req() req: AuthedRequest, @Query('limit') limitStr?: string, @Query('offset') offsetStr?: string) {
     const limit = parseInt(limitStr ?? '25', 10);
     const offset = parseInt(offsetStr ?? '1', 10);
+
+    if (this.useMongo()) {
+      const restaurant = await this.mongo.findOne<MongoRestaurantDoc>('restaurants', { mysql_vendor_id: Number(req.actor!.id) });
+      if (!restaurant) return { products: [], total_size: 0, limit, offset };
+      const filter = { mysql_restaurant_id: Number(restaurant.mysql_id) };
+      const [rows, total] = await Promise.all([
+        this.mongo.findMany<MongoFoodDoc>('foods', filter, { sort: { mysql_id: -1 }, limit, skip: Math.max(0, (offset - 1) * limit) }),
+        this.mongo.count('foods', filter),
+      ]);
+      return {
+        products: rows.map((r) => ({
+          ...(r.legacy ?? {}),
+          ...r,
+          id: Number(r.mysql_id),
+          price: toNum(r.price),
+          tax: toNum(r.tax),
+          discount: toNum(r.discount),
+          restaurant_id: r.mysql_restaurant_id !== null && r.mysql_restaurant_id !== undefined ? Number(r.mysql_restaurant_id) : 0,
+          category_id: r.mysql_category_id !== null && r.mysql_category_id !== undefined ? Number(r.mysql_category_id) : null,
+        })),
+        total_size: total,
+        limit,
+        offset,
+      };
+    }
+
     const restaurant = await this.prisma.restaurants.findFirst({ where: { vendor_id: req.actor!.id }, select: { id: true } });
     if (!restaurant) return { products: [], total_size: 0, limit, offset };
     const [rows, total] = await Promise.all([
@@ -148,6 +408,23 @@ export class VendorExtrasController {
   async productDetails(@Query('product_id') idStr?: string) {
     const id = parseInt(idStr ?? '', 10);
     if (!Number.isFinite(id)) return null;
+
+    if (this.useMongo()) {
+      const f = await this.mongo.findByMysqlId<MongoFoodDoc>('foods', id);
+      return f
+        ? {
+            ...(f.legacy ?? {}),
+            ...f,
+            id: Number(f.mysql_id),
+            price: toNum(f.price),
+            tax: toNum(f.tax),
+            discount: toNum(f.discount),
+            restaurant_id: f.mysql_restaurant_id !== null && f.mysql_restaurant_id !== undefined ? Number(f.mysql_restaurant_id) : 0,
+            category_id: f.mysql_category_id !== null && f.mysql_category_id !== undefined ? Number(f.mysql_category_id) : null,
+          }
+        : null;
+    }
+
     const f = await this.prisma.food.findUnique({ where: { id: BigInt(id) } });
     return f ? { ...f, id: Number(f.id), price: Number(f.price), tax: Number(f.tax), discount: Number(f.discount), restaurant_id: Number(f.restaurant_id), category_id: f.category_id ? Number(f.category_id) : null } : null;
   }
@@ -183,6 +460,23 @@ export class VendorExtrasController {
   async productReviews(@Query('product_id') idStr?: string) {
     const id = parseInt(idStr ?? '', 10);
     if (!Number.isFinite(id)) return [];
+
+    if (this.useMongo()) {
+      const rows = await this.mongo.findMany<MongoReviewDoc>(
+        'reviews',
+        { mysql_food_id: id },
+        { sort: { mysql_id: -1 }, limit: 50 },
+      );
+      return rows.map((r) => ({
+        id: Number(r.mysql_id),
+        food_id: r.mysql_food_id !== null && r.mysql_food_id !== undefined ? Number(r.mysql_food_id) : 0,
+        user_id: r.mysql_user_id !== null && r.mysql_user_id !== undefined ? Number(r.mysql_user_id) : 0,
+        comment: r.comment ?? null,
+        rating: r.rating ?? null,
+        reply: r.reply ?? null,
+      }));
+    }
+
     const rows = await this.prisma.reviews.findMany({ where: { food_id: BigInt(id) }, orderBy: { id: 'desc' }, take: 50 });
     return rows.map((r) => ({ id: Number(r.id), food_id: Number(r.food_id), user_id: Number(r.user_id), comment: r.comment, rating: r.rating, reply: r.reply }));
   }
@@ -197,13 +491,21 @@ export class VendorExtrasController {
   // ── Categories ───────────────────────────────────────────────────
   @Get('categories')
   async categories() {
+    if (this.useMongo()) {
+      const rows = await this.mongo.findMany<MongoCategoryDoc>('categories', { parent_id: 0, status: true });
+      return rows.map((r) => ({ id: Number(r.mysql_id), name: r.name ?? null, image: r.image ?? null, status: r.status ?? null }));
+    }
     const rows = await this.prisma.categories.findMany({ where: { parent_id: 0, status: true } });
     return rows.map((r) => ({ id: Number(r.id), name: r.name, image: r.image, status: r.status }));
   }
 
   @Get('categories/childes')
-  childCategories(@Query('parent_id') idStr?: string) {
+  async childCategories(@Query('parent_id') idStr?: string) {
     const id = parseInt(idStr ?? '0', 10);
+    if (this.useMongo()) {
+      const rows = await this.mongo.findMany<MongoCategoryDoc>('categories', { parent_id: id, status: true });
+      return rows.map((r) => ({ id: Number(r.mysql_id), name: r.name ?? null, image: r.image ?? null, status: r.status ?? null }));
+    }
     return this.prisma.categories.findMany({ where: { parent_id: id, status: true } }).then((rows) =>
       rows.map((r) => ({ id: Number(r.id), name: r.name, image: r.image, status: r.status })),
     );
@@ -215,6 +517,19 @@ export class VendorExtrasController {
   // ── Add-ons + attributes ─────────────────────────────────────────
   @Get('addon')
   async vendorAddons(@Req() req: AuthedRequest) {
+    if (this.useMongo()) {
+      const restaurant = await this.mongo.findOne<MongoRestaurantDoc>('restaurants', { mysql_vendor_id: Number(req.actor!.id) });
+      if (!restaurant) return { addons: [] };
+      const rows = await this.mongo.findMany<MongoAddonDoc>('add_ons', { mysql_restaurant_id: Number(restaurant.mysql_id) });
+      return rows.map((r) => ({
+        ...(r.legacy ?? {}),
+        ...r,
+        id: Number(r.mysql_id),
+        restaurant_id: r.mysql_restaurant_id !== null && r.mysql_restaurant_id !== undefined ? Number(r.mysql_restaurant_id) : 0,
+        addon_category_id: r.mysql_addon_category_id !== null && r.mysql_addon_category_id !== undefined ? Number(r.mysql_addon_category_id) : null,
+        price: toNum(r.price),
+      }));
+    }
     const restaurant = await this.prisma.restaurants.findFirst({ where: { vendor_id: req.actor!.id }, select: { id: true } });
     if (!restaurant) return { addons: [] };
     const rows = await this.prisma.add_ons.findMany({ where: { restaurant_id: restaurant.id } });
@@ -235,6 +550,10 @@ export class VendorExtrasController {
 
   @Get('attributes')
   async attributes() {
+    if (this.useMongo()) {
+      const rows = await this.mongo.findMany<MongoAttributeDoc>('attributes', {});
+      return rows.map((r) => ({ id: Number(r.mysql_id), name: r.name ?? null }));
+    }
     const rows = await this.prisma.attributes.findMany();
     return rows.map((r) => ({ id: Number(r.id), name: r.name }));
   }
@@ -242,6 +561,21 @@ export class VendorExtrasController {
   // ── Delivery man (vendor view) ───────────────────────────────────
   @Get('delivery-man/list')
   async vendorDmList(@Req() req: AuthedRequest) {
+    if (this.useMongo()) {
+      const restaurant = await this.mongo.findOne<MongoRestaurantDoc>('restaurants', { mysql_vendor_id: Number(req.actor!.id) });
+      if (!restaurant) return { delivery_men: [], total_size: 0 };
+      const zoneId = restaurant.mysql_zone_id ?? restaurant.zone_id ?? null;
+      const filter: Record<string, unknown> = zoneId !== null && zoneId !== undefined ? { mysql_zone_id: Number(zoneId) } : {};
+      const rows = await this.mongo.findMany<MongoDeliveryManDoc>('delivery_men', filter);
+      return rows.map((r) => ({
+        id: Number(r.mysql_id),
+        f_name: r.f_name ?? null,
+        l_name: r.l_name ?? null,
+        phone: r.phone ?? null,
+        status: r.status ?? null,
+        application_status: r.application_status ?? null,
+      }));
+    }
     const restaurant = await this.prisma.restaurants.findFirst({ where: { vendor_id: req.actor!.id }, select: { id: true, zone_id: true } });
     if (!restaurant) return { delivery_men: [], total_size: 0 };
     const rows = await this.prisma.delivery_men.findMany({ where: { zone_id: restaurant.zone_id ?? undefined } });
@@ -305,6 +639,17 @@ export class VendorExtrasController {
 
   @Get('withdraw-method/list')
   async withdrawMethods() {
+    if (this.useMongo()) {
+      // Original Prisma filter uses `is_active: 1`; in Mongo we accept either
+      // the numeric or boolean truthy value.
+      const rows = await this.mongo.findMany<MongoWithdrawalMethodDoc>('withdrawal_methods', { $or: [{ is_active: 1 }, { is_active: true }] });
+      return rows.map((r) => ({
+        id: Number(r.mysql_id),
+        method_name: r.method_name ?? null,
+        method_fields: r.method_fields ?? null,
+        is_default: r.is_default ?? null,
+      }));
+    }
     const rows = await this.prisma.withdrawal_methods.findMany({ where: { is_active: 1 } });
     return rows.map((r) => ({ id: Number(r.id), method_name: r.method_name, method_fields: r.method_fields, is_default: r.is_default }));
   }
@@ -352,6 +697,14 @@ export class VendorExtrasController {
   // ── Notifications + messages ─────────────────────────────────────
   @Get('notifications')
   async vendorNotifications() {
+    if (this.useMongo()) {
+      const rows = await this.mongo.findMany<MongoNotificationDoc>(
+        'notifications',
+        { status: true },
+        { sort: { mysql_id: -1 }, limit: 50 },
+      );
+      return rows.map((r) => ({ id: Number(r.mysql_id), title: r.title ?? null, description: r.description ?? null }));
+    }
     const rows = await this.prisma.notifications.findMany({ where: { status: true }, orderBy: { id: 'desc' }, take: 50 });
     return rows.map((r) => ({ id: Number(r.id), title: r.title, description: r.description }));
   }
@@ -377,6 +730,18 @@ export class VendorExtrasController {
 
   @Get('advertisement')
   async ads(@Req() req: AuthedRequest) {
+    if (this.useMongo()) {
+      const r = await this.mongo.findOne<MongoRestaurantDoc>('restaurants', { mysql_vendor_id: Number(req.actor!.id) });
+      if (!r) return [];
+      const rows = await this.mongo.findMany<MongoAdDoc>('advertisements', { mysql_restaurant_id: Number(r.mysql_id) });
+      return rows.map((row) => ({
+        ...(row.legacy ?? {}),
+        ...row,
+        id: Number(row.mysql_id),
+        restaurant_id: row.mysql_restaurant_id !== null && row.mysql_restaurant_id !== undefined ? Number(row.mysql_restaurant_id) : 0,
+        created_by_id: row.mysql_created_by_id !== null && row.mysql_created_by_id !== undefined ? Number(row.mysql_created_by_id) : 0,
+      }));
+    }
     const r = await this.prisma.restaurants.findFirst({ where: { vendor_id: req.actor!.id }, select: { id: true } });
     if (!r) return [];
     const rows = await this.prisma.advertisements.findMany({ where: { restaurant_id: r.id } });
@@ -417,6 +782,17 @@ export class VendorExtrasController {
   // ── Schedule + restaurant config ─────────────────────────────────
   @Get('schedule')
   async schedule(@Req() req: AuthedRequest) {
+    if (this.useMongo()) {
+      const r = await this.mongo.findOne<MongoRestaurantDoc>('restaurants', { mysql_vendor_id: Number(req.actor!.id) });
+      if (!r) return [];
+      const rows = await this.mongo.findMany<MongoScheduleDoc>('restaurant_schedule', { mysql_restaurant_id: Number(r.mysql_id) });
+      return rows.map((row) => ({
+        ...(row.legacy ?? {}),
+        ...row,
+        id: Number(row.mysql_id),
+        restaurant_id: row.mysql_restaurant_id !== null && row.mysql_restaurant_id !== undefined ? Number(row.mysql_restaurant_id) : 0,
+      }));
+    }
     const r = await this.prisma.restaurants.findFirst({ where: { vendor_id: req.actor!.id }, select: { id: true } });
     if (!r) return [];
     const rows = await this.prisma.restaurant_schedule.findMany({ where: { restaurant_id: r.id } });

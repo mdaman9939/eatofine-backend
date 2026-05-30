@@ -1,4 +1,10 @@
+import { PrismaService } from '../prisma/prisma.service';
+import { MongoDataService } from '../mongo/mongo-data.service';
 export declare class AuthExtrasController {
+    private readonly prisma;
+    private readonly mongo;
+    constructor(prisma: PrismaService, mongo: MongoDataService);
+    private useMongo;
     forgot(): {
         message: string;
     };

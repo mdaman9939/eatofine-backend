@@ -10,11 +10,13 @@ exports.DocumentsModule = void 0;
 const common_1 = require("@nestjs/common");
 const documents_controller_1 = require("./documents.controller");
 const documents_service_1 = require("./documents.service");
+const migration_module_1 = require("../mongo/migration.module");
 let DocumentsModule = class DocumentsModule {
 };
 exports.DocumentsModule = DocumentsModule;
 exports.DocumentsModule = DocumentsModule = __decorate([
     (0, common_1.Module)({
+        imports: [migration_module_1.MigrationModule],
         controllers: [documents_controller_1.DocumentsController],
         providers: [documents_service_1.DocumentsService],
     })

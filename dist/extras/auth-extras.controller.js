@@ -14,7 +14,19 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AuthExtrasController = void 0;
 const common_1 = require("@nestjs/common");
+const prisma_service_1 = require("../prisma/prisma.service");
+const mongo_data_service_1 = require("../mongo/mongo-data.service");
 let AuthExtrasController = class AuthExtrasController {
+    prisma;
+    mongo;
+    constructor(prisma, mongo) {
+        this.prisma = prisma;
+        this.mongo = mongo;
+    }
+    useMongo() {
+        const v = (process.env.USE_MONGO_EXTRAS ?? '').toLowerCase();
+        return v === '1' || v === 'true' || v === 'yes';
+    }
     forgot() { return { message: 'Reset link sent (demo)' }; }
     reset() { return { message: 'Password reset (demo)' }; }
     verifyToken() { return { message: 'token verified', otp: '1234' }; }
@@ -213,6 +225,8 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AuthExtrasController.prototype, "dmStore", null);
 exports.AuthExtrasController = AuthExtrasController = __decorate([
-    (0, common_1.Controller)('auth')
+    (0, common_1.Controller)('auth'),
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        mongo_data_service_1.MongoDataService])
 ], AuthExtrasController);
 //# sourceMappingURL=auth-extras.controller.js.map

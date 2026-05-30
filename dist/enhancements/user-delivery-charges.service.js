@@ -12,12 +12,31 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.UserDeliveryChargesService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
+const mongo_data_service_1 = require("../mongo/mongo-data.service");
 let UserDeliveryChargesService = class UserDeliveryChargesService {
     prisma;
-    constructor(prisma) {
+    mongo;
+    constructor(prisma, mongo) {
         this.prisma = prisma;
+        this.mongo = mongo;
+    }
+    useMongo() {
+        const v = (process.env.USE_MONGO_ENHANCEMENTS ?? '').toLowerCase();
+        return v === '1' || v === 'true' || v === 'yes';
     }
     async listSlabs() {
+        if (this.useMongo()) {
+            const docs = await this.mongo.findMany('user_delivery_slabs', {}, { sort: { min_km: 1 } });
+            return docs.map((r) => ({
+                id: Number(r.mysql_id),
+                min_km: Number(r.min_km),
+                max_km: Number(r.max_km),
+                base_charge: Number(r.base_charge),
+                extra_per_km: Number(r.extra_per_km),
+                gst_rate: Number(r.gst_rate),
+                status: !!r.status,
+            }));
+        }
         const rows = await this.prisma.$queryRawUnsafe(`SELECT id, min_km, max_km, base_charge, extra_per_km, gst_rate, status
        FROM user_delivery_slabs ORDER BY min_km ASC`);
         return rows.map((r) => ({ ...r, id: Number(r.id), min_km: Number(r.min_km), max_km: Number(r.max_km), base_charge: Number(r.base_charge), extra_per_km: Number(r.extra_per_km), gst_rate: Number(r.gst_rate), status: !!r.status }));
@@ -28,11 +47,48 @@ let UserDeliveryChargesService = class UserDeliveryChargesService {
         }
         if (body.max_km <= body.min_km)
             throw new common_1.BadRequestException({ errors: [{ code: 'range', message: 'max_km must be > min_km' }] });
+        if (this.useMongo()) {
+            const nextId = await this.mongo.nextMysqlId('user_delivery_slabs');
+            const now = new Date();
+            await this.mongo.insertOne('user_delivery_slabs', {
+                mysql_id: nextId,
+                min_km: body.min_km,
+                max_km: body.max_km,
+                base_charge: body.base_charge,
+                extra_per_km: body.extra_per_km ?? 0,
+                gst_rate: body.gst_rate ?? 18,
+                status: 1,
+                effective_from: now,
+                created_at: now,
+                updated_at: now,
+            });
+            return { ok: true };
+        }
         await this.prisma.$executeRawUnsafe(`INSERT INTO user_delivery_slabs (min_km, max_km, base_charge, extra_per_km, gst_rate, status, effective_from, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, 1, NOW(), NOW(), NOW())`, body.min_km, body.max_km, body.base_charge, body.extra_per_km ?? 0, body.gst_rate ?? 18);
         return { ok: true };
     }
     async updateSlab(id, body) {
+        if (this.useMongo()) {
+            const set = {};
+            if (body.min_km !== undefined)
+                set.min_km = body.min_km;
+            if (body.max_km !== undefined)
+                set.max_km = body.max_km;
+            if (body.base_charge !== undefined)
+                set.base_charge = body.base_charge;
+            if (body.extra_per_km !== undefined)
+                set.extra_per_km = body.extra_per_km;
+            if (body.gst_rate !== undefined)
+                set.gst_rate = body.gst_rate;
+            if (body.status !== undefined)
+                set.status = body.status ? 1 : 0;
+            if (!Object.keys(set).length)
+                throw new common_1.BadRequestException({ errors: [{ code: 'body', message: 'no fields' }] });
+            set.updated_at = new Date();
+            await this.mongo.updateOne('user_delivery_slabs', { mysql_id: Number(id) }, set);
+            return { ok: true, id };
+        }
         const updates = [];
         const values = [];
         if (body.min_km !== undefined) {
@@ -67,10 +123,27 @@ let UserDeliveryChargesService = class UserDeliveryChargesService {
         return { ok: true, id };
     }
     async deleteSlab(id) {
+        if (this.useMongo()) {
+            await this.mongo.deleteOne('user_delivery_slabs', { mysql_id: Number(id) });
+            return { ok: true, id };
+        }
         await this.prisma.$executeRawUnsafe('DELETE FROM user_delivery_slabs WHERE id = ?', id);
         return { ok: true, id };
     }
     async listSurcharges() {
+        if (this.useMongo()) {
+            const docs = await this.mongo.findMany('user_delivery_surcharges', {}, { sort: { surcharge_type: 1, mysql_id: 1 } });
+            return docs.map((r) => ({
+                id: Number(r.mysql_id),
+                surcharge_type: r.surcharge_type,
+                label: r.label,
+                config_json: typeof r.config_json === 'string' ? JSON.parse(r.config_json) : r.config_json,
+                surcharge_type_value: r.surcharge_type_value,
+                amount: Number(r.amount),
+                gst_rate: Number(r.gst_rate),
+                status: !!r.status,
+            }));
+        }
         const rows = await this.prisma.$queryRawUnsafe(`SELECT id, surcharge_type, label, config_json, surcharge_type_value, amount, gst_rate, status
        FROM user_delivery_surcharges ORDER BY surcharge_type ASC, id ASC`);
         return rows.map((r) => ({
@@ -84,11 +157,49 @@ let UserDeliveryChargesService = class UserDeliveryChargesService {
         if (!body.surcharge_type || !body.label || body.config_json === undefined || body.config_json === null) {
             throw new common_1.BadRequestException({ errors: [{ code: 'body', message: 'type/label/config_json required' }] });
         }
+        if (this.useMongo()) {
+            const nextId = await this.mongo.nextMysqlId('user_delivery_surcharges');
+            const now = new Date();
+            await this.mongo.insertOne('user_delivery_surcharges', {
+                mysql_id: nextId,
+                surcharge_type: body.surcharge_type,
+                label: body.label,
+                config_json: body.config_json,
+                surcharge_type_value: body.surcharge_type_value ?? 'fixed',
+                amount: body.amount,
+                gst_rate: body.gst_rate ?? 18,
+                status: 1,
+                effective_from: now,
+                created_at: now,
+                updated_at: now,
+            });
+            return { ok: true };
+        }
         await this.prisma.$executeRawUnsafe(`INSERT INTO user_delivery_surcharges (surcharge_type, label, config_json, surcharge_type_value, amount, gst_rate, status, effective_from, created_at, updated_at)
        VALUES (?, ?, CAST(? AS JSON), ?, ?, ?, 1, NOW(), NOW(), NOW())`, body.surcharge_type, body.label, JSON.stringify(body.config_json), body.surcharge_type_value ?? 'fixed', body.amount, body.gst_rate ?? 18);
         return { ok: true };
     }
     async updateSurcharge(id, body) {
+        if (this.useMongo()) {
+            const set = {};
+            if (body.label !== undefined)
+                set.label = body.label;
+            if (body.config_json !== undefined)
+                set.config_json = body.config_json;
+            if (body.surcharge_type_value !== undefined)
+                set.surcharge_type_value = body.surcharge_type_value;
+            if (body.amount !== undefined)
+                set.amount = body.amount;
+            if (body.gst_rate !== undefined)
+                set.gst_rate = body.gst_rate;
+            if (body.status !== undefined)
+                set.status = body.status ? 1 : 0;
+            if (!Object.keys(set).length)
+                throw new common_1.BadRequestException({ errors: [{ code: 'body', message: 'no fields' }] });
+            set.updated_at = new Date();
+            await this.mongo.updateOne('user_delivery_surcharges', { mysql_id: Number(id) }, set);
+            return { ok: true, id };
+        }
         const updates = [];
         const values = [];
         if (body.label !== undefined) {
@@ -123,10 +234,21 @@ let UserDeliveryChargesService = class UserDeliveryChargesService {
         return { ok: true, id };
     }
     async deleteSurcharge(id) {
+        if (this.useMongo()) {
+            await this.mongo.deleteOne('user_delivery_surcharges', { mysql_id: Number(id) });
+            return { ok: true, id };
+        }
         await this.prisma.$executeRawUnsafe('DELETE FROM user_delivery_surcharges WHERE id = ?', id);
         return { ok: true, id };
     }
     async getFreeDelivery() {
+        if (this.useMongo()) {
+            const docs = await this.mongo.findMany('free_delivery_settings', {}, { sort: { mysql_id: 1 }, limit: 1 });
+            const r = docs[0];
+            if (!r)
+                return { id: 0, min_order_value: 0, status: false };
+            return { id: Number(r.mysql_id), min_order_value: Number(r.min_order_value), status: !!r.status };
+        }
         const rows = await this.prisma.$queryRawUnsafe(`SELECT id, min_order_value, status FROM free_delivery_settings ORDER BY id ASC LIMIT 1`);
         const r = rows[0];
         if (!r)
@@ -134,6 +256,21 @@ let UserDeliveryChargesService = class UserDeliveryChargesService {
         return { id: Number(r.id), min_order_value: Number(r.min_order_value), status: !!r.status };
     }
     async updateFreeDelivery(body) {
+        if (this.useMongo()) {
+            const set = {};
+            if (body.min_order_value !== undefined)
+                set.min_order_value = body.min_order_value;
+            if (body.status !== undefined)
+                set.status = body.status ? 1 : 0;
+            if (!Object.keys(set).length)
+                throw new common_1.BadRequestException({ errors: [{ code: 'body', message: 'no fields' }] });
+            set.updated_at = new Date();
+            const top = await this.mongo.findMany('free_delivery_settings', {}, { sort: { mysql_id: 1 }, limit: 1 });
+            if (top[0]) {
+                await this.mongo.updateOne('free_delivery_settings', { mysql_id: Number(top[0].mysql_id) }, set);
+            }
+            return { ok: true };
+        }
         const updates = [];
         const values = [];
         if (body.min_order_value !== undefined) {
@@ -151,6 +288,15 @@ let UserDeliveryChargesService = class UserDeliveryChargesService {
         return { ok: true };
     }
     async getSurgeGrid() {
+        if (this.useMongo()) {
+            const docs = await this.mongo.findMany('surge_pricing_grid', {}, { sort: { day_of_week: 1, hour_of_day: 1 } });
+            return docs.map((r) => ({
+                day_of_week: Number(r.day_of_week),
+                hour_of_day: Number(r.hour_of_day),
+                multiplier: Number(r.multiplier),
+                status: !!r.status,
+            }));
+        }
         const rows = await this.prisma.$queryRawUnsafe(`SELECT day_of_week, hour_of_day, multiplier, status FROM surge_pricing_grid ORDER BY day_of_week, hour_of_day`);
         return rows.map((r) => ({ day_of_week: Number(r.day_of_week), hour_of_day: Number(r.hour_of_day), multiplier: Number(r.multiplier), status: !!r.status }));
     }
@@ -160,6 +306,14 @@ let UserDeliveryChargesService = class UserDeliveryChargesService {
         }
         if (body.day_of_week < 0 || body.day_of_week > 6 || body.hour_of_day < 0 || body.hour_of_day > 23) {
             throw new common_1.BadRequestException({ errors: [{ code: 'range', message: 'day_of_week 0..6, hour_of_day 0..23' }] });
+        }
+        if (this.useMongo()) {
+            await this.mongo.updateOne('surge_pricing_grid', { day_of_week: body.day_of_week, hour_of_day: body.hour_of_day }, {
+                multiplier: body.multiplier,
+                status: body.status === false ? 0 : 1,
+                updated_at: new Date(),
+            });
+            return { ok: true };
         }
         await this.prisma.$executeRawUnsafe(`UPDATE surge_pricing_grid SET multiplier = ?, status = ?, updated_at = NOW()
        WHERE day_of_week = ? AND hour_of_day = ?`, body.multiplier, body.status === false ? 0 : 1, body.day_of_week, body.hour_of_day);
@@ -258,6 +412,7 @@ let UserDeliveryChargesService = class UserDeliveryChargesService {
 exports.UserDeliveryChargesService = UserDeliveryChargesService;
 exports.UserDeliveryChargesService = UserDeliveryChargesService = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        mongo_data_service_1.MongoDataService])
 ], UserDeliveryChargesService);
 //# sourceMappingURL=user-delivery-charges.service.js.map

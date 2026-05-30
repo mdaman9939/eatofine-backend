@@ -13,14 +13,13 @@ exports.PrismaService = void 0;
 const common_1 = require("@nestjs/common");
 const client_1 = require("@prisma/client");
 let PrismaService = class PrismaService extends client_1.PrismaClient {
+    log = new common_1.Logger('Prisma');
     constructor() {
         super({ log: ['warn', 'error'] });
-    }
-    async onModuleInit() {
-        await this.$connect();
+        this.log.log('Prisma client created (lazy — MySQL connection deferred until first query).');
     }
     async onModuleDestroy() {
-        await this.$disconnect();
+        await this.$disconnect().catch(() => undefined);
     }
 };
 exports.PrismaService = PrismaService;

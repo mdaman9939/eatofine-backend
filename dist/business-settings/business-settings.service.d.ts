@@ -1,11 +1,14 @@
 import { OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { MongoDataService } from '../mongo/mongo-data.service';
 export declare class BusinessSettingsService implements OnModuleInit {
     private readonly prisma;
+    private readonly mongo;
     private cache;
     private cachedAt;
     private readonly ttlMs;
-    constructor(prisma: PrismaService);
+    constructor(prisma: PrismaService, mongo: MongoDataService);
+    private useMongo;
     onModuleInit(): Promise<void>;
     private refresh;
     private ensureFresh;

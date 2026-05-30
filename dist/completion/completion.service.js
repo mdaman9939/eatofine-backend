@@ -12,19 +12,100 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.CompletionService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
+const mongo_data_service_1 = require("../mongo/mongo-data.service");
 let CompletionService = class CompletionService {
     prisma;
-    constructor(prisma) {
+    mongo;
+    constructor(prisma, mongo) {
         this.prisma = prisma;
+        this.mongo = mongo;
+    }
+    useMongo() {
+        const v = (process.env.USE_MONGO_COMPLETION ?? '').toLowerCase();
+        return v === '1' || v === 'true' || v === 'yes';
+    }
+    async vendorNameMongo(vendorId) {
+        const v = await this.mongo.findByMysqlId('vendors', vendorId);
+        if (!v)
+            return null;
+        return [v.f_name, v.l_name].filter((x) => x != null && String(x).length > 0).join(' ') || null;
+    }
+    async restaurantNameMongo(restaurantId) {
+        if (restaurantId == null)
+            return null;
+        const r = await this.mongo.findByMysqlId('restaurants', Number(restaurantId));
+        return r?.name ?? null;
+    }
+    async userNameMongo(userId) {
+        const u = await this.mongo.findByMysqlId('users', userId);
+        if (!u)
+            return null;
+        return [u.f_name, u.l_name].filter((x) => x != null && String(x).length > 0).join(' ') || null;
+    }
+    async subjectNameMongo(subjectType, subjectId) {
+        if (subjectType === 'customer')
+            return this.userNameMongo(subjectId);
+        if (subjectType === 'vendor')
+            return this.vendorNameMongo(subjectId);
+        if (subjectType === 'delivery_man') {
+            const dm = await this.mongo.findByMysqlId('delivery_men', subjectId);
+            if (!dm)
+                return null;
+            return [dm.f_name, dm.l_name].filter((x) => x != null && String(x).length > 0).join(' ') || null;
+        }
+        return null;
     }
     async listInvoices(filters = {}) {
+        const limit = Math.min(filters.limit ?? 500, 2000);
+        if (this.useMongo()) {
+            const filter = {};
+            if (filters.vendorId)
+                filter.vendor_id = Number(filters.vendorId);
+            if (filters.status)
+                filter.status = filters.status;
+            const docs = await this.mongo.findMany('vendor_invoices', filter, {
+                sort: { period_end: -1, mysql_id: -1 },
+                limit,
+            });
+            const out = [];
+            for (const d of docs) {
+                out.push({
+                    id: Number(d.mysql_id),
+                    invoice_number: d.invoice_number,
+                    vendor_id: Number(d.vendor_id),
+                    restaurant_id: d.restaurant_id != null ? Number(d.restaurant_id) : null,
+                    plan_type: d.plan_type,
+                    period_start: d.period_start,
+                    period_end: d.period_end,
+                    gross_sales: Number(d.gross_sales ?? 0),
+                    order_count: Number(d.order_count ?? 0),
+                    commission_base: Number(d.commission_base ?? 0),
+                    ppo_base: Number(d.ppo_base ?? 0),
+                    subscription_fee: Number(d.subscription_fee ?? 0),
+                    taxable_amount: Number(d.taxable_amount ?? 0),
+                    cgst: Number(d.cgst ?? 0),
+                    sgst: Number(d.sgst ?? 0),
+                    igst: Number(d.igst ?? 0),
+                    total_amount: Number(d.total_amount ?? 0),
+                    tds_amount: Number(d.tds_amount ?? 0),
+                    net_payable: Number(d.net_payable ?? 0),
+                    status: d.status,
+                    notes: d.notes ?? null,
+                    issued_at: d.issued_at ?? null,
+                    paid_at: d.paid_at ?? null,
+                    created_at: d.created_at ?? null,
+                    vendor_name: await this.vendorNameMongo(Number(d.vendor_id)),
+                    restaurant_name: await this.restaurantNameMongo(d.restaurant_id),
+                });
+            }
+            return out;
+        }
         const conds = [];
         if (filters.vendorId)
             conds.push(`vi.vendor_id = ${filters.vendorId}`);
         if (filters.status)
             conds.push(`vi.status = '${filters.status}'`);
         const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
-        const limit = Math.min(filters.limit ?? 500, 2000);
         const rows = await this.prisma.$queryRawUnsafe(`SELECT vi.*,
               CONCAT_WS(' ', v.f_name, v.l_name) AS vendor_name,
               r.name AS restaurant_name
@@ -52,6 +133,35 @@ let CompletionService = class CompletionService {
         }));
     }
     async getInvoiceStats() {
+        if (this.useMongo()) {
+            const rows = await this.mongo.aggregate('vendor_invoices', [
+                {
+                    $group: {
+                        _id: '$status',
+                        c: { $sum: 1 },
+                        total: { $sum: { $ifNull: ['$total_amount', 0] } },
+                    },
+                },
+            ]);
+            const summary = {
+                draft: 0, issued: 0, paid: 0, cancelled: 0, total_count: 0,
+                total_value: 0, paid_value: 0, outstanding_value: 0,
+            };
+            for (const r of rows) {
+                const n = Number(r.c ?? 0);
+                const t = Number(r.total ?? 0);
+                const status = String(r._id);
+                if (status in summary)
+                    summary[status] = n;
+                summary.total_count += n;
+                summary.total_value += t;
+                if (status === 'paid')
+                    summary.paid_value += t;
+                if (status === 'issued')
+                    summary.outstanding_value += t;
+            }
+            return summary;
+        }
         const rows = await this.prisma.$queryRawUnsafe(`SELECT status, COUNT(*) AS c, COALESCE(SUM(total_amount),0) AS total
        FROM vendor_invoices GROUP BY status`);
         const summary = {
@@ -78,6 +188,92 @@ let CompletionService = class CompletionService {
         const end = periodEnd ? new Date(periodEnd) : new Date(now.getFullYear(), now.getMonth(), 0);
         const startStr = start.toISOString().slice(0, 10);
         const endStr = end.toISOString().slice(0, 10);
+        if (this.useMongo()) {
+            const dayStart = new Date(`${startStr}T00:00:00.000Z`);
+            const dayEnd = new Date(`${endStr}T00:00:00.000Z`);
+            dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
+            const rollups = await this.mongo.aggregate('orders', [
+                {
+                    $match: {
+                        order_status: 'delivered',
+                        delivered: { $gte: dayStart, $lt: dayEnd },
+                    },
+                },
+                {
+                    $group: {
+                        _id: { restaurant_id: '$mysql_restaurant_id' },
+                        orders: { $sum: 1 },
+                        gross: { $sum: { $ifNull: ['$order_amount', 0] } },
+                    },
+                },
+            ]);
+            let created = 0;
+            for (const row of rollups) {
+                const rid = Number(row._id?.restaurant_id ?? 0);
+                if (!rid)
+                    continue;
+                const restaurant = await this.mongo.findByMysqlId('restaurants', rid);
+                if (!restaurant)
+                    continue;
+                const vendorId = await this.mongo.findOne('restaurants', { mysql_id: rid });
+                const vid = Number(vendorId?.mysql_vendor_id ?? 0);
+                if (!vid)
+                    continue;
+                const orders = Number(row.orders ?? 0);
+                const gross = Number(row.gross ?? 0);
+                if (gross <= 0)
+                    continue;
+                const existing = await this.mongo.findOne('vendor_invoices', {
+                    vendor_id: vid,
+                    restaurant_id: rid,
+                    period_start: startStr,
+                    period_end: endStr,
+                });
+                if (existing)
+                    continue;
+                const commissionPct = Number(restaurant.comission ?? 0);
+                const planType = (restaurant.restaurant_model ?? 'commission').toLowerCase();
+                const commissionBase = (gross * commissionPct) / 100;
+                const ppoBase = planType === 'ppo' ? orders * 10 : 0;
+                const subFee = 0;
+                const taxable = commissionBase + ppoBase + subFee;
+                const cgst = taxable * 0.09;
+                const sgst = taxable * 0.09;
+                const total = taxable + cgst + sgst;
+                const tds = total * 0.01;
+                const netPayable = gross - total - tds;
+                const invNumber = `INV-${start.getFullYear()}${String(start.getMonth() + 1).padStart(2, '0')}-${vid}-${rid}`;
+                const mysqlId = await this.mongo.nextMysqlId('vendor_invoices');
+                const nowDate = new Date();
+                await this.mongo.insertOne('vendor_invoices', {
+                    mysql_id: mysqlId,
+                    invoice_number: invNumber,
+                    vendor_id: vid,
+                    restaurant_id: rid,
+                    plan_type: planType,
+                    period_start: startStr,
+                    period_end: endStr,
+                    gross_sales: gross,
+                    order_count: orders,
+                    commission_base: commissionBase,
+                    ppo_base: ppoBase,
+                    subscription_fee: subFee,
+                    taxable_amount: taxable,
+                    cgst,
+                    sgst,
+                    igst: 0,
+                    total_amount: total,
+                    tds_amount: tds,
+                    net_payable: netPayable,
+                    status: 'issued',
+                    issued_at: nowDate,
+                    created_at: nowDate,
+                    updated_at: nowDate,
+                });
+                created++;
+            }
+            return { ok: true, period: { start: startStr, end: endStr }, created };
+        }
         const rollups = await this.prisma.$queryRawUnsafe(`SELECT r.vendor_id AS vendor_id,
               r.id AS restaurant_id,
               COUNT(*) AS orders,
@@ -124,16 +320,56 @@ let CompletionService = class CompletionService {
         return { ok: true, period: { start: startStr, end: endStr }, created };
     }
     async markInvoicePaid(id) {
+        if (this.useMongo()) {
+            const now = new Date();
+            await this.mongo.updateOne('vendor_invoices', { mysql_id: Number(id) }, { status: 'paid', paid_at: now, updated_at: now });
+            return { ok: true, id };
+        }
         await this.prisma.$executeRawUnsafe(`UPDATE vendor_invoices SET status = 'paid', paid_at = NOW(), updated_at = NOW() WHERE id = ?`, id);
         return { ok: true, id };
     }
     async cancelInvoice(id, notes) {
+        if (this.useMongo()) {
+            await this.mongo.updateOne('vendor_invoices', { mysql_id: Number(id) }, { status: 'cancelled', notes: notes ?? null, updated_at: new Date() });
+            return { ok: true, id };
+        }
         await this.prisma.$executeRawUnsafe(`UPDATE vendor_invoices SET status = 'cancelled', notes = ?, updated_at = NOW() WHERE id = ?`, notes ?? null, id);
         return { ok: true, id };
     }
     async listCreditNotes(filters = {}) {
-        const where = filters.status ? `WHERE cn.status = '${filters.status}'` : '';
         const limit = Math.min(filters.limit ?? 500, 2000);
+        if (this.useMongo()) {
+            const filter = {};
+            if (filters.status)
+                filter.status = filters.status;
+            const docs = await this.mongo.findMany('credit_notes', filter, {
+                sort: { created_at: -1, mysql_id: -1 },
+                limit,
+            });
+            const out = [];
+            for (const d of docs) {
+                out.push({
+                    id: Number(d.mysql_id),
+                    credit_note_number: d.credit_note_number,
+                    order_id: Number(d.order_id),
+                    customer_id: Number(d.customer_id),
+                    restaurant_id: d.restaurant_id != null ? Number(d.restaurant_id) : null,
+                    reason: d.reason ?? null,
+                    refund_amount: Number(d.refund_amount ?? 0),
+                    tax_reversed: Number(d.tax_reversed ?? 0),
+                    delivery_reversed: Number(d.delivery_reversed ?? 0),
+                    total_credit: Number(d.total_credit ?? 0),
+                    status: d.status,
+                    notes: d.notes ?? null,
+                    issued_by: d.issued_by != null ? Number(d.issued_by) : null,
+                    created_at: d.created_at ?? null,
+                    customer_name: await this.userNameMongo(Number(d.customer_id)),
+                    restaurant_name: await this.restaurantNameMongo(d.restaurant_id),
+                });
+            }
+            return out;
+        }
+        const where = filters.status ? `WHERE cn.status = '${filters.status}'` : '';
         const rows = await this.prisma.$queryRawUnsafe(`SELECT cn.*,
               CONCAT_WS(' ', u.f_name, u.l_name) AS customer_name,
               r.name AS restaurant_name
@@ -162,6 +398,35 @@ let CompletionService = class CompletionService {
         if (!body.refund_amount || body.refund_amount <= 0) {
             throw new common_1.BadRequestException({ errors: [{ code: 'refund_amount', message: 'refund_amount must be > 0' }] });
         }
+        if (this.useMongo()) {
+            const order = await this.mongo.findByMysqlId('orders', body.order_id);
+            if (!order)
+                throw new common_1.NotFoundException({ errors: [{ code: 'order', message: 'order not found' }] });
+            const taxReversed = body.tax_reversed ?? 0;
+            const delivReversed = body.delivery_reversed ?? 0;
+            const total = Number(body.refund_amount) + Number(taxReversed) + Number(delivReversed);
+            const today = new Date();
+            const cnNumber = `CN-${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}-${body.order_id}`;
+            const mysqlId = await this.mongo.nextMysqlId('credit_notes');
+            await this.mongo.insertOne('credit_notes', {
+                mysql_id: mysqlId,
+                credit_note_number: cnNumber,
+                order_id: Number(body.order_id),
+                customer_id: Number(order.mysql_user_id ?? 0),
+                restaurant_id: order.mysql_restaurant_id != null ? Number(order.mysql_restaurant_id) : null,
+                reason: body.reason ?? null,
+                refund_amount: Number(body.refund_amount),
+                tax_reversed: Number(taxReversed),
+                delivery_reversed: Number(delivReversed),
+                total_credit: total,
+                status: 'issued',
+                notes: body.notes ?? null,
+                issued_by: body.issued_by ?? null,
+                created_at: today,
+                updated_at: today,
+            });
+            return { ok: true, credit_note_number: cnNumber, total_credit: total };
+        }
         const orderRows = await this.prisma.$queryRawUnsafe(`SELECT id, user_id, restaurant_id FROM orders WHERE id = ? LIMIT 1`, body.order_id);
         if (!orderRows.length)
             throw new common_1.NotFoundException({ errors: [{ code: 'order', message: 'order not found' }] });
@@ -179,6 +444,28 @@ let CompletionService = class CompletionService {
         return { ok: true, credit_note_number: cnNumber, total_credit: total };
     }
     async getCreditNoteStats() {
+        if (this.useMongo()) {
+            const rows = await this.mongo.aggregate('credit_notes', [
+                {
+                    $group: {
+                        _id: '$status',
+                        c: { $sum: 1 },
+                        total: { $sum: { $ifNull: ['$total_credit', 0] } },
+                    },
+                },
+            ]);
+            const summary = { issued: 0, adjusted: 0, cancelled: 0, total_count: 0, total_value: 0 };
+            for (const r of rows) {
+                const n = Number(r.c ?? 0);
+                const t = Number(r.total ?? 0);
+                const status = String(r._id);
+                if (status in summary)
+                    summary[status] = n;
+                summary.total_count += n;
+                summary.total_value += t;
+            }
+            return summary;
+        }
         const rows = await this.prisma.$queryRawUnsafe(`SELECT status, COUNT(*) AS c, COALESCE(SUM(total_credit),0) AS total
        FROM credit_notes GROUP BY status`);
         const summary = { issued: 0, adjusted: 0, cancelled: 0, total_count: 0, total_value: 0 };
@@ -193,6 +480,26 @@ let CompletionService = class CompletionService {
         return summary;
     }
     async listSettings(category) {
+        if (this.useMongo()) {
+            const filter = {};
+            if (category)
+                filter.category = category;
+            const docs = await this.mongo.findMany('platform_settings', filter, {
+                sort: { category: 1, setting_key: 1 },
+            });
+            return docs.map((d) => ({
+                id: Number(d.mysql_id),
+                setting_key: d.setting_key,
+                setting_value: d.setting_value,
+                value_type: d.value_type,
+                category: d.category,
+                label: d.label,
+                description: d.description ?? null,
+                min_value: d.min_value != null ? Number(d.min_value) : null,
+                max_value: d.max_value != null ? Number(d.max_value) : null,
+                updated_at: d.updated_at ?? null,
+            }));
+        }
         const where = category ? `WHERE category = '${category}'` : '';
         const rows = await this.prisma.$queryRawUnsafe(`SELECT id, setting_key, setting_value, value_type, category, label,
               description, min_value, max_value, updated_at
@@ -205,6 +512,29 @@ let CompletionService = class CompletionService {
         }));
     }
     async updateSetting(key, value, updatedBy) {
+        if (this.useMongo()) {
+            const meta = await this.mongo.findOne('platform_settings', { setting_key: key });
+            if (!meta)
+                throw new common_1.NotFoundException({ errors: [{ code: 'key', message: 'setting not found' }] });
+            if (meta.value_type === 'int' || meta.value_type === 'float') {
+                const n = Number(value);
+                if (Number.isNaN(n))
+                    throw new common_1.BadRequestException({ errors: [{ code: 'value', message: 'numeric value required' }] });
+                if (meta.min_value != null && n < Number(meta.min_value)) {
+                    throw new common_1.BadRequestException({ errors: [{ code: 'value', message: `min ${meta.min_value}` }] });
+                }
+                if (meta.max_value != null && n > Number(meta.max_value)) {
+                    throw new common_1.BadRequestException({ errors: [{ code: 'value', message: `max ${meta.max_value}` }] });
+                }
+            }
+            else if (meta.value_type === 'bool') {
+                if (!['0', '1', 'true', 'false'].includes(value.toLowerCase())) {
+                    throw new common_1.BadRequestException({ errors: [{ code: 'value', message: 'bool must be 0/1/true/false' }] });
+                }
+            }
+            await this.mongo.updateOne('platform_settings', { setting_key: key }, { setting_value: value, updated_by: updatedBy ?? null, updated_at: new Date() });
+            return { ok: true, key, value };
+        }
         const rows = await this.prisma.$queryRawUnsafe(`SELECT value_type, min_value, max_value FROM platform_settings WHERE setting_key = ? LIMIT 1`, key);
         if (!rows.length)
             throw new common_1.NotFoundException({ errors: [{ code: 'key', message: 'setting not found' }] });
@@ -229,13 +559,47 @@ let CompletionService = class CompletionService {
         return { ok: true, key, value };
     }
     async listFraudFlags(filters = {}) {
+        const limit = Math.min(filters.limit ?? 500, 2000);
+        if (this.useMongo()) {
+            const filter = {};
+            if (filters.status)
+                filter.status = filters.status;
+            if (filters.subjectType)
+                filter.subject_type = filters.subjectType;
+            const docs = await this.mongo.findMany('fraud_flags', filter, {
+                sort: { created_at: -1, mysql_id: -1 },
+                limit,
+            });
+            const out = [];
+            for (const d of docs) {
+                out.push({
+                    id: Number(d.mysql_id),
+                    subject_type: d.subject_type,
+                    subject_id: Number(d.subject_id),
+                    subject_name: await this.subjectNameMongo(d.subject_type, Number(d.subject_id)),
+                    flag_type: d.flag_type,
+                    severity: d.severity,
+                    description: d.description ?? null,
+                    auto_triggered: d.auto_triggered ? 1 : 0,
+                    status: d.status,
+                    flagged_by: d.flagged_by != null ? Number(d.flagged_by) : null,
+                    resolved_by: d.resolved_by != null ? Number(d.resolved_by) : null,
+                    resolved_at: d.resolved_at ?? null,
+                    resolution_notes: d.resolution_notes ?? null,
+                    created_at: d.created_at ?? null,
+                });
+            }
+            return out.map((r) => ({
+                ...r,
+                auto_triggered: !!Number(r.auto_triggered),
+            }));
+        }
         const conds = [];
         if (filters.status)
             conds.push(`ff.status = '${filters.status}'`);
         if (filters.subjectType)
             conds.push(`ff.subject_type = '${filters.subjectType}'`);
         const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
-        const limit = Math.min(filters.limit ?? 500, 2000);
         const rows = await this.prisma.$queryRawUnsafe(`SELECT ff.*,
               CASE
                 WHEN ff.subject_type = 'customer' THEN (SELECT CONCAT_WS(' ', u.f_name, u.l_name) FROM users u WHERE u.id = ff.subject_id)
@@ -260,18 +624,74 @@ let CompletionService = class CompletionService {
         if (!body.subject_type || !body.subject_id || !body.flag_type) {
             throw new common_1.BadRequestException({ errors: [{ code: 'fields', message: 'subject_type, subject_id, flag_type required' }] });
         }
+        if (this.useMongo()) {
+            const now = new Date();
+            const mysqlId = await this.mongo.nextMysqlId('fraud_flags');
+            await this.mongo.insertOne('fraud_flags', {
+                mysql_id: mysqlId,
+                subject_type: body.subject_type,
+                subject_id: Number(body.subject_id),
+                flag_type: body.flag_type,
+                severity: body.severity ?? 'medium',
+                description: body.description ?? null,
+                auto_triggered: false,
+                status: 'open',
+                flagged_by: body.flagged_by ?? null,
+                created_at: now,
+                updated_at: now,
+            });
+            return { ok: true };
+        }
         await this.prisma.$executeRawUnsafe(`INSERT INTO fraud_flags
        (subject_type, subject_id, flag_type, severity, description, auto_triggered, status, flagged_by, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, 0, 'open', ?, NOW(), NOW())`, body.subject_type, body.subject_id, body.flag_type, body.severity ?? 'medium', body.description ?? null, body.flagged_by ?? null);
         return { ok: true };
     }
     async resolveFraudFlag(id, status, notes, resolvedBy) {
+        if (this.useMongo()) {
+            const now = new Date();
+            const set = {
+                status,
+                resolution_notes: notes,
+                resolved_by: Number(resolvedBy),
+                updated_at: now,
+            };
+            if (status === 'resolved' || status === 'dismissed') {
+                set.resolved_at = now;
+            }
+            await this.mongo.updateOne('fraud_flags', { mysql_id: Number(id) }, set);
+            return { ok: true, id, status };
+        }
         await this.prisma.$executeRawUnsafe(`UPDATE fraud_flags SET status = ?, resolution_notes = ?, resolved_by = ?,
        resolved_at = CASE WHEN ? IN ('resolved','dismissed') THEN NOW() ELSE resolved_at END,
        updated_at = NOW() WHERE id = ?`, status, notes, resolvedBy, status, id);
         return { ok: true, id, status };
     }
     async getFraudStats() {
+        if (this.useMongo()) {
+            const rows = await this.mongo.aggregate('fraud_flags', [
+                {
+                    $group: {
+                        _id: { status: '$status', severity: '$severity' },
+                        c: { $sum: 1 },
+                    },
+                },
+            ]);
+            const byStatus = { open: 0, investigating: 0, resolved: 0, dismissed: 0 };
+            const bySeverity = { low: 0, medium: 0, high: 0, critical: 0 };
+            let total = 0;
+            for (const r of rows) {
+                const n = Number(r.c ?? 0);
+                total += n;
+                const status = String(r._id?.status ?? '');
+                const severity = String(r._id?.severity ?? '');
+                if (status in byStatus)
+                    byStatus[status] += n;
+                if (severity in bySeverity)
+                    bySeverity[severity] += n;
+            }
+            return { total, byStatus, bySeverity };
+        }
         const rows = await this.prisma.$queryRawUnsafe(`SELECT status, severity, COUNT(*) AS c FROM fraud_flags GROUP BY status, severity`);
         const byStatus = { open: 0, investigating: 0, resolved: 0, dismissed: 0 };
         const bySeverity = { low: 0, medium: 0, high: 0, critical: 0 };
@@ -287,13 +707,52 @@ let CompletionService = class CompletionService {
         return { total, byStatus, bySeverity };
     }
     async listVendorPromos(filters = {}) {
+        const limit = Math.min(filters.limit ?? 500, 2000);
+        if (this.useMongo()) {
+            const filter = {};
+            if (filters.status)
+                filter.status = filters.status;
+            if (filters.vendorId)
+                filter.vendor_id = Number(filters.vendorId);
+            const docs = await this.mongo.findMany('vendor_promotions', filter, {
+                sort: { created_at: -1, mysql_id: -1 },
+                limit,
+            });
+            const out = [];
+            for (const d of docs) {
+                out.push({
+                    id: Number(d.mysql_id),
+                    vendor_id: Number(d.vendor_id),
+                    restaurant_id: Number(d.restaurant_id),
+                    vendor_name: await this.vendorNameMongo(Number(d.vendor_id)),
+                    restaurant_name: await this.restaurantNameMongo(Number(d.restaurant_id)),
+                    title: d.title,
+                    description: d.description ?? null,
+                    promo_type: d.promo_type,
+                    discount_type: d.discount_type ?? null,
+                    discount_value: d.discount_value != null ? Number(d.discount_value) : null,
+                    min_order_value: d.min_order_value != null ? Number(d.min_order_value) : null,
+                    max_discount: d.max_discount != null ? Number(d.max_discount) : null,
+                    start_date: d.start_date ?? null,
+                    end_date: d.end_date ?? null,
+                    image_path: d.image_path ?? null,
+                    target_audience: d.target_audience ?? 'all',
+                    status: d.status,
+                    admin_remarks: d.admin_remarks ?? null,
+                    reviewed_by: d.reviewed_by != null ? Number(d.reviewed_by) : null,
+                    reviewed_at: d.reviewed_at ?? null,
+                    total_uses: Number(d.total_uses ?? 0),
+                    created_at: d.created_at ?? null,
+                });
+            }
+            return out;
+        }
         const conds = [];
         if (filters.status)
             conds.push(`vp.status = '${filters.status}'`);
         if (filters.vendorId)
             conds.push(`vp.vendor_id = ${filters.vendorId}`);
         const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
-        const limit = Math.min(filters.limit ?? 500, 2000);
         const rows = await this.prisma.$queryRawUnsafe(`SELECT vp.*,
               CONCAT_WS(' ', v.f_name, v.l_name) AS vendor_name,
               r.name AS restaurant_name
@@ -316,6 +775,17 @@ let CompletionService = class CompletionService {
         }));
     }
     async approvePromo(id, reviewerId, remarks) {
+        if (this.useMongo()) {
+            const now = new Date();
+            await this.mongo.updateOne('vendor_promotions', { mysql_id: Number(id) }, {
+                status: 'approved',
+                admin_remarks: remarks ?? null,
+                reviewed_by: Number(reviewerId),
+                reviewed_at: now,
+                updated_at: now,
+            });
+            return { ok: true, id };
+        }
         await this.prisma.$executeRawUnsafe(`UPDATE vendor_promotions
        SET status = 'approved', admin_remarks = ?, reviewed_by = ?, reviewed_at = NOW(), updated_at = NOW()
        WHERE id = ?`, remarks ?? null, reviewerId, id);
@@ -325,16 +795,41 @@ let CompletionService = class CompletionService {
         if (!remarks?.trim()) {
             throw new common_1.BadRequestException({ errors: [{ code: 'remarks', message: 'remarks required to reject' }] });
         }
+        if (this.useMongo()) {
+            const now = new Date();
+            await this.mongo.updateOne('vendor_promotions', { mysql_id: Number(id) }, {
+                status: 'rejected',
+                admin_remarks: remarks,
+                reviewed_by: Number(reviewerId),
+                reviewed_at: now,
+                updated_at: now,
+            });
+            return { ok: true, id };
+        }
         await this.prisma.$executeRawUnsafe(`UPDATE vendor_promotions
        SET status = 'rejected', admin_remarks = ?, reviewed_by = ?, reviewed_at = NOW(), updated_at = NOW()
        WHERE id = ?`, remarks, reviewerId, id);
         return { ok: true, id };
     }
     async pausePromo(id, paused) {
+        if (this.useMongo()) {
+            await this.mongo.updateOne('vendor_promotions', { mysql_id: Number(id) }, { status: paused ? 'paused' : 'approved', updated_at: new Date() });
+            return { ok: true, id };
+        }
         await this.prisma.$executeRawUnsafe(`UPDATE vendor_promotions SET status = ?, updated_at = NOW() WHERE id = ?`, paused ? 'paused' : 'approved', id);
         return { ok: true, id };
     }
     async getPromoStats() {
+        if (this.useMongo()) {
+            const rows = await this.mongo.aggregate('vendor_promotions', [{ $group: { _id: '$status', c: { $sum: 1 } } }]);
+            const summary = { draft: 0, pending: 0, approved: 0, rejected: 0, live: 0, paused: 0, expired: 0, total: 0 };
+            for (const r of rows) {
+                const n = Number(r.c ?? 0);
+                summary[String(r._id)] = n;
+                summary.total += n;
+            }
+            return summary;
+        }
         const rows = await this.prisma.$queryRawUnsafe(`SELECT status, COUNT(*) AS c FROM vendor_promotions GROUP BY status`);
         const summary = { draft: 0, pending: 0, approved: 0, rejected: 0, live: 0, paused: 0, expired: 0, total: 0 };
         for (const r of rows) {
@@ -348,6 +843,7 @@ let CompletionService = class CompletionService {
 exports.CompletionService = CompletionService;
 exports.CompletionService = CompletionService = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        mongo_data_service_1.MongoDataService])
 ], CompletionService);
 //# sourceMappingURL=completion.service.js.map

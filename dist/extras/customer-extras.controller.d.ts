@@ -1,8 +1,11 @@
 import type { AuthedRequest } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
+import { MongoDataService } from '../mongo/mongo-data.service';
 export declare class CustomerExtrasController {
     private readonly prisma;
-    constructor(prisma: PrismaService);
+    private readonly mongo;
+    constructor(prisma: PrismaService, mongo: MongoDataService);
+    private useMongo;
     wishList(): {
         product: never[];
         restaurant: never[];
@@ -21,7 +24,7 @@ export declare class CustomerExtrasController {
         title: string | null;
         description: string | null;
         image: string | null;
-        created_at: Date | null;
+        created_at: string | Date | null;
     }[]>;
     fcmToken(): {
         message: string;
@@ -88,6 +91,24 @@ export declare class CustomerExtrasController {
             price: number;
             discount: number;
             tax: number;
+            restaurant_id: number | null;
+            category_id: number | null;
+            mysql_id: number;
+            name?: string | null;
+            description?: string | null;
+            image?: string | null;
+            mysql_restaurant_id?: number | null;
+            mysql_category_id?: number | null;
+            status?: boolean | null;
+            avg_rating?: number | null;
+            legacy?: Record<string, unknown>;
+        }[];
+    } | {
+        products: {
+            id: number;
+            price: number;
+            discount: number;
+            tax: number;
             restaurant_id: number;
             category_id: number | null;
             add_ons: string | null;
@@ -125,9 +146,18 @@ export declare class CustomerExtrasController {
         user_id: number | null;
         restaurant_id: number;
         order_amount: number;
+        mysql_id: number;
+        mysql_user_id?: number | null;
+        mysql_restaurant_id?: number | null;
+        order_status?: string | null;
+        legacy?: Record<string, unknown>;
+    }[] | {
+        id: number;
+        user_id: number | null;
+        restaurant_id: number;
+        order_amount: number;
         created_at: Date | null;
         updated_at: Date | null;
-        distance: number | null;
         zone_id: bigint | null;
         cutlery: boolean;
         vehicle_id: bigint | null;
@@ -143,6 +173,11 @@ export declare class CustomerExtrasController {
         restaurant_discount_amount: import("@prisma/client/runtime/library").Decimal;
         delivered: Date | null;
         delivery_man_id: bigint | null;
+        confirmed: Date | null;
+        processing: Date | null;
+        canceled: Date | null;
+        handover: Date | null;
+        distance: number | null;
         cancellation_note: string | null;
         tax_type: string | null;
         is_guest: boolean;
@@ -158,11 +193,7 @@ export declare class CustomerExtrasController {
         callback: string | null;
         otp: string | null;
         accepted: Date | null;
-        confirmed: Date | null;
-        processing: Date | null;
-        handover: Date | null;
         picked_up: Date | null;
-        canceled: Date | null;
         refund_requested: Date | null;
         refunded: Date | null;
         delivery_address: string | null;
@@ -207,6 +238,20 @@ export declare class CustomerExtrasController {
         total_add_on_price: number;
         item_campaign_id: number | null;
         discount_on_food: number | null;
+        mysql_id: number;
+        mysql_order_id?: number | null;
+        mysql_food_id?: number | null;
+        mysql_item_campaign_id?: number | null;
+        legacy?: Record<string, unknown>;
+    }[] | {
+        id: number;
+        food_id: number | null;
+        order_id: number | null;
+        price: number;
+        tax_amount: number;
+        total_add_on_price: number;
+        item_campaign_id: number | null;
+        discount_on_food: number | null;
         add_ons: string | null;
         created_at: Date | null;
         updated_at: Date | null;
@@ -233,7 +278,7 @@ export declare class CustomerExtrasController {
     };
     refundReasons(): Promise<{
         id: number;
-        reason: string;
+        reason: string | null;
     }[]>;
     refundRequest(req: AuthedRequest, body: {
         order_id?: number;
@@ -259,6 +304,22 @@ export declare class CustomerExtrasController {
         message: string;
     };
     foodList(idsStr?: string): Promise<{
+        id: number;
+        price: number;
+        tax: number;
+        discount: number;
+        restaurant_id: number;
+        category_id: number | null;
+        mysql_id: number;
+        name?: string | null;
+        description?: string | null;
+        image?: string | null;
+        mysql_restaurant_id?: number | null;
+        mysql_category_id?: number | null;
+        status?: boolean | null;
+        avg_rating?: number | null;
+        legacy?: Record<string, unknown>;
+    }[] | {
         id: number;
         price: number;
         tax: number;

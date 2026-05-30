@@ -14,11 +14,13 @@ const catalog_extras_controller_1 = require("./catalog-extras.controller");
 const vendor_extras_controller_1 = require("./vendor-extras.controller");
 const delivery_extras_controller_1 = require("./delivery-extras.controller");
 const auth_extras_controller_1 = require("./auth-extras.controller");
+const migration_module_1 = require("../mongo/migration.module");
 let ExtrasModule = class ExtrasModule {
 };
 exports.ExtrasModule = ExtrasModule;
 exports.ExtrasModule = ExtrasModule = __decorate([
     (0, common_1.Module)({
+        imports: [migration_module_1.MigrationModule],
         controllers: [
             static_pages_controller_1.StaticPagesController,
             auth_extras_controller_1.AuthExtrasController,

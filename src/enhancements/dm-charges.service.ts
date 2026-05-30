@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { MongoDataService } from '../mongo/mongo-data.service';
 
 // BRD §5 — Delivery Partner (DM) charge calculation: distance slabs + situational surcharges.
 // Per BRD §5.4 the result has NO GST applied (it's an internal cost, not user-facing).
@@ -17,6 +18,27 @@ interface SurchargeRow {
   status: number; effective_from: Date | null;
 }
 
+interface MongoSlabDoc {
+  mysql_id: number;
+  min_km: number;
+  max_km: number;
+  base_charge: number;
+  extra_per_km: number;
+  status: number | boolean;
+  effective_from: Date | null;
+}
+
+interface MongoSurchargeDoc {
+  mysql_id: number;
+  surcharge_type: 'weekend' | 'festival' | 'late_night';
+  label: string;
+  config_json: unknown;
+  surcharge_type_value: 'fixed' | 'percentage';
+  amount: number;
+  status: number | boolean;
+  effective_from: Date | null;
+}
+
 export interface DmApplicableSurcharge {
   id: number;
   type: SurchargeRow['surcharge_type'];
@@ -26,10 +48,35 @@ export interface DmApplicableSurcharge {
 
 @Injectable()
 export class DmChargesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mongo: MongoDataService,
+  ) {}
+
+  /** Feature flag — when "1"/"true"/"yes", reads/writes route to MongoDB. */
+  private useMongo(): boolean {
+    const v = (process.env.USE_MONGO_ENHANCEMENTS ?? '').toLowerCase();
+    return v === '1' || v === 'true' || v === 'yes';
+  }
 
   // ── Slabs ────────────────────────────────────────────────────────
   async listSlabs() {
+    if (this.useMongo()) {
+      const docs = await this.mongo.findMany<MongoSlabDoc>(
+        'dm_distance_slabs',
+        {},
+        { sort: { min_km: 1 } },
+      );
+      return docs.map((r) => ({
+        id: Number(r.mysql_id),
+        min_km: Number(r.min_km),
+        max_km: Number(r.max_km),
+        base_charge: Number(r.base_charge),
+        extra_per_km: Number(r.extra_per_km),
+        status: !!r.status,
+        effective_from: r.effective_from ?? null,
+      }));
+    }
     const rows = await this.prisma.$queryRawUnsafe<SlabRow[]>(
       `SELECT id, min_km, max_km, base_charge, extra_per_km, status, effective_from
        FROM dm_distance_slabs ORDER BY min_km ASC`,
@@ -50,6 +97,22 @@ export class DmChargesService {
       throw new BadRequestException({ errors: [{ code: 'body', message: 'min_km/max_km required' }] });
     }
     if (body.max_km <= body.min_km) throw new BadRequestException({ errors: [{ code: 'range', message: 'max_km must be > min_km' }] });
+    if (this.useMongo()) {
+      const nextId = await this.mongo.nextMysqlId('dm_distance_slabs');
+      const now = new Date();
+      await this.mongo.insertOne('dm_distance_slabs', {
+        mysql_id: nextId,
+        min_km: body.min_km,
+        max_km: body.max_km,
+        base_charge: body.base_charge,
+        extra_per_km: body.extra_per_km ?? 0,
+        status: 1,
+        effective_from: body.effective_from ? new Date(body.effective_from) : now,
+        created_at: now,
+        updated_at: now,
+      });
+      return { ok: true };
+    }
     await this.prisma.$executeRawUnsafe(
       `INSERT INTO dm_distance_slabs (min_km, max_km, base_charge, extra_per_km, status, effective_from, created_at, updated_at)
        VALUES (?, ?, ?, ?, 1, ?, NOW(), NOW())`,
@@ -60,6 +123,18 @@ export class DmChargesService {
   }
 
   async updateSlab(id: number, body: { min_km?: number; max_km?: number; base_charge?: number; extra_per_km?: number; status?: boolean }) {
+    if (this.useMongo()) {
+      const set: Record<string, unknown> = {};
+      if (body.min_km !== undefined) set.min_km = body.min_km;
+      if (body.max_km !== undefined) set.max_km = body.max_km;
+      if (body.base_charge !== undefined) set.base_charge = body.base_charge;
+      if (body.extra_per_km !== undefined) set.extra_per_km = body.extra_per_km;
+      if (body.status !== undefined) set.status = body.status ? 1 : 0;
+      if (!Object.keys(set).length) throw new BadRequestException({ errors: [{ code: 'body', message: 'no fields' }] });
+      set.updated_at = new Date();
+      await this.mongo.updateOne('dm_distance_slabs', { mysql_id: Number(id) }, set);
+      return { ok: true, id };
+    }
     const updates: string[] = [];
     const values: unknown[] = [];
     if (body.min_km !== undefined) { updates.push('min_km = ?'); values.push(body.min_km); }
@@ -75,12 +150,33 @@ export class DmChargesService {
   }
 
   async deleteSlab(id: number) {
+    if (this.useMongo()) {
+      await this.mongo.deleteOne('dm_distance_slabs', { mysql_id: Number(id) });
+      return { ok: true, id };
+    }
     await this.prisma.$executeRawUnsafe('DELETE FROM dm_distance_slabs WHERE id = ?', id);
     return { ok: true, id };
   }
 
   // ── Surcharges ───────────────────────────────────────────────────
   async listSurcharges() {
+    if (this.useMongo()) {
+      const docs = await this.mongo.findMany<MongoSurchargeDoc>(
+        'dm_surcharges',
+        {},
+        { sort: { surcharge_type: 1, mysql_id: 1 } },
+      );
+      return docs.map((r) => ({
+        id: Number(r.mysql_id),
+        surcharge_type: r.surcharge_type,
+        label: r.label,
+        config_json: typeof r.config_json === 'string' ? JSON.parse(r.config_json) : r.config_json,
+        surcharge_type_value: r.surcharge_type_value,
+        amount: Number(r.amount),
+        status: !!r.status,
+        effective_from: r.effective_from ?? null,
+      }));
+    }
     const rows = await this.prisma.$queryRawUnsafe<SurchargeRow[]>(
       `SELECT id, surcharge_type, label, config_json, surcharge_type_value, amount, status, effective_from
        FROM dm_surcharges ORDER BY surcharge_type ASC, id ASC`,
@@ -99,6 +195,23 @@ export class DmChargesService {
     if (!body.surcharge_type || !body.label || body.config_json === undefined || body.config_json === null) {
       throw new BadRequestException({ errors: [{ code: 'body', message: 'type/label/config_json required' }] });
     }
+    if (this.useMongo()) {
+      const nextId = await this.mongo.nextMysqlId('dm_surcharges');
+      const now = new Date();
+      await this.mongo.insertOne('dm_surcharges', {
+        mysql_id: nextId,
+        surcharge_type: body.surcharge_type,
+        label: body.label,
+        config_json: body.config_json,
+        surcharge_type_value: body.surcharge_type_value ?? 'fixed',
+        amount: body.amount,
+        status: 1,
+        effective_from: body.effective_from ? new Date(body.effective_from) : now,
+        created_at: now,
+        updated_at: now,
+      });
+      return { ok: true };
+    }
     await this.prisma.$executeRawUnsafe(
       `INSERT INTO dm_surcharges (surcharge_type, label, config_json, surcharge_type_value, amount, status, effective_from, created_at, updated_at)
        VALUES (?, ?, CAST(? AS JSON), ?, ?, 1, ?, NOW(), NOW())`,
@@ -110,6 +223,18 @@ export class DmChargesService {
   }
 
   async updateSurcharge(id: number, body: { label?: string; config_json?: unknown; surcharge_type_value?: 'fixed' | 'percentage'; amount?: number; status?: boolean }) {
+    if (this.useMongo()) {
+      const set: Record<string, unknown> = {};
+      if (body.label !== undefined) set.label = body.label;
+      if (body.config_json !== undefined) set.config_json = body.config_json;
+      if (body.surcharge_type_value !== undefined) set.surcharge_type_value = body.surcharge_type_value;
+      if (body.amount !== undefined) set.amount = body.amount;
+      if (body.status !== undefined) set.status = body.status ? 1 : 0;
+      if (!Object.keys(set).length) throw new BadRequestException({ errors: [{ code: 'body', message: 'no fields' }] });
+      set.updated_at = new Date();
+      await this.mongo.updateOne('dm_surcharges', { mysql_id: Number(id) }, set);
+      return { ok: true, id };
+    }
     const updates: string[] = [];
     const values: unknown[] = [];
     if (body.label !== undefined) { updates.push('label = ?'); values.push(body.label); }
@@ -125,6 +250,10 @@ export class DmChargesService {
   }
 
   async deleteSurcharge(id: number) {
+    if (this.useMongo()) {
+      await this.mongo.deleteOne('dm_surcharges', { mysql_id: Number(id) });
+      return { ok: true, id };
+    }
     await this.prisma.$executeRawUnsafe('DELETE FROM dm_surcharges WHERE id = ?', id);
     return { ok: true, id };
   }

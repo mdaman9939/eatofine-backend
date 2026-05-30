@@ -3,34 +3,7 @@ import { CompletionService } from './completion.service';
 export declare class CompletionController {
     private readonly svc;
     constructor(svc: CompletionService);
-    listInvoices(vendorId?: string, status?: string, limit?: string): Promise<{
-        id: number;
-        vendor_id: number;
-        restaurant_id: number | null;
-        gross_sales: number;
-        order_count: number;
-        commission_base: number;
-        ppo_base: number;
-        subscription_fee: number;
-        taxable_amount: number;
-        cgst: number;
-        sgst: number;
-        igst: number;
-        total_amount: number;
-        tds_amount: number;
-        net_payable: number;
-        invoice_number: string;
-        plan_type: string;
-        period_start: Date;
-        period_end: Date;
-        status: string;
-        notes: string | null;
-        issued_at: Date | null;
-        paid_at: Date | null;
-        created_at: Date | null;
-        vendor_name: string | null;
-        restaurant_name: string | null;
-    }[]>;
+    listInvoices(vendorId?: string, status?: string, limit?: string): Promise<import("./completion.service").InvoiceRow[]>;
     invoiceStats(): Promise<{
         draft: number;
         issued: number;
@@ -62,24 +35,7 @@ export declare class CompletionController {
         ok: boolean;
         id: number;
     }>;
-    listCreditNotes(status?: string, limit?: string): Promise<{
-        id: number;
-        order_id: number;
-        customer_id: number;
-        restaurant_id: number | null;
-        refund_amount: number;
-        tax_reversed: number;
-        delivery_reversed: number;
-        total_credit: number;
-        issued_by: number | null;
-        credit_note_number: string;
-        reason: string | null;
-        status: string;
-        notes: string | null;
-        created_at: Date | null;
-        customer_name: string | null;
-        restaurant_name: string | null;
-    }[]>;
+    listCreditNotes(status?: string, limit?: string): Promise<import("./completion.service").CreditNoteRow[]>;
     cnStats(): Promise<{
         issued: number;
         adjusted: number;
@@ -94,14 +50,14 @@ export declare class CompletionController {
     }>;
     listSettings(category?: string): Promise<{
         id: number;
-        min_value: number | null;
-        max_value: number | null;
         setting_key: string;
         setting_value: string;
         value_type: "string" | "bool" | "int" | "float" | "json";
         category: string;
         label: string;
         description: string | null;
+        min_value: number | null;
+        max_value: number | null;
         updated_at: Date | null;
     }[]>;
     updateSetting(req: AuthedRequest, key: string, body: {
@@ -112,17 +68,17 @@ export declare class CompletionController {
         value: string;
     }>;
     listFlags(status?: string, subjectType?: string, limit?: string): Promise<{
-        id: number;
-        subject_id: number;
         auto_triggered: boolean;
-        flagged_by: number | null;
-        resolved_by: number | null;
+        id: number;
         subject_type: "customer" | "vendor" | "delivery_man";
+        subject_id: number;
         subject_name: string | null;
         flag_type: string;
         severity: string;
         description: string | null;
         status: string;
+        flagged_by: number | null;
+        resolved_by: number | null;
         resolved_at: Date | null;
         resolution_notes: string | null;
         created_at: Date | null;
@@ -153,30 +109,7 @@ export declare class CompletionController {
         id: number;
         status: "investigating" | "resolved" | "dismissed";
     }>;
-    listPromos(status?: string, vendorId?: string, limit?: string): Promise<{
-        id: number;
-        vendor_id: number;
-        restaurant_id: number;
-        discount_value: number | null;
-        min_order_value: number | null;
-        max_discount: number | null;
-        total_uses: number;
-        reviewed_by: number | null;
-        vendor_name: string | null;
-        restaurant_name: string | null;
-        title: string;
-        description: string | null;
-        promo_type: string;
-        discount_type: string | null;
-        start_date: Date | null;
-        end_date: Date | null;
-        image_path: string | null;
-        target_audience: string;
-        status: string;
-        admin_remarks: string | null;
-        reviewed_at: Date | null;
-        created_at: Date | null;
-    }[]>;
+    listPromos(status?: string, vendorId?: string, limit?: string): Promise<import("./completion.service").VendorPromoRow[]>;
     promoStats(): Promise<Record<string, number>>;
     approvePromo(req: AuthedRequest, id: number, body: {
         remarks?: string;

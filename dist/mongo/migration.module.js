@@ -13,6 +13,7 @@ const migration_controller_1 = require("./migration.controller");
 const migration_service_1 = require("./migration.service");
 const generic_migration_service_1 = require("./generic-migration.service");
 const mongo_data_service_1 = require("./mongo-data.service");
+const seed_service_1 = require("./seed.service");
 const user_schema_1 = require("./schemas/user.schema");
 const vendor_schema_1 = require("./schemas/vendor.schema");
 const restaurant_schema_1 = require("./schemas/restaurant.schema");
@@ -41,8 +42,8 @@ exports.MigrationModule = MigrationModule = __decorate([
             ]),
         ],
         controllers: [migration_controller_1.MigrationController],
-        providers: [migration_service_1.MigrationService, generic_migration_service_1.GenericMigrationService, mongo_data_service_1.MongoDataService],
-        exports: [mongoose_1.MongooseModule, migration_service_1.MigrationService, generic_migration_service_1.GenericMigrationService, mongo_data_service_1.MongoDataService],
+        providers: [migration_service_1.MigrationService, generic_migration_service_1.GenericMigrationService, mongo_data_service_1.MongoDataService, seed_service_1.SeedService],
+        exports: [mongoose_1.MongooseModule, migration_service_1.MigrationService, generic_migration_service_1.GenericMigrationService, mongo_data_service_1.MongoDataService, seed_service_1.SeedService],
     })
 ], MigrationModule);
 //# sourceMappingURL=migration.module.js.map

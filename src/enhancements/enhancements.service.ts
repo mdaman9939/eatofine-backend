@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { MongoDataService } from '../mongo/mongo-data.service';
 
 // BRD enhancements: §5.1 Slab Plan + §5.3 GST Engine + §5.2 Invoices + §5.4 TDS.
 // New tables (business_plan_slabs, tax_master) are demo-time additions not yet
@@ -19,12 +20,133 @@ interface TaxRow {
   hsn_sac: string | null; status: number; configurable: number;
 }
 
+interface MongoSlabDoc {
+  mysql_id: number;
+  vendor_id: number | null;
+  min_order_value: number;
+  max_order_value: number;
+  fixed_charge: number;
+  extra_charge: number;
+  gst_rate: number;
+  gst_on_extra: number | boolean;
+  effective_from: Date | null;
+  status: number | boolean;
+  created_at: Date | null;
+}
+
+interface MongoTaxDoc {
+  mysql_id: number;
+  charge_head: string;
+  gst_rate: number;
+  cgst: number;
+  sgst: number;
+  igst: number;
+  hsn_sac: string | null;
+  status: number | boolean;
+  configurable: number | boolean;
+}
+
+interface MongoAdditionalChargeDoc {
+  mysql_id: number;
+  charge_head: string;
+  charge_type: 'fixed' | 'percentage';
+  amount: number;
+  gst_applicable: number | boolean;
+  gst_rate: number;
+  hsn_sac: string | null;
+  description: string | null;
+  status: number | boolean;
+}
+
+interface MongoTdsDoc {
+  mysql_id: number;
+  default_rate: number;
+  threshold: number;
+  section_code: string;
+  financial_year_start: Date | null;
+  status: number | boolean;
+  updated_by: string | null;
+  updated_at: Date | null;
+}
+
+interface MongoOrderDoc {
+  mysql_id: number;
+  mysql_user_id: number | null;
+  mysql_restaurant_id: number | null;
+  order_status: string;
+  payment_status: string;
+  payment_method: string | null;
+  order_amount: number;
+  delivery_charge: number;
+  total_tax_amount: number;
+  delivery_address: string | null;
+  delivered: Date | null;
+  created_at: Date | null;
+  created_at_legacy?: Date | null;
+}
+
+interface MongoOrderDetailDoc {
+  mysql_id: number;
+  order_id: number;
+  food_id: number | null;
+  price: number;
+  quantity: number;
+  tax_amount: number;
+  food_details: string | null;
+}
+
+interface MongoRestaurantDoc {
+  mysql_id: number;
+  name?: string | null;
+  address?: string | null;
+  mysql_vendor_id?: number | null;
+  comission?: number | null;
+}
+
+interface MongoUserDoc {
+  mysql_id: number;
+  f_name?: string | null;
+  l_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+}
+
 @Injectable()
 export class EnhancementsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mongo: MongoDataService,
+  ) {}
+
+  /** Feature flag — when "1"/"true"/"yes", reads/writes route to MongoDB. */
+  private useMongo(): boolean {
+    const v = (process.env.USE_MONGO_ENHANCEMENTS ?? '').toLowerCase();
+    return v === '1' || v === 'true' || v === 'yes';
+  }
 
   // ── BRD §5.1 — Slab Business Plan ────────────────────────────────
   async listSlabs(vendorId?: number) {
+    if (this.useMongo()) {
+      const filter: Record<string, unknown> = vendorId ? { vendor_id: Number(vendorId) } : { vendor_id: null };
+      const docs = await this.mongo.findMany<MongoSlabDoc>(
+        'business_plan_slabs',
+        filter,
+        { sort: { min_order_value: 1 } },
+      );
+      return docs.map((r) => ({
+        id: Number(r.mysql_id),
+        vendor_id: r.vendor_id != null ? Number(r.vendor_id) : null,
+        min_order_value: Number(r.min_order_value),
+        max_order_value: Number(r.max_order_value),
+        fixed_charge: Number(r.fixed_charge),
+        extra_charge: Number(r.extra_charge),
+        gst_rate: Number(r.gst_rate),
+        gst_on_extra: !!r.gst_on_extra,
+        effective_from: r.effective_from ?? null,
+        status: !!r.status,
+        created_at: r.created_at ?? null,
+      }));
+    }
     const rows = await this.prisma.$queryRawUnsafe<SlabRow[]>(
       `SELECT id, vendor_id, min_order_value, max_order_value, fixed_charge,
               extra_charge, gst_rate, gst_on_extra, effective_from, status, created_at
@@ -50,6 +172,24 @@ export class EnhancementsService {
     if (typeof body.min_order_value !== 'number' || typeof body.max_order_value !== 'number') {
       throw new BadRequestException({ errors: [{ code: 'body', message: 'min/max_order_value required' }] });
     }
+    if (this.useMongo()) {
+      const nextId = await this.mongo.nextMysqlId('business_plan_slabs');
+      const now = new Date();
+      await this.mongo.insertOne('business_plan_slabs', {
+        mysql_id: nextId,
+        vendor_id: body.vendor_id ?? null,
+        min_order_value: body.min_order_value,
+        max_order_value: body.max_order_value,
+        fixed_charge: body.fixed_charge,
+        extra_charge: body.extra_charge ?? 0,
+        gst_rate: body.gst_rate ?? 18,
+        gst_on_extra: body.gst_on_extra ? 1 : 0,
+        status: 1,
+        created_at: now,
+        updated_at: now,
+      });
+      return { ok: true };
+    }
     await this.prisma.$executeRawUnsafe(
       `INSERT INTO business_plan_slabs
        (vendor_id, min_order_value, max_order_value, fixed_charge, extra_charge, gst_rate, gst_on_extra, status, created_at, updated_at)
@@ -63,11 +203,23 @@ export class EnhancementsService {
   }
 
   async deleteSlab(id: number) {
+    if (this.useMongo()) {
+      await this.mongo.deleteOne('business_plan_slabs', { mysql_id: Number(id) });
+      return { ok: true, id };
+    }
     await this.prisma.$executeRawUnsafe(`DELETE FROM business_plan_slabs WHERE id = ?`, id);
     return { ok: true, id };
   }
 
   async toggleSlabStatus(id: number, status: boolean) {
+    if (this.useMongo()) {
+      await this.mongo.updateOne(
+        'business_plan_slabs',
+        { mysql_id: Number(id) },
+        { status: status ? 1 : 0, updated_at: new Date() },
+      );
+      return { ok: true, id, status };
+    }
     await this.prisma.$executeRawUnsafe(
       `UPDATE business_plan_slabs SET status = ?, updated_at = NOW() WHERE id = ?`,
       status ? 1 : 0, id,
@@ -77,6 +229,24 @@ export class EnhancementsService {
 
   // ── BRD §5.3 — Tax / GST Engine ──────────────────────────────────
   async listTaxes() {
+    if (this.useMongo()) {
+      const docs = await this.mongo.findMany<MongoTaxDoc>(
+        'tax_master',
+        {},
+        { sort: { mysql_id: 1 } },
+      );
+      return docs.map((r) => ({
+        id: Number(r.mysql_id),
+        charge_head: r.charge_head,
+        gst_rate: Number(r.gst_rate),
+        cgst: Number(r.cgst),
+        sgst: Number(r.sgst),
+        igst: Number(r.igst),
+        hsn_sac: r.hsn_sac ?? null,
+        status: !!r.status,
+        configurable: !!r.configurable,
+      }));
+    }
     const rows = await this.prisma.$queryRawUnsafe<TaxRow[]>(
       `SELECT id, charge_head, gst_rate, cgst, sgst, igst, hsn_sac, status, configurable
        FROM tax_master ORDER BY id ASC`,
@@ -94,6 +264,19 @@ export class EnhancementsService {
   }
 
   async updateTaxRate(id: number, body: { gst_rate?: number; cgst?: number; sgst?: number; igst?: number; hsn_sac?: string; status?: boolean }) {
+    if (this.useMongo()) {
+      const set: Record<string, unknown> = {};
+      if (body.gst_rate !== undefined) set.gst_rate = body.gst_rate;
+      if (body.cgst !== undefined) set.cgst = body.cgst;
+      if (body.sgst !== undefined) set.sgst = body.sgst;
+      if (body.igst !== undefined) set.igst = body.igst;
+      if (body.hsn_sac !== undefined) set.hsn_sac = body.hsn_sac;
+      if (body.status !== undefined) set.status = body.status ? 1 : 0;
+      if (!Object.keys(set).length) throw new BadRequestException({ errors: [{ code: 'body', message: 'no fields' }] });
+      set.updated_at = new Date();
+      await this.mongo.updateOne('tax_master', { mysql_id: Number(id) }, set);
+      return { ok: true, id };
+    }
     const updates: string[] = [];
     const values: unknown[] = [];
     if (body.gst_rate !== undefined) { updates.push('gst_rate = ?'); values.push(body.gst_rate); }
@@ -114,6 +297,24 @@ export class EnhancementsService {
 
   async createTax(body: { charge_head: string; gst_rate?: number; cgst?: number; sgst?: number; igst?: number; hsn_sac?: string; configurable?: boolean }) {
     if (!body.charge_head?.trim()) throw new BadRequestException({ errors: [{ code: 'charge_head', message: 'required' }] });
+    if (this.useMongo()) {
+      const nextId = await this.mongo.nextMysqlId('tax_master');
+      const now = new Date();
+      await this.mongo.insertOne('tax_master', {
+        mysql_id: nextId,
+        charge_head: body.charge_head.trim(),
+        gst_rate: body.gst_rate ?? 0,
+        cgst: body.cgst ?? 0,
+        sgst: body.sgst ?? 0,
+        igst: body.igst ?? 0,
+        hsn_sac: body.hsn_sac ?? null,
+        status: 1,
+        configurable: body.configurable ? 1 : 0,
+        created_at: now,
+        updated_at: now,
+      });
+      return { ok: true };
+    }
     await this.prisma.$executeRawUnsafe(
       `INSERT INTO tax_master (charge_head, gst_rate, cgst, sgst, igst, hsn_sac, status, configurable, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, 1, ?, NOW(), NOW())`,
@@ -124,6 +325,10 @@ export class EnhancementsService {
   }
 
   async deleteTax(id: number) {
+    if (this.useMongo()) {
+      await this.mongo.deleteOne('tax_master', { mysql_id: Number(id) });
+      return { ok: true, id };
+    }
     await this.prisma.$executeRawUnsafe('DELETE FROM tax_master WHERE id = ?', id);
     return { ok: true, id };
   }
@@ -134,6 +339,24 @@ export class EnhancementsService {
       id: number; charge_head: string; charge_type: 'fixed' | 'percentage';
       amount: number; gst_applicable: number; gst_rate: number;
       hsn_sac: string | null; description: string | null; status: number;
+    }
+    if (this.useMongo()) {
+      const docs = await this.mongo.findMany<MongoAdditionalChargeDoc>(
+        'additional_user_charges',
+        {},
+        { sort: { mysql_id: 1 } },
+      );
+      return docs.map((r) => ({
+        id: Number(r.mysql_id),
+        charge_head: r.charge_head,
+        charge_type: r.charge_type,
+        amount: Number(r.amount),
+        gst_applicable: !!r.gst_applicable,
+        gst_rate: Number(r.gst_rate),
+        hsn_sac: r.hsn_sac ?? null,
+        description: r.description ?? null,
+        status: !!r.status,
+      }));
     }
     const rows = await this.prisma.$queryRawUnsafe<Row[]>(
       `SELECT id, charge_head, charge_type, amount, gst_applicable, gst_rate, hsn_sac, description, status
@@ -152,6 +375,24 @@ export class EnhancementsService {
   async createAdditionalCharge(body: { charge_head: string; charge_type?: 'fixed' | 'percentage'; amount: number; gst_applicable?: boolean; gst_rate?: number; hsn_sac?: string; description?: string }) {
     if (!body.charge_head?.trim()) throw new BadRequestException({ errors: [{ code: 'charge_head', message: 'required' }] });
     if (typeof body.amount !== 'number') throw new BadRequestException({ errors: [{ code: 'amount', message: 'required' }] });
+    if (this.useMongo()) {
+      const nextId = await this.mongo.nextMysqlId('additional_user_charges');
+      const now = new Date();
+      await this.mongo.insertOne('additional_user_charges', {
+        mysql_id: nextId,
+        charge_head: body.charge_head.trim(),
+        charge_type: body.charge_type ?? 'fixed',
+        amount: body.amount,
+        gst_applicable: body.gst_applicable ? 1 : 0,
+        gst_rate: body.gst_rate ?? 0,
+        hsn_sac: body.hsn_sac ?? null,
+        description: body.description ?? null,
+        status: 1,
+        created_at: now,
+        updated_at: now,
+      });
+      return { ok: true };
+    }
     await this.prisma.$executeRawUnsafe(
       `INSERT INTO additional_user_charges (charge_head, charge_type, amount, gst_applicable, gst_rate, hsn_sac, description, status, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())`,
@@ -163,6 +404,21 @@ export class EnhancementsService {
   }
 
   async updateAdditionalCharge(id: number, body: { charge_head?: string; charge_type?: 'fixed' | 'percentage'; amount?: number; gst_applicable?: boolean; gst_rate?: number; hsn_sac?: string; description?: string; status?: boolean }) {
+    if (this.useMongo()) {
+      const set: Record<string, unknown> = {};
+      if (body.charge_head !== undefined) set.charge_head = body.charge_head;
+      if (body.charge_type !== undefined) set.charge_type = body.charge_type;
+      if (body.amount !== undefined) set.amount = body.amount;
+      if (body.gst_applicable !== undefined) set.gst_applicable = body.gst_applicable ? 1 : 0;
+      if (body.gst_rate !== undefined) set.gst_rate = body.gst_rate;
+      if (body.hsn_sac !== undefined) set.hsn_sac = body.hsn_sac;
+      if (body.description !== undefined) set.description = body.description;
+      if (body.status !== undefined) set.status = body.status ? 1 : 0;
+      if (!Object.keys(set).length) throw new BadRequestException({ errors: [{ code: 'body', message: 'no fields' }] });
+      set.updated_at = new Date();
+      await this.mongo.updateOne('additional_user_charges', { mysql_id: Number(id) }, set);
+      return { ok: true, id };
+    }
     const updates: string[] = [];
     const values: unknown[] = [];
     if (body.charge_head !== undefined) { updates.push('charge_head = ?'); values.push(body.charge_head); }
@@ -181,6 +437,10 @@ export class EnhancementsService {
   }
 
   async deleteAdditionalCharge(id: number) {
+    if (this.useMongo()) {
+      await this.mongo.deleteOne('additional_user_charges', { mysql_id: Number(id) });
+      return { ok: true, id };
+    }
     await this.prisma.$executeRawUnsafe('DELETE FROM additional_user_charges WHERE id = ?', id);
     return { ok: true, id };
   }
@@ -188,6 +448,25 @@ export class EnhancementsService {
   // ── §4.1 — TDS settings ──────────────────────────────────────────
   async getTdsSettings() {
     interface Row { id: number; default_rate: number; threshold: number; section_code: string; financial_year_start: Date; status: number; updated_by: string | null; updated_at: Date | null }
+    if (this.useMongo()) {
+      const docs = await this.mongo.findMany<MongoTdsDoc>(
+        'tds_settings',
+        {},
+        { sort: { mysql_id: 1 }, limit: 1 },
+      );
+      const r = docs[0];
+      if (!r) throw new NotFoundException({ errors: [{ code: 'tds_settings', message: 'no row — re-seed required' }] });
+      return {
+        id: Number(r.mysql_id),
+        default_rate: Number(r.default_rate),
+        threshold: Number(r.threshold),
+        section_code: r.section_code,
+        financial_year_start: r.financial_year_start as Date,
+        status: !!r.status,
+        updated_by: r.updated_by ?? null,
+        updated_at: r.updated_at ?? null,
+      };
+    }
     const rows = await this.prisma.$queryRawUnsafe<Row[]>(
       `SELECT id, default_rate, threshold, section_code, financial_year_start, status, updated_by, updated_at
        FROM tds_settings ORDER BY id ASC LIMIT 1`,
@@ -207,6 +486,26 @@ export class EnhancementsService {
   }
 
   async updateTdsSettings(body: { default_rate?: number; threshold?: number; section_code?: string; financial_year_start?: string; status?: boolean; updated_by?: string }) {
+    if (this.useMongo()) {
+      const set: Record<string, unknown> = {};
+      if (body.default_rate !== undefined) set.default_rate = body.default_rate;
+      if (body.threshold !== undefined) set.threshold = body.threshold;
+      if (body.section_code !== undefined) set.section_code = body.section_code;
+      if (body.financial_year_start !== undefined) set.financial_year_start = new Date(body.financial_year_start);
+      if (body.status !== undefined) set.status = body.status ? 1 : 0;
+      if (body.updated_by !== undefined) set.updated_by = body.updated_by;
+      if (!Object.keys(set).length) throw new BadRequestException({ errors: [{ code: 'body', message: 'no fields' }] });
+      set.updated_at = new Date();
+      const top = await this.mongo.findMany<MongoTdsDoc>(
+        'tds_settings',
+        {},
+        { sort: { mysql_id: 1 }, limit: 1 },
+      );
+      if (top[0]) {
+        await this.mongo.updateOne('tds_settings', { mysql_id: Number(top[0].mysql_id) }, set);
+      }
+      return { ok: true };
+    }
     const updates: string[] = [];
     const values: unknown[] = [];
     if (body.default_rate !== undefined) { updates.push('default_rate = ?'); values.push(body.default_rate); }
@@ -226,6 +525,61 @@ export class EnhancementsService {
     if (typeof input.order_value !== 'number' || input.order_value <= 0) {
       throw new BadRequestException({ errors: [{ code: 'order_value', message: 'order_value > 0 required' }] });
     }
+
+    if (this.useMongo()) {
+      let slab: MongoSlabDoc | null = null;
+      if (input.vendor_id) {
+        slab = await this.mongo.findOne<MongoSlabDoc>('business_plan_slabs', {
+          vendor_id: Number(input.vendor_id),
+          status: { $in: [1, true] },
+          min_order_value: { $lte: input.order_value },
+          max_order_value: { $gte: input.order_value },
+        });
+      }
+      if (!slab) {
+        slab = await this.mongo.findOne<MongoSlabDoc>('business_plan_slabs', {
+          vendor_id: null,
+          status: { $in: [1, true] },
+          min_order_value: { $lte: input.order_value },
+          max_order_value: { $gte: input.order_value },
+        });
+      }
+      if (!slab) throw new NotFoundException({ errors: [{ code: 'slab', message: `No active slab matches order value ${input.order_value}` }] });
+
+      const fixed = Number(slab.fixed_charge);
+      const extra = Number(slab.extra_charge);
+      const gstRate = Number(slab.gst_rate);
+      const gstOnExtra = !!slab.gst_on_extra;
+      const baseCharge = fixed + extra;
+      const gstBase = gstOnExtra ? baseCharge : fixed;
+      const gstAmount = +(gstBase * (gstRate / 100)).toFixed(2);
+      const sameState = input.same_state !== false;
+      const cgst = sameState ? +(gstAmount / 2).toFixed(2) : 0;
+      const sgst = sameState ? +(gstAmount / 2).toFixed(2) : 0;
+      const igst = sameState ? 0 : gstAmount;
+      const totalDeduction = +(baseCharge + gstAmount).toFixed(2);
+      const vendorPayout = +(input.order_value - totalDeduction).toFixed(2);
+      return {
+        order_value: input.order_value,
+        matched_slab: {
+          id: Number(slab.mysql_id),
+          min_order_value: Number(slab.min_order_value),
+          max_order_value: Number(slab.max_order_value),
+          fixed_charge: fixed, extra_charge: extra,
+          gst_rate: gstRate, gst_on_extra: gstOnExtra,
+          vendor_id: slab.vendor_id != null ? Number(slab.vendor_id) : null,
+        },
+        breakdown: {
+          fixed_charge: fixed, extra_charge: extra,
+          base_charge: baseCharge,
+          gst_base: gstBase, gst_rate: gstRate, gst_amount: gstAmount,
+          cgst, sgst, igst, total_deduction: totalDeduction,
+        },
+        vendor_payout: vendorPayout,
+        tax_mode: sameState ? 'intra-state (CGST + SGST)' : 'inter-state (IGST)',
+      };
+    }
+
     let slab: SlabRow | undefined;
     if (input.vendor_id) {
       const v = await this.prisma.$queryRawUnsafe<SlabRow[]>(
@@ -281,6 +635,50 @@ export class EnhancementsService {
 
   // ── BRD §5.2 — Tax invoice list/detail ───────────────────────────
   async listInvoices(limit = 50, offset = 0) {
+    if (this.useMongo()) {
+      const orders = await this.mongo.findMany<MongoOrderDoc>(
+        'orders',
+        { order_status: 'delivered', payment_status: 'paid' },
+        { sort: { mysql_id: -1 }, limit, skip: offset },
+      );
+      const rIds = Array.from(new Set(orders.map((o) => Number(o.mysql_restaurant_id)).filter((n) => !isNaN(n))));
+      const uIds = Array.from(new Set(orders.map((o) => (o.mysql_user_id != null ? Number(o.mysql_user_id) : null)).filter((u): u is number => u !== null)));
+      const [rs, us] = await Promise.all([
+        rIds.length
+          ? this.mongo.findMany<MongoRestaurantDoc>('restaurants', { mysql_id: { $in: rIds } })
+          : Promise.resolve([] as MongoRestaurantDoc[]),
+        uIds.length
+          ? this.mongo.findMany<MongoUserDoc>('users', { mysql_id: { $in: uIds } })
+          : Promise.resolve([] as MongoUserDoc[]),
+      ]);
+      const rMap = new Map(rs.map((r) => [String(r.mysql_id), { id: BigInt(r.mysql_id), name: r.name ?? null }]));
+      const uMap = new Map(us.map((u) => [String(u.mysql_id), { id: BigInt(u.mysql_id), f_name: u.f_name ?? null, l_name: u.l_name ?? null, email: u.email ?? null }]));
+      return {
+        total: orders.length,
+        invoices: orders.map((o) => {
+          const orderAmount = Number(o.order_amount ?? 0);
+          const tax = Number(o.total_tax_amount ?? 0);
+          const delivery = Number(o.delivery_charge ?? 0);
+          const dt = (o.created_at_legacy ?? o.created_at) ?? new Date();
+          const month = String(dt.getMonth() + 1).padStart(2, '0');
+          const year = dt.getFullYear();
+          return {
+            invoice_no: `INV-${year}-${month}-${String(Number(o.mysql_id)).padStart(5, '0')}`,
+            order_id: Number(o.mysql_id),
+            issued_on: o.delivered ?? o.created_at_legacy ?? o.created_at,
+            customer: o.mysql_user_id != null ? uMap.get(String(Number(o.mysql_user_id))) ?? null : null,
+            restaurant: rMap.get(String(Number(o.mysql_restaurant_id))) ?? null,
+            subtotal: orderAmount - tax - delivery,
+            tax, delivery_charge: delivery, total: orderAmount,
+            cgst: +(tax / 2).toFixed(2),
+            sgst: +(tax / 2).toFixed(2),
+            igst: 0,
+            payment_method: o.payment_method,
+            status: 'GENERATED',
+          };
+        }),
+      };
+    }
     const orders = await this.prisma.orders.findMany({
       where: { order_status: 'delivered', payment_status: 'paid' },
       orderBy: { id: 'desc' }, take: limit, skip: offset,
@@ -321,6 +719,68 @@ export class EnhancementsService {
   }
 
   async getInvoice(orderId: number) {
+    if (this.useMongo()) {
+      const order = await this.mongo.findByMysqlId<MongoOrderDoc>('orders', orderId);
+      if (!order) throw new NotFoundException({ errors: [{ code: 'order', message: 'not found' }] });
+      const [items, restaurant, user] = await Promise.all([
+        this.mongo.findMany<MongoOrderDetailDoc>(
+          'order_details',
+          { order_id: Number(order.mysql_id) },
+          { sort: { mysql_id: 1 } },
+        ),
+        order.mysql_restaurant_id != null
+          ? this.mongo.findByMysqlId<MongoRestaurantDoc>('restaurants', Number(order.mysql_restaurant_id))
+          : Promise.resolve(null),
+        order.mysql_user_id != null
+          ? this.mongo.findByMysqlId<MongoUserDoc>('users', Number(order.mysql_user_id))
+          : Promise.resolve(null),
+      ]);
+      const orderAmount = Number(order.order_amount ?? 0);
+      const tax = Number(order.total_tax_amount ?? 0);
+      const delivery = Number(order.delivery_charge ?? 0);
+      const dt = (order.created_at_legacy ?? order.created_at) ?? new Date();
+      const month = String(dt.getMonth() + 1).padStart(2, '0');
+      const year = dt.getFullYear();
+      return {
+        invoice_no: `INV-${year}-${month}-${String(Number(order.mysql_id)).padStart(5, '0')}`,
+        issued_on: order.delivered ?? order.created_at_legacy ?? order.created_at,
+        bill_from: {
+          name: restaurant?.name ?? '—',
+          address: restaurant?.address ?? '—',
+          gstin: '29ABCDE1234F1Z5',
+          state: 'Delhi', state_code: '07',
+        },
+        bill_to: {
+          name: user ? `${user.f_name ?? ''} ${user.l_name ?? ''}`.trim() : 'Customer',
+          email: user?.email ?? null, phone: user?.phone ?? null,
+          address: order.delivery_address,
+        },
+        items: items.map((it) => {
+          let parsed: { name?: string } = {};
+          try { parsed = JSON.parse(it.food_details ?? '{}'); } catch { /* ignore */ }
+          return {
+            id: Number(it.mysql_id),
+            name: parsed.name ?? `Item #${it.food_id ?? '?'}`,
+            hsn: '996331',
+            qty: it.quantity,
+            unit_price: Number(it.price),
+            subtotal: Number(it.price) * Number(it.quantity),
+            tax: Number(it.tax_amount),
+          };
+        }),
+        summary: {
+          subtotal: orderAmount - tax - delivery,
+          delivery_charge: delivery,
+          tax_total: tax,
+          cgst: +(tax / 2).toFixed(2),
+          sgst: +(tax / 2).toFixed(2),
+          igst: 0,
+          grand_total: orderAmount,
+        },
+        payment_method: order.payment_method,
+        payment_status: order.payment_status,
+      };
+    }
     const order = await this.prisma.orders.findUnique({ where: { id: BigInt(orderId) } });
     if (!order) throw new NotFoundException({ errors: [{ code: 'order', message: 'not found' }] });
     const [items, restaurant, user] = await Promise.all([
@@ -382,6 +842,61 @@ export class EnhancementsService {
     catch { defaults = { default_rate: 2, threshold: 30000 }; }
     const rate = opts.rate ?? defaults.default_rate;
     const threshold = opts.threshold ?? defaults.threshold;
+
+    if (this.useMongo()) {
+      const match: Record<string, unknown> = { order_status: 'delivered', payment_status: 'paid' };
+      if (opts.vendor_id) {
+        const r = await this.mongo.findOne<MongoRestaurantDoc>('restaurants', { mysql_vendor_id: Number(opts.vendor_id) });
+        if (r) match.mysql_restaurant_id = Number(r.mysql_id);
+      }
+      const groups = await this.mongo.aggregate<{
+        _id: number;
+        total: number;
+        count: number;
+      }>('orders', [
+        { $match: match },
+        {
+          $group: {
+            _id: '$mysql_restaurant_id',
+            total: { $sum: '$order_amount' },
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { total: -1 } },
+      ]);
+      const rIds = groups.map((g) => Number(g._id)).filter((n) => !isNaN(n));
+      const restaurants = rIds.length
+        ? await this.mongo.findMany<MongoRestaurantDoc>('restaurants', { mysql_id: { $in: rIds } })
+        : [];
+      const rMap = new Map(restaurants.map((r) => [String(r.mysql_id), r]));
+      return {
+        tds_rate: rate, threshold,
+        rows: groups.map((g) => {
+          const r = rMap.get(String(Number(g._id)));
+          const grossPayout = Number(g.total ?? 0);
+          const commission = r?.comission !== null && r?.comission !== undefined ? Number(r.comission) : 0;
+          const adminCut = grossPayout * (commission / 100);
+          const netVendorPayout = grossPayout - adminCut;
+          const tdsApplies = netVendorPayout >= threshold;
+          const tdsAmount = tdsApplies ? +(netVendorPayout * (rate / 100)).toFixed(2) : 0;
+          const finalDisbursement = +(netVendorPayout - tdsAmount).toFixed(2);
+          return {
+            restaurant_id: Number(g._id),
+            restaurant: r?.name ?? null,
+            vendor_id: r?.mysql_vendor_id != null ? Number(r.mysql_vendor_id) : null,
+            orders: Number(g.count ?? 0),
+            gross_payout: grossPayout,
+            admin_commission_pct: commission,
+            admin_cut: +adminCut.toFixed(2),
+            net_vendor_payout: +netVendorPayout.toFixed(2),
+            tds_applies: tdsApplies,
+            tds_amount: tdsAmount,
+            final_disbursement: finalDisbursement,
+          };
+        }),
+      };
+    }
+
     const where: { order_status: string; payment_status: string; restaurant_id?: bigint } = {
       order_status: 'delivered', payment_status: 'paid',
     };

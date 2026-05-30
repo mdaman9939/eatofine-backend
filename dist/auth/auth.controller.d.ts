@@ -36,6 +36,10 @@ export declare class AuthController {
         password?: string;
     }): Promise<{
         token: string;
+        restaurant_id: number | null;
+        role: string;
+    } | {
+        token: string;
         restaurant_id: bigint | null;
         role: string;
     }>;

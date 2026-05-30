@@ -1,4 +1,5 @@
 import { PrismaService } from '../prisma/prisma.service';
+import { MongoDataService } from '../mongo/mongo-data.service';
 interface SurRow {
     id: number;
     surcharge_type: 'weekend' | 'festival' | 'late_night' | 'surge';
@@ -18,7 +19,9 @@ export interface UserApplicableSurcharge {
 }
 export declare class UserDeliveryChargesService {
     private readonly prisma;
-    constructor(prisma: PrismaService);
+    private readonly mongo;
+    constructor(prisma: PrismaService, mongo: MongoDataService);
+    private useMongo;
     listSlabs(): Promise<{
         id: number;
         min_km: number;
@@ -54,13 +57,13 @@ export declare class UserDeliveryChargesService {
     }>;
     listSurcharges(): Promise<{
         id: number;
+        surcharge_type: "weekend" | "festival" | "late_night" | "surge";
+        label: string;
+        config_json: any;
+        surcharge_type_value: "fixed" | "percentage" | "multiplier";
         amount: number;
         gst_rate: number;
         status: boolean;
-        config_json: any;
-        surcharge_type: "weekend" | "festival" | "late_night" | "surge";
-        label: string;
-        surcharge_type_value: "fixed" | "percentage" | "multiplier";
     }[]>;
     createSurcharge(body: {
         surcharge_type: SurRow['surcharge_type'];

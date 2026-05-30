@@ -1,7 +1,10 @@
 import { PrismaService } from '../prisma/prisma.service';
+import { MongoDataService } from '../mongo/mongo-data.service';
 export declare class EnhancementsService {
     private readonly prisma;
-    constructor(prisma: PrismaService);
+    private readonly mongo;
+    constructor(prisma: PrismaService, mongo: MongoDataService);
+    private useMongo;
     listSlabs(vendorId?: number): Promise<{
         id: number;
         vendor_id: number | null;
@@ -11,8 +14,8 @@ export declare class EnhancementsService {
         extra_charge: number;
         gst_rate: number;
         gst_on_extra: boolean;
-        status: boolean;
         effective_from: Date | null;
+        status: boolean;
         created_at: Date | null;
     }[]>;
     createSlab(body: {
@@ -37,14 +40,14 @@ export declare class EnhancementsService {
     }>;
     listTaxes(): Promise<{
         id: number;
+        charge_head: string;
         gst_rate: number;
         cgst: number;
         sgst: number;
         igst: number;
+        hsn_sac: string | null;
         status: boolean;
         configurable: boolean;
-        charge_head: string;
-        hsn_sac: string | null;
     }[]>;
     updateTaxRate(id: number, body: {
         gst_rate?: number;
@@ -74,14 +77,14 @@ export declare class EnhancementsService {
     }>;
     listAdditionalCharges(): Promise<{
         id: number;
-        amount: number;
-        gst_rate: number;
-        gst_applicable: boolean;
-        status: boolean;
         charge_head: string;
         charge_type: "fixed" | "percentage";
+        amount: number;
+        gst_applicable: boolean;
+        gst_rate: number;
         hsn_sac: string | null;
         description: string | null;
+        status: boolean;
     }[]>;
     createAdditionalCharge(body: {
         charge_head: string;
@@ -176,7 +179,7 @@ export declare class EnhancementsService {
             } | null;
             restaurant: {
                 id: bigint;
-                name: string;
+                name: string | null;
             } | null;
             subtotal: number;
             tax: number;

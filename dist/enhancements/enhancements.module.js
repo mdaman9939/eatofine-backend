@@ -12,11 +12,13 @@ const enhancements_controller_1 = require("./enhancements.controller");
 const enhancements_service_1 = require("./enhancements.service");
 const dm_charges_service_1 = require("./dm-charges.service");
 const user_delivery_charges_service_1 = require("./user-delivery-charges.service");
+const migration_module_1 = require("../mongo/migration.module");
 let EnhancementsModule = class EnhancementsModule {
 };
 exports.EnhancementsModule = EnhancementsModule;
 exports.EnhancementsModule = EnhancementsModule = __decorate([
     (0, common_1.Module)({
+        imports: [migration_module_1.MigrationModule],
         controllers: [enhancements_controller_1.EnhancementsController],
         providers: [enhancements_service_1.EnhancementsService, dm_charges_service_1.DmChargesService, user_delivery_charges_service_1.UserDeliveryChargesService],
     })

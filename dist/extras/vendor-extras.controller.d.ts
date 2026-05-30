@@ -1,8 +1,11 @@
 import type { AuthedRequest } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
+import { MongoDataService } from '../mongo/mongo-data.service';
 export declare class VendorExtrasController {
     private readonly prisma;
-    constructor(prisma: PrismaService);
+    private readonly mongo;
+    constructor(prisma: PrismaService, mongo: MongoDataService);
+    private useMongo;
     profile(req: AuthedRequest): Promise<{
         id?: undefined;
         f_name?: undefined;
@@ -14,23 +17,23 @@ export declare class VendorExtrasController {
         restaurants?: undefined;
     } | {
         id: number;
-        f_name: string;
+        f_name: string | null;
         l_name: string | null;
-        email: string;
-        phone: string;
+        email: string | null;
+        phone: string | null;
         image: string | null;
         status: boolean | null;
         restaurants: {
             id: number;
+            name: string | null;
+            logo: string | null;
+            status: boolean | null;
+            address: string | null;
+            phone: string | null;
             comission: number | null;
             minimum_order: number;
-            name: string;
-            status: boolean;
-            logo: string | null;
-            address: string | null;
-            phone: string;
-            take_away: boolean;
-            delivery: boolean;
+            delivery: boolean | null;
+            take_away: boolean | null;
             restaurant_model: string | null;
         }[];
     }>;
@@ -76,9 +79,18 @@ export declare class VendorExtrasController {
         user_id: number | null;
         restaurant_id: number;
         order_amount: number;
+        mysql_id: number;
+        mysql_user_id?: number | null;
+        mysql_restaurant_id?: number | null;
+        order_status?: string | null;
+        legacy?: Record<string, unknown>;
+    }[] | {
+        id: number;
+        user_id: number | null;
+        restaurant_id: number;
+        order_amount: number;
         created_at: Date | null;
         updated_at: Date | null;
-        distance: number | null;
         zone_id: bigint | null;
         cutlery: boolean;
         vehicle_id: bigint | null;
@@ -94,6 +106,11 @@ export declare class VendorExtrasController {
         restaurant_discount_amount: import("@prisma/client/runtime/library").Decimal;
         delivered: Date | null;
         delivery_man_id: bigint | null;
+        confirmed: Date | null;
+        processing: Date | null;
+        canceled: Date | null;
+        handover: Date | null;
+        distance: number | null;
         cancellation_note: string | null;
         tax_type: string | null;
         is_guest: boolean;
@@ -109,11 +126,7 @@ export declare class VendorExtrasController {
         callback: string | null;
         otp: string | null;
         accepted: Date | null;
-        confirmed: Date | null;
-        processing: Date | null;
-        handover: Date | null;
         picked_up: Date | null;
-        canceled: Date | null;
         refund_requested: Date | null;
         refunded: Date | null;
         delivery_address: string | null;
@@ -149,9 +162,21 @@ export declare class VendorExtrasController {
             user_id: number | null;
             restaurant_id: number;
             order_amount: number;
+            mysql_id: number;
+            mysql_user_id?: number | null;
+            mysql_restaurant_id?: number | null;
+            order_status?: string | null;
+            legacy?: Record<string, unknown>;
+        }[];
+        total_size: number;
+    } | {
+        orders: {
+            id: number;
+            user_id: number | null;
+            restaurant_id: number;
+            order_amount: number;
             created_at: Date | null;
             updated_at: Date | null;
-            distance: number | null;
             zone_id: bigint | null;
             cutlery: boolean;
             vehicle_id: bigint | null;
@@ -167,6 +192,11 @@ export declare class VendorExtrasController {
             restaurant_discount_amount: import("@prisma/client/runtime/library").Decimal;
             delivered: Date | null;
             delivery_man_id: bigint | null;
+            confirmed: Date | null;
+            processing: Date | null;
+            canceled: Date | null;
+            handover: Date | null;
+            distance: number | null;
             cancellation_note: string | null;
             tax_type: string | null;
             is_guest: boolean;
@@ -182,11 +212,7 @@ export declare class VendorExtrasController {
             callback: string | null;
             otp: string | null;
             accepted: Date | null;
-            confirmed: Date | null;
-            processing: Date | null;
-            handover: Date | null;
             picked_up: Date | null;
-            canceled: Date | null;
             refund_requested: Date | null;
             refunded: Date | null;
             delivery_address: string | null;
@@ -223,9 +249,18 @@ export declare class VendorExtrasController {
         user_id: number | null;
         restaurant_id: number;
         order_amount: number;
+        mysql_id: number;
+        mysql_user_id?: number | null;
+        mysql_restaurant_id?: number | null;
+        order_status?: string | null;
+        legacy?: Record<string, unknown>;
+    } | {
+        id: number;
+        user_id: number | null;
+        restaurant_id: number;
+        order_amount: number;
         created_at: Date | null;
         updated_at: Date | null;
-        distance: number | null;
         zone_id: bigint | null;
         cutlery: boolean;
         vehicle_id: bigint | null;
@@ -241,6 +276,11 @@ export declare class VendorExtrasController {
         restaurant_discount_amount: import("@prisma/client/runtime/library").Decimal;
         delivered: Date | null;
         delivery_man_id: bigint | null;
+        confirmed: Date | null;
+        processing: Date | null;
+        canceled: Date | null;
+        handover: Date | null;
+        distance: number | null;
         cancellation_note: string | null;
         tax_type: string | null;
         is_guest: boolean;
@@ -256,11 +296,7 @@ export declare class VendorExtrasController {
         callback: string | null;
         otp: string | null;
         accepted: Date | null;
-        confirmed: Date | null;
-        processing: Date | null;
-        handover: Date | null;
         picked_up: Date | null;
-        canceled: Date | null;
         refund_requested: Date | null;
         refunded: Date | null;
         delivery_address: string | null;
@@ -308,6 +344,25 @@ export declare class VendorExtrasController {
             discount: number;
             restaurant_id: number;
             category_id: number | null;
+            mysql_id: number;
+            name?: string | null;
+            description?: string | null;
+            image?: string | null;
+            mysql_restaurant_id?: number | null;
+            mysql_category_id?: number | null;
+            legacy?: Record<string, unknown>;
+        }[];
+        total_size: number;
+        limit: number;
+        offset: number;
+    } | {
+        products: {
+            id: number;
+            price: number;
+            tax: number;
+            discount: number;
+            restaurant_id: number;
+            category_id: number | null;
             add_ons: string | null;
             attributes: string | null;
             variations: string | null;
@@ -341,6 +396,20 @@ export declare class VendorExtrasController {
         offset: number;
     }>;
     productDetails(idStr?: string): Promise<{
+        id: number;
+        price: number;
+        tax: number;
+        discount: number;
+        restaurant_id: number;
+        category_id: number | null;
+        mysql_id: number;
+        name?: string | null;
+        description?: string | null;
+        image?: string | null;
+        mysql_restaurant_id?: number | null;
+        mysql_category_id?: number | null;
+        legacy?: Record<string, unknown>;
+    } | {
         id: number;
         price: number;
         tax: number;
@@ -402,7 +471,7 @@ export declare class VendorExtrasController {
         food_id: number;
         user_id: number;
         comment: string | null;
-        rating: number;
+        rating: number | null;
         reply: string | null;
     }[]>;
     productReply(): {
@@ -413,21 +482,31 @@ export declare class VendorExtrasController {
     };
     categories(): Promise<{
         id: number;
-        name: string;
-        image: string;
-        status: boolean;
+        name: string | null;
+        image: string | null;
+        status: boolean | null;
     }[]>;
     childCategories(idStr?: string): Promise<{
         id: number;
-        name: string;
-        image: string;
-        status: boolean;
+        name: string | null;
+        image: string | null;
+        status: boolean | null;
     }[]>;
     categoryProducts(): {
         products: never[];
         total_size: number;
     };
     vendorAddons(req: AuthedRequest): Promise<{
+        id: number;
+        restaurant_id: number;
+        addon_category_id: number | null;
+        price: number;
+        mysql_id: number;
+        mysql_restaurant_id?: number | null;
+        mysql_addon_category_id?: number | null;
+        name?: string | null;
+        legacy?: Record<string, unknown>;
+    }[] | {
         id: number;
         restaurant_id: number;
         addon_category_id: number | null;
@@ -459,9 +538,9 @@ export declare class VendorExtrasController {
         id: number;
         f_name: string | null;
         l_name: string | null;
-        phone: string;
-        status: boolean;
-        application_status: import("@prisma/client").$Enums.delivery_men_application_status;
+        phone: string | null;
+        status: boolean | null;
+        application_status: string | null;
     }[] | {
         delivery_men: never[];
         total_size: number;
@@ -470,9 +549,9 @@ export declare class VendorExtrasController {
         id: number;
         f_name: string | null;
         l_name: string | null;
-        phone: string;
-        status: boolean;
-        application_status: import("@prisma/client").$Enums.delivery_men_application_status;
+        phone: string | null;
+        status: boolean | null;
+        application_status: string | null;
     }[] | {
         delivery_men: never[];
         total_size: number;
@@ -522,9 +601,9 @@ export declare class VendorExtrasController {
     };
     withdrawMethods(): Promise<{
         id: number;
-        method_name: string;
-        method_fields: string;
-        is_default: number;
+        method_name: string | null;
+        method_fields: {} | null;
+        is_default: number | boolean | null;
     }[]>;
     withdrawStore(): {
         message: string;
@@ -537,9 +616,9 @@ export declare class VendorExtrasController {
     };
     getWithdrawMethods(): Promise<{
         id: number;
-        method_name: string;
-        method_fields: string;
-        is_default: number;
+        method_name: string | null;
+        method_fields: {} | null;
+        is_default: number | boolean | null;
     }[]>;
     getWithdrawList(): {
         data: never[];
@@ -616,15 +695,23 @@ export declare class VendorExtrasController {
         id: number;
         restaurant_id: number;
         created_by_id: number;
+        mysql_id: number;
+        mysql_restaurant_id?: number | null;
+        mysql_created_by_id?: number | null;
+        legacy?: Record<string, unknown>;
+    }[] | {
+        id: number;
+        restaurant_id: number;
+        created_by_id: number;
         created_at: Date | null;
         updated_at: Date | null;
         status: import("@prisma/client").$Enums.advertisements_status;
         description: string | null;
         priority: number | null;
         title: string | null;
-        add_type: import("@prisma/client").$Enums.advertisements_add_type;
         start_date: Date;
         end_date: Date;
+        add_type: import("@prisma/client").$Enums.advertisements_add_type;
         pause_note: string | null;
         cancellation_note: string | null;
         cover_image: string | null;
@@ -670,6 +757,12 @@ export declare class VendorExtrasController {
         message: string;
     };
     schedule(req: AuthedRequest): Promise<{
+        id: number;
+        restaurant_id: number;
+        mysql_id: number;
+        mysql_restaurant_id?: number | null;
+        legacy?: Record<string, unknown>;
+    }[] | {
         id: number;
         restaurant_id: number;
         created_at: Date | null;

@@ -1,10 +1,30 @@
 import { Body, Controller, HttpCode, Post } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { MongoDataService } from '../mongo/mongo-data.service';
 
 // All authentication endpoints the apps call beyond login/signup.
 // For the demo these are stubs: forgot/verify/reset flows always succeed,
 // biometric flows acknowledge, registration endpoints are no-ops.
+//
+// Most of these endpoints touch Laravel framework-internal tables
+// (password_resets, phone_verifications, email_verifications) that we don't
+// migrate to MongoDB. The stub responses are identical regardless of backend,
+// so the `useMongo()` branches simply short-circuit with the same message
+// shape. PrismaService and MongoDataService are kept on the constructor so
+// individual flows can reach into `users` / `vendors` / `delivery_men` later
+// (e.g. to persist a real password reset) without touching the wiring again.
 @Controller('auth')
 export class AuthExtrasController {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mongo: MongoDataService,
+  ) {}
+
+  private useMongo(): boolean {
+    const v = (process.env.USE_MONGO_EXTRAS ?? '').toLowerCase();
+    return v === '1' || v === 'true' || v === 'yes';
+  }
+
   @Post('forgot-password')
   @HttpCode(200)
   forgot() { return { message: 'Reset link sent (demo)' }; }

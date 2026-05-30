@@ -3,9 +3,13 @@ generator client {
   binaryTargets = ["native", "windows"]
 }
 
+// NOTE: This datasource is here only because Prisma requires one to generate
+// the client. We do NOT actually use it — every service routes to MongoDB
+// via the USE_MONGO_* feature flags. The URL is hardcoded to a dummy so the
+// build doesn't need any DATABASE_URL env var to be set.
 datasource db {
   provider = "mysql"
-  url      = env("DATABASE_URL")
+  url      = "mysql://disabled:disabled@localhost:3306/disabled"
 }
 
 model account_transactions {

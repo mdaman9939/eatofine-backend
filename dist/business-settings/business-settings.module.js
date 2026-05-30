@@ -9,12 +9,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.BusinessSettingsModule = void 0;
 const common_1 = require("@nestjs/common");
 const business_settings_service_1 = require("./business-settings.service");
+const migration_module_1 = require("../mongo/migration.module");
 let BusinessSettingsModule = class BusinessSettingsModule {
 };
 exports.BusinessSettingsModule = BusinessSettingsModule;
 exports.BusinessSettingsModule = BusinessSettingsModule = __decorate([
     (0, common_1.Global)(),
     (0, common_1.Module)({
+        imports: [migration_module_1.MigrationModule],
         providers: [business_settings_service_1.BusinessSettingsService],
         exports: [business_settings_service_1.BusinessSettingsService],
     })

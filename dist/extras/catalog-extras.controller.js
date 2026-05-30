@@ -15,12 +15,45 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.CatalogExtrasController = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
+const mongo_data_service_1 = require("../mongo/mongo-data.service");
 let CatalogExtrasController = class CatalogExtrasController {
     prisma;
-    constructor(prisma) {
+    mongo;
+    constructor(prisma, mongo) {
         this.prisma = prisma;
+        this.mongo = mongo;
+    }
+    useMongo() {
+        const v = (process.env.USE_MONGO_EXTRAS ?? '').toLowerCase();
+        return v === '1' || v === 'true' || v === 'yes';
+    }
+    num(v) {
+        if (v === null || v === undefined || v === '')
+            return 0;
+        if (typeof v === 'number')
+            return Number.isFinite(v) ? v : 0;
+        if (typeof v === 'string')
+            return Number(v) || 0;
+        if (typeof v === 'object' && v !== null && 'toNumber' in v && typeof v.toNumber === 'function') {
+            return v.toNumber();
+        }
+        return Number(v) || 0;
     }
     async couponList() {
+        if (this.useMongo()) {
+            const rows = await this.mongo.findMany('coupons', { status: true }, { sort: { mysql_id: -1 } });
+            return rows.map((r) => ({
+                ...r,
+                id: Number(r.mysql_id),
+                restaurant_id: r.restaurant_id !== undefined && r.restaurant_id !== null
+                    ? Number(r.restaurant_id)
+                    : (r.mysql_restaurant_id !== undefined && r.mysql_restaurant_id !== null ? Number(r.mysql_restaurant_id) : null),
+                min_purchase: this.num(r.min_purchase),
+                max_discount: this.num(r.max_discount),
+                discount: this.num(r.discount),
+                total_uses: r.total_uses !== undefined && r.total_uses !== null ? Number(r.total_uses) : 0,
+            }));
+        }
         const rows = await this.prisma.coupons.findMany({
             where: { status: true },
             orderBy: { id: 'desc' },
@@ -38,6 +71,28 @@ let CatalogExtrasController = class CatalogExtrasController {
     async couponApply(code, amountStr) {
         if (!code)
             return { code: 'invalid', message: 'code required' };
+        if (this.useMongo()) {
+            const c = await this.mongo.findOne('coupons', { code, status: true });
+            if (!c)
+                return { code: 'invalid', message: 'coupon not found' };
+            const amount = parseFloat(amountStr ?? '0');
+            const minPurchase = this.num(c.min_purchase);
+            if (amount > 0 && amount < minPurchase) {
+                return { code: 'minimum', message: `Minimum purchase ₹${minPurchase}` };
+            }
+            let discount = c.discount_type === 'percentage' ? (amount * this.num(c.discount)) / 100 : this.num(c.discount);
+            const maxDiscount = this.num(c.max_discount);
+            if (maxDiscount > 0 && discount > maxDiscount)
+                discount = maxDiscount;
+            return {
+                code: 'valid',
+                title: c.title,
+                coupon_code: c.code,
+                discount,
+                min_purchase: minPurchase,
+                max_discount: maxDiscount,
+            };
+        }
         const c = await this.prisma.coupons.findFirst({ where: { code, status: true } });
         if (!c)
             return { code: 'invalid', message: 'coupon not found' };
@@ -63,6 +118,28 @@ let CatalogExtrasController = class CatalogExtrasController {
         const id = parseInt(idStr ?? '', 10);
         if (!Number.isFinite(id))
             return [];
+        if (this.useMongo()) {
+            const rows = await this.mongo.findMany('coupons', {
+                status: true,
+                $or: [
+                    { restaurant_id: id },
+                    { mysql_restaurant_id: id },
+                    { restaurant_id: null, coupon_type: 'default' },
+                    { mysql_restaurant_id: null, coupon_type: 'default' },
+                ],
+            }, { sort: { mysql_id: -1 } });
+            return rows.map((r) => ({
+                ...r,
+                id: Number(r.mysql_id),
+                restaurant_id: r.restaurant_id !== undefined && r.restaurant_id !== null
+                    ? Number(r.restaurant_id)
+                    : (r.mysql_restaurant_id !== undefined && r.mysql_restaurant_id !== null ? Number(r.mysql_restaurant_id) : null),
+                min_purchase: this.num(r.min_purchase),
+                max_discount: this.num(r.max_discount),
+                discount: this.num(r.discount),
+                total_uses: r.total_uses !== undefined && r.total_uses !== null ? Number(r.total_uses) : 0,
+            }));
+        }
         const rows = await this.prisma.coupons.findMany({
             where: { status: true, OR: [{ restaurant_id: BigInt(id) }, { restaurant_id: null, coupon_type: 'default' }] },
             orderBy: { id: 'desc' },
@@ -78,6 +155,10 @@ let CatalogExtrasController = class CatalogExtrasController {
         }));
     }
     async cuisineAlias() {
+        if (this.useMongo()) {
+            const rows = await this.mongo.findMany('cuisines', { status: true });
+            return rows.map((r) => ({ id: Number(r.mysql_id), name: r.name, image: r.image, slug: r.slug }));
+        }
         const rows = await this.prisma.cuisines.findMany({ where: { status: true } });
         return rows.map((r) => ({ id: Number(r.id), name: r.name, image: r.image, slug: r.slug }));
     }
@@ -88,10 +169,25 @@ let CatalogExtrasController = class CatalogExtrasController {
         return { restaurants: [], total_size: 0 };
     }
     async addonCategoryList() {
+        if (this.useMongo()) {
+            const rows = await this.mongo.findMany('addon_categories', { status: true });
+            return rows.map((r) => ({ id: Number(r.mysql_id), name: r.name, status: r.status, slug: r.slug }));
+        }
         const rows = await this.prisma.addon_categories.findMany({ where: { status: true } });
         return rows.map((r) => ({ id: Number(r.id), name: r.name, status: r.status, slug: r.slug }));
     }
     async basicCampaigns() {
+        if (this.useMongo()) {
+            const rows = await this.mongo.findMany('campaigns', { status: true }, { sort: { mysql_id: -1 } });
+            return rows.map((r) => ({
+                id: Number(r.mysql_id),
+                title: r.title,
+                description: r.description,
+                image: r.image,
+                start_date: r.start_date,
+                end_date: r.end_date,
+            }));
+        }
         const rows = await this.prisma.campaigns.findMany({ where: { status: true }, orderBy: { id: 'desc' } });
         return rows.map((r) => ({ id: Number(r.id), title: r.title, description: r.description, image: r.image, start_date: r.start_date, end_date: r.end_date }));
     }
@@ -99,6 +195,10 @@ let CatalogExtrasController = class CatalogExtrasController {
         const id = parseInt(idStr ?? '', 10);
         if (!Number.isFinite(id))
             return { campaign: null, restaurants: [] };
+        if (this.useMongo()) {
+            const c = await this.mongo.findByMysqlId('campaigns', id);
+            return { campaign: c ? { ...c, id: Number(c.mysql_id) } : null, restaurants: [] };
+        }
         const campaign = await this.prisma.campaigns.findUnique({ where: { id: BigInt(id) } });
         return { campaign: campaign ? { ...campaign, id: Number(campaign.id) } : null, restaurants: [] };
     }
@@ -106,6 +206,10 @@ let CatalogExtrasController = class CatalogExtrasController {
         return { campaigns: [], total_size: 0 };
     }
     async cashbackList() {
+        if (this.useMongo()) {
+            const rows = await this.mongo.findMany('cash_backs', {});
+            return rows.map((r) => ({ ...r, id: Number(r.mysql_id) }));
+        }
         const rows = await this.prisma.cash_backs.findMany();
         return rows.map((r) => ({ ...r, id: Number(r.id) }));
     }
@@ -113,6 +217,15 @@ let CatalogExtrasController = class CatalogExtrasController {
         return { cashback_amount: 0, message: 'no cashback' };
     }
     async offlinePaymentMethods() {
+        if (this.useMongo()) {
+            const rows = await this.mongo.findMany('offline_payment_methods', { $or: [{ status: 1 }, { status: true }] });
+            return rows.map((r) => ({
+                id: Number(r.mysql_id),
+                method_name: r.method_name,
+                method_fields: r.method_fields,
+                method_informations: r.method_informations,
+            }));
+        }
         const rows = await this.prisma.offline_payment_methods.findMany({ where: { status: 1 } });
         return rows.map((r) => ({
             id: Number(r.id),
@@ -126,6 +239,49 @@ let CatalogExtrasController = class CatalogExtrasController {
         const q = (name ?? '').trim();
         if (!q)
             return { products: { products: [] }, restaurants: { restaurants: [] } };
+        if (this.useMongo()) {
+            const escape = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const re = { $regex: escape, $options: 'i' };
+            const [products, restaurants] = await Promise.all([
+                this.mongo.findMany('foods', { name: re, status: true }, { limit }),
+                this.mongo.findMany('restaurants', { name: re, status: true }, { limit }),
+            ]);
+            return {
+                products: {
+                    total_size: products.length,
+                    limit,
+                    offset: 1,
+                    products: products.map((r) => ({
+                        ...r,
+                        id: Number(r.mysql_id),
+                        price: this.num(r.price),
+                        tax: this.num(r.tax),
+                        discount: this.num(r.discount),
+                        restaurant_id: Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0),
+                        category_id: r.mysql_category_id !== undefined && r.mysql_category_id !== null
+                            ? Number(r.mysql_category_id)
+                            : (r.category_id !== undefined && r.category_id !== null ? Number(r.category_id) : null),
+                    })),
+                },
+                restaurants: {
+                    total_size: restaurants.length,
+                    limit,
+                    offset: 1,
+                    restaurants: restaurants.map((r) => ({
+                        ...r,
+                        id: Number(r.mysql_id),
+                        zone_id: r.mysql_zone_id !== undefined && r.mysql_zone_id !== null
+                            ? Number(r.mysql_zone_id)
+                            : (r.zone_id !== undefined && r.zone_id !== null ? Number(r.zone_id) : null),
+                        vendor_id: Number(r.mysql_vendor_id ?? r.vendor_id ?? 0),
+                        tax: this.num(r.tax),
+                        minimum_order: this.num(r.minimum_order),
+                        minimum_shipping_charge: this.num(r.minimum_shipping_charge),
+                        comission: r.comission !== undefined && r.comission !== null ? this.num(r.comission) : null,
+                    })),
+                },
+            };
+        }
         const [products, restaurants] = await Promise.all([
             this.prisma.food.findMany({ where: { name: { contains: q }, status: true }, take: limit }),
             this.prisma.restaurants.findMany({ where: { name: { contains: q }, status: true }, take: limit }),
@@ -152,6 +308,20 @@ let CatalogExtrasController = class CatalogExtrasController {
         const id = parseInt(idStr ?? '', 10);
         if (!Number.isFinite(id))
             return [];
+        if (this.useMongo()) {
+            const rows = await this.mongo.findMany('reviews', { $or: [{ food_id: id }, { mysql_food_id: id }], status: true }, { sort: { mysql_id: -1 }, limit: 50 });
+            return rows.map((r) => ({
+                id: Number(r.mysql_id),
+                food_id: Number(r.food_id ?? r.mysql_food_id ?? 0),
+                user_id: Number(r.user_id ?? r.mysql_user_id ?? 0),
+                comment: r.comment,
+                rating: r.rating,
+                attachment: r.attachment,
+                created_at: r.created_at,
+                reply: r.reply,
+                reply_at: r.reply_at,
+            }));
+        }
         const rows = await this.prisma.reviews.findMany({ where: { food_id: BigInt(id), status: true }, orderBy: { id: 'desc' }, take: 50 });
         return rows.map((r) => ({
             id: Number(r.id),
@@ -169,6 +339,22 @@ let CatalogExtrasController = class CatalogExtrasController {
         return { message: 'review submitted' };
     }
     async recommendedMostReviewed() {
+        if (this.useMongo()) {
+            const rows = await this.mongo.findMany('foods', { status: true }, { sort: { order_count: -1 }, limit: 10 });
+            return {
+                products: rows.map((r) => ({
+                    ...r,
+                    id: Number(r.mysql_id),
+                    price: this.num(r.price),
+                    tax: this.num(r.tax),
+                    discount: this.num(r.discount),
+                    restaurant_id: Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0),
+                    category_id: r.mysql_category_id !== undefined && r.mysql_category_id !== null
+                        ? Number(r.mysql_category_id)
+                        : (r.category_id !== undefined && r.category_id !== null ? Number(r.category_id) : null),
+                })),
+            };
+        }
         const rows = await this.prisma.food.findMany({ where: { status: true }, orderBy: { rating_count: 'desc' }, take: 10 });
         return { products: rows.map((r) => ({ ...r, id: Number(r.id), price: Number(r.price), tax: Number(r.tax), discount: Number(r.discount), restaurant_id: Number(r.restaurant_id), category_id: r.category_id ? Number(r.category_id) : null })) };
     }
@@ -176,6 +362,17 @@ let CatalogExtrasController = class CatalogExtrasController {
         const id = parseInt(idStr ?? '', 10);
         if (!Number.isFinite(id))
             return [];
+        if (this.useMongo()) {
+            const rows = await this.mongo.findMany('reviews', { $or: [{ restaurant_id: id }, { mysql_restaurant_id: id }], status: true }, { sort: { mysql_id: -1 }, limit: 50 });
+            return rows.map((r) => ({
+                id: Number(r.mysql_id),
+                food_id: Number(r.food_id ?? r.mysql_food_id ?? 0),
+                user_id: Number(r.user_id ?? r.mysql_user_id ?? 0),
+                comment: r.comment,
+                rating: r.rating,
+                created_at: r.created_at,
+            }));
+        }
         const rows = await this.prisma.reviews.findMany({ where: { restaurant_id: BigInt(id), status: true }, orderBy: { id: 'desc' }, take: 50 });
         return rows.map((r) => ({
             id: Number(r.id),
@@ -193,18 +390,39 @@ let CatalogExtrasController = class CatalogExtrasController {
         return [];
     }
     async advertisementList() {
+        if (this.useMongo()) {
+            const rows = await this.mongo.findMany('advertisements', { status: 'approved' }, { sort: { priority: 1 }, limit: 20 });
+            return rows.map((r) => ({
+                ...r,
+                id: Number(r.mysql_id),
+                restaurant_id: Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0),
+                created_by_id: Number(r.mysql_created_by_id ?? r.created_by_id ?? 0),
+            }));
+        }
         const rows = await this.prisma.advertisements.findMany({ where: { status: 'approved' }, orderBy: { priority: 'asc' }, take: 20 });
         return rows.map((r) => ({ ...r, id: Number(r.id), restaurant_id: Number(r.restaurant_id), created_by_id: Number(r.created_by_id) }));
     }
     async allergies() {
+        if (this.useMongo()) {
+            const rows = await this.mongo.findMany('allergies', {});
+            return rows.map((r) => ({ ...r, id: Number(r.mysql_id) }));
+        }
         const rows = await this.prisma.allergies.findMany();
         return rows.map((r) => ({ ...r, id: Number(r.id) }));
     }
     async nutritions() {
+        if (this.useMongo()) {
+            const rows = await this.mongo.findMany('nutritions', {});
+            return rows.map((r) => ({ ...r, id: Number(r.mysql_id) }));
+        }
         const rows = await this.prisma.nutritions.findMany();
         return rows.map((r) => ({ ...r, id: Number(r.id) }));
     }
     async vehicles() {
+        if (this.useMongo()) {
+            const rows = await this.mongo.findMany('vehicles', { status: true });
+            return rows.map((r) => ({ ...r, id: Number(r.mysql_id) }));
+        }
         const rows = await this.prisma.vehicles.findMany({ where: { status: true } });
         return rows.map((r) => ({ ...r, id: Number(r.id) }));
     }
@@ -215,6 +433,10 @@ let CatalogExtrasController = class CatalogExtrasController {
         return [10, 20, 30, 50, 100];
     }
     async dmShifts() {
+        if (this.useMongo()) {
+            const rows = await this.mongo.findMany('shifts', { status: true });
+            return rows.map((r) => ({ ...r, id: Number(r.mysql_id) }));
+        }
         const rows = await this.prisma.shifts.findMany({ where: { status: true } });
         return rows.map((r) => ({ ...r, id: Number(r.id) }));
     }
@@ -413,6 +635,7 @@ __decorate([
 ], CatalogExtrasController.prototype, "newsletter", null);
 exports.CatalogExtrasController = CatalogExtrasController = __decorate([
     (0, common_1.Controller)(),
-    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        mongo_data_service_1.MongoDataService])
 ], CatalogExtrasController);
 //# sourceMappingURL=catalog-extras.controller.js.map

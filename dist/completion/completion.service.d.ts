@@ -1,40 +1,90 @@
 import { PrismaService } from '../prisma/prisma.service';
+import { MongoDataService } from '../mongo/mongo-data.service';
 type SettingType = 'int' | 'float' | 'string' | 'bool' | 'json';
+export interface InvoiceRow {
+    id: number;
+    invoice_number: string;
+    vendor_id: number;
+    restaurant_id: number | null;
+    plan_type: string;
+    period_start: Date;
+    period_end: Date;
+    gross_sales: number;
+    order_count: number;
+    commission_base: number;
+    ppo_base: number;
+    subscription_fee: number;
+    taxable_amount: number;
+    cgst: number;
+    sgst: number;
+    igst: number;
+    total_amount: number;
+    tds_amount: number;
+    net_payable: number;
+    status: string;
+    notes: string | null;
+    issued_at: Date | null;
+    paid_at: Date | null;
+    created_at: Date | null;
+    vendor_name: string | null;
+    restaurant_name: string | null;
+}
+export interface CreditNoteRow {
+    id: number;
+    credit_note_number: string;
+    order_id: number;
+    customer_id: number;
+    restaurant_id: number | null;
+    reason: string | null;
+    refund_amount: number;
+    tax_reversed: number;
+    delivery_reversed: number;
+    total_credit: number;
+    status: string;
+    notes: string | null;
+    issued_by: number | null;
+    created_at: Date | null;
+    customer_name: string | null;
+    restaurant_name: string | null;
+}
+export interface VendorPromoRow {
+    id: number;
+    vendor_id: number;
+    restaurant_id: number;
+    vendor_name: string | null;
+    restaurant_name: string | null;
+    title: string;
+    description: string | null;
+    promo_type: string;
+    discount_type: string | null;
+    discount_value: number | null;
+    min_order_value: number | null;
+    max_discount: number | null;
+    start_date: Date | null;
+    end_date: Date | null;
+    image_path: string | null;
+    target_audience: string;
+    status: string;
+    admin_remarks: string | null;
+    reviewed_by: number | null;
+    reviewed_at: Date | null;
+    total_uses: number;
+    created_at: Date | null;
+}
 export declare class CompletionService {
     private readonly prisma;
-    constructor(prisma: PrismaService);
+    private readonly mongo;
+    constructor(prisma: PrismaService, mongo: MongoDataService);
+    private useMongo;
+    private vendorNameMongo;
+    private restaurantNameMongo;
+    private userNameMongo;
+    private subjectNameMongo;
     listInvoices(filters?: {
         vendorId?: number;
         status?: string;
         limit?: number;
-    }): Promise<{
-        id: number;
-        vendor_id: number;
-        restaurant_id: number | null;
-        gross_sales: number;
-        order_count: number;
-        commission_base: number;
-        ppo_base: number;
-        subscription_fee: number;
-        taxable_amount: number;
-        cgst: number;
-        sgst: number;
-        igst: number;
-        total_amount: number;
-        tds_amount: number;
-        net_payable: number;
-        invoice_number: string;
-        plan_type: string;
-        period_start: Date;
-        period_end: Date;
-        status: string;
-        notes: string | null;
-        issued_at: Date | null;
-        paid_at: Date | null;
-        created_at: Date | null;
-        vendor_name: string | null;
-        restaurant_name: string | null;
-    }[]>;
+    }): Promise<InvoiceRow[]>;
     getInvoiceStats(): Promise<{
         draft: number;
         issued: number;
@@ -64,24 +114,7 @@ export declare class CompletionService {
     listCreditNotes(filters?: {
         status?: string;
         limit?: number;
-    }): Promise<{
-        id: number;
-        order_id: number;
-        customer_id: number;
-        restaurant_id: number | null;
-        refund_amount: number;
-        tax_reversed: number;
-        delivery_reversed: number;
-        total_credit: number;
-        issued_by: number | null;
-        credit_note_number: string;
-        reason: string | null;
-        status: string;
-        notes: string | null;
-        created_at: Date | null;
-        customer_name: string | null;
-        restaurant_name: string | null;
-    }[]>;
+    }): Promise<CreditNoteRow[]>;
     createCreditNote(body: {
         order_id: number;
         refund_amount: number;
@@ -104,14 +137,14 @@ export declare class CompletionService {
     }>;
     listSettings(category?: string): Promise<{
         id: number;
-        min_value: number | null;
-        max_value: number | null;
         setting_key: string;
         setting_value: string;
         value_type: SettingType;
         category: string;
         label: string;
         description: string | null;
+        min_value: number | null;
+        max_value: number | null;
         updated_at: Date | null;
     }[]>;
     updateSetting(key: string, value: string, updatedBy?: number): Promise<{
@@ -124,17 +157,17 @@ export declare class CompletionService {
         subjectType?: string;
         limit?: number;
     }): Promise<{
-        id: number;
-        subject_id: number;
         auto_triggered: boolean;
-        flagged_by: number | null;
-        resolved_by: number | null;
+        id: number;
         subject_type: "customer" | "vendor" | "delivery_man";
+        subject_id: number;
         subject_name: string | null;
         flag_type: string;
         severity: string;
         description: string | null;
         status: string;
+        flagged_by: number | null;
+        resolved_by: number | null;
         resolved_at: Date | null;
         resolution_notes: string | null;
         created_at: Date | null;
@@ -173,30 +206,7 @@ export declare class CompletionService {
         status?: string;
         vendorId?: number;
         limit?: number;
-    }): Promise<{
-        id: number;
-        vendor_id: number;
-        restaurant_id: number;
-        discount_value: number | null;
-        min_order_value: number | null;
-        max_discount: number | null;
-        total_uses: number;
-        reviewed_by: number | null;
-        vendor_name: string | null;
-        restaurant_name: string | null;
-        title: string;
-        description: string | null;
-        promo_type: string;
-        discount_type: string | null;
-        start_date: Date | null;
-        end_date: Date | null;
-        image_path: string | null;
-        target_audience: string;
-        status: string;
-        admin_remarks: string | null;
-        reviewed_at: Date | null;
-        created_at: Date | null;
-    }[]>;
+    }): Promise<VendorPromoRow[]>;
     approvePromo(id: number, reviewerId: number, remarks?: string): Promise<{
         ok: boolean;
         id: number;

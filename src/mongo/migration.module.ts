@@ -4,6 +4,7 @@ import { MigrationController } from './migration.controller';
 import { MigrationService } from './migration.service';
 import { GenericMigrationService } from './generic-migration.service';
 import { MongoDataService } from './mongo-data.service';
+import { SeedService } from './seed.service';
 import { User, UserSchema } from './schemas/user.schema';
 import { Vendor, VendorSchema } from './schemas/vendor.schema';
 import { Restaurant, RestaurantSchema } from './schemas/restaurant.schema';
@@ -29,7 +30,7 @@ import { Banner, BannerSchema } from './schemas/banner.schema';
     ]),
   ],
   controllers: [MigrationController],
-  providers: [MigrationService, GenericMigrationService, MongoDataService],
-  exports: [MongooseModule, MigrationService, GenericMigrationService, MongoDataService],
+  providers: [MigrationService, GenericMigrationService, MongoDataService, SeedService],
+  exports: [MongooseModule, MigrationService, GenericMigrationService, MongoDataService, SeedService],
 })
 export class MigrationModule {}
