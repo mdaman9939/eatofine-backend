@@ -12,7 +12,9 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger: ['error', 'warn', 'log'],
   });
-  app.setGlobalPrefix('api/v1', { exclude: ['storage/(.*)'] });
+  // Root path `/` and `/health` are excluded so visiting the base URL of
+  // the deployed API shows a friendly status message instead of a 404.
+  app.setGlobalPrefix('api/v1', { exclude: ['/', 'health', 'storage/(.*)'] });
 
   // CORS — allow specific origins in production, anything in dev.
   const corsOrigins = (process.env.CORS_ORIGINS ?? '')

@@ -43,7 +43,7 @@ async function bootstrap() {
     const app = await core_1.NestFactory.create(app_module_1.AppModule, {
         logger: ['error', 'warn', 'log'],
     });
-    app.setGlobalPrefix('api/v1', { exclude: ['storage/(.*)'] });
+    app.setGlobalPrefix('api/v1', { exclude: ['/', 'health', 'storage/(.*)'] });
     const corsOrigins = (process.env.CORS_ORIGINS ?? '')
         .split(',')
         .map((s) => s.trim())

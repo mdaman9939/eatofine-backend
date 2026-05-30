@@ -1,6 +1,18 @@
-import { AppService } from './app.service';
 export declare class AppController {
-    private readonly appService;
-    constructor(appService: AppService);
-    getHello(): string;
+    root(): string;
+    health(): {
+        ok: boolean;
+        service: string;
+        database: string;
+        uptime_seconds: number;
+        timestamp: string;
+    };
+    apiRoot(): {
+        service: string;
+        version: string;
+        database: string;
+        status: string;
+        docs: string;
+    };
+    private formatUptime;
 }

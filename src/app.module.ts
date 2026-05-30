@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { ConfigModule as NestConfig } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { AppController } from './app.controller';
-import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { BusinessSettingsModule } from './business-settings/business-settings.module';
 import { ConfigModule } from './config/config.module';
@@ -42,6 +41,6 @@ import { MigrationModule } from './mongo/migration.module';
     MigrationModule,
   ],
   controllers: [AppController],
-  providers: [AppService, { provide: APP_GUARD, useClass: AuthGuard }],
+  providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
 })
 export class AppModule {}
