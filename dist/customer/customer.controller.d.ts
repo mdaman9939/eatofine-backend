@@ -1,0 +1,243 @@
+import type { AuthedRequest } from '../auth/auth.guard';
+import { AuthService } from '../auth/auth.service';
+import { CustomerService } from './customer.service';
+export declare class CustomerController {
+    private readonly customer;
+    private readonly auth;
+    constructor(customer: CustomerService, auth: AuthService);
+    info(req: AuthedRequest): Promise<{
+        id: number;
+        f_name: string | null;
+        l_name: string | null;
+        phone: string | null;
+        email: string | null;
+        image: string | null;
+        image_full_url: string | null;
+        is_phone_verified: number;
+        is_email_verified: number;
+        email_verified_at: string | Date | null;
+        auth_token: string | null;
+        created_at: string | Date | null;
+        updated_at: string | Date | null;
+        status: number;
+        order_count: number;
+        login_medium: string | null;
+        wallet_balance: number;
+        loyalty_point: number;
+        ref_code: string | null;
+        current_language_key: string | null;
+        userinfo: null;
+        member_since_days: number;
+        is_valid_for_discount: boolean;
+        discount_amount: number;
+        discount_amount_type: string;
+        validity: string;
+    } | {
+        id: bigint;
+        f_name: string | null;
+        l_name: string | null;
+        phone: string | null;
+        email: string | null;
+        image: string | null;
+        image_full_url: string | null;
+        is_phone_verified: number;
+        is_email_verified: number;
+        email_verified_at: Date | null;
+        auth_token: string | null;
+        created_at: Date | null;
+        updated_at: Date | null;
+        status: number;
+        order_count: number;
+        login_medium: string | null;
+        wallet_balance: number;
+        loyalty_point: number;
+        ref_code: string | null;
+        current_language_key: string | null;
+        userinfo: null;
+        member_since_days: number;
+        is_valid_for_discount: boolean;
+        discount_amount: number;
+        discount_amount_type: string;
+        validity: string;
+    }>;
+    addresses(req: AuthedRequest): Promise<{
+        total_size: number;
+        limit: number;
+        offset: number;
+        addresses: {
+            id: number;
+            address_type: string | null;
+            contact_person_number: string | null;
+            contact_person_name: string | null;
+            address: string | null;
+            latitude: string | null;
+            longitude: string | null;
+            user_id: number | null;
+            zone_id: number | null;
+            floor: string | null;
+            road: string | null;
+            house: string | null;
+            is_default: number;
+        }[];
+    } | {
+        total_size: number;
+        limit: number;
+        offset: number;
+        addresses: {
+            id: bigint;
+            address_type: string;
+            contact_person_number: string;
+            contact_person_name: string | null;
+            address: string | null;
+            latitude: string | null;
+            longitude: string | null;
+            user_id: bigint | null;
+            zone_id: bigint | null;
+            floor: string | null;
+            road: string | null;
+            house: string | null;
+            is_default: number;
+        }[];
+    }>;
+    addAddress(req: AuthedRequest, body: Parameters<CustomerService['addAddress']>[1]): Promise<{
+        message: string;
+        address_id: number;
+    } | {
+        message: string;
+        address_id: bigint;
+    }>;
+    cart(req: AuthedRequest, guestIdStr?: string): Promise<{
+        id: number;
+        user_id: number;
+        item_id: number;
+        is_guest: boolean;
+        item_type: string;
+        price: number;
+        quantity: number;
+        variations: unknown[];
+        variation_options: unknown[];
+        add_on_ids: unknown[];
+        add_on_qtys: unknown[];
+        created_at: string | null;
+        updated_at: string | null;
+        item: {
+            id: number;
+            name: string | null;
+            description: string | null;
+            image: string | null;
+            image_full_url: string | null;
+            restaurant_id: number;
+            price: number;
+            veg: number;
+        } | null;
+    }[]>;
+    cartAdd(req: AuthedRequest, body: Parameters<CustomerService['addToCart']>[1], guestIdStr?: string): Promise<{
+        id: number;
+        user_id: number;
+        item_id: number;
+        is_guest: boolean;
+        item_type: string;
+        price: number;
+        quantity: number;
+        variations: unknown[];
+        variation_options: unknown[];
+        add_on_ids: unknown[];
+        add_on_qtys: unknown[];
+        created_at: string | null;
+        updated_at: string | null;
+        item: {
+            id: number;
+            name: string | null;
+            description: string | null;
+            image: string | null;
+            image_full_url: string | null;
+            restaurant_id: number;
+            price: number;
+            veg: number;
+        } | null;
+    }[] | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+    }>;
+    cartUpdate(req: AuthedRequest, body: {
+        cart_id?: number;
+        quantity?: number;
+    }, guestIdStr?: string): Promise<{
+        id: number;
+        user_id: number;
+        item_id: number;
+        is_guest: boolean;
+        item_type: string;
+        price: number;
+        quantity: number;
+        variations: unknown[];
+        variation_options: unknown[];
+        add_on_ids: unknown[];
+        add_on_qtys: unknown[];
+        created_at: string | null;
+        updated_at: string | null;
+        item: {
+            id: number;
+            name: string | null;
+            description: string | null;
+            image: string | null;
+            image_full_url: string | null;
+            restaurant_id: number;
+            price: number;
+            veg: number;
+        } | null;
+    }[]>;
+    cartRemoveItem(req: AuthedRequest, cartId: number, guestIdStr?: string): Promise<{
+        id: number;
+        user_id: number;
+        item_id: number;
+        is_guest: boolean;
+        item_type: string;
+        price: number;
+        quantity: number;
+        variations: unknown[];
+        variation_options: unknown[];
+        add_on_ids: unknown[];
+        add_on_qtys: unknown[];
+        created_at: string | null;
+        updated_at: string | null;
+        item: {
+            id: number;
+            name: string | null;
+            description: string | null;
+            image: string | null;
+            image_full_url: string | null;
+            restaurant_id: number;
+            price: number;
+            veg: number;
+        } | null;
+    }[]>;
+    cartClear(req: AuthedRequest, guestIdStr?: string): Promise<{
+        id: number;
+        user_id: number;
+        item_id: number;
+        is_guest: boolean;
+        item_type: string;
+        price: number;
+        quantity: number;
+        variations: unknown[];
+        variation_options: unknown[];
+        add_on_ids: unknown[];
+        add_on_qtys: unknown[];
+        created_at: string | null;
+        updated_at: string | null;
+        item: {
+            id: number;
+            name: string | null;
+            description: string | null;
+            image: string | null;
+            image_full_url: string | null;
+            restaurant_id: number;
+            price: number;
+            veg: number;
+        } | null;
+    }[]>;
+    private resolveCartIdentity;
+}

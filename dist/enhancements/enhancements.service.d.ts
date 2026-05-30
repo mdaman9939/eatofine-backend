@@ -1,0 +1,250 @@
+import { PrismaService } from '../prisma/prisma.service';
+export declare class EnhancementsService {
+    private readonly prisma;
+    constructor(prisma: PrismaService);
+    listSlabs(vendorId?: number): Promise<{
+        id: number;
+        vendor_id: number | null;
+        min_order_value: number;
+        max_order_value: number;
+        fixed_charge: number;
+        extra_charge: number;
+        gst_rate: number;
+        gst_on_extra: boolean;
+        status: boolean;
+        effective_from: Date | null;
+        created_at: Date | null;
+    }[]>;
+    createSlab(body: {
+        min_order_value: number;
+        max_order_value: number;
+        fixed_charge: number;
+        extra_charge?: number;
+        gst_rate?: number;
+        gst_on_extra?: boolean;
+        vendor_id?: number | null;
+    }): Promise<{
+        ok: boolean;
+    }>;
+    deleteSlab(id: number): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
+    toggleSlabStatus(id: number, status: boolean): Promise<{
+        ok: boolean;
+        id: number;
+        status: boolean;
+    }>;
+    listTaxes(): Promise<{
+        id: number;
+        gst_rate: number;
+        cgst: number;
+        sgst: number;
+        igst: number;
+        status: boolean;
+        configurable: boolean;
+        charge_head: string;
+        hsn_sac: string | null;
+    }[]>;
+    updateTaxRate(id: number, body: {
+        gst_rate?: number;
+        cgst?: number;
+        sgst?: number;
+        igst?: number;
+        hsn_sac?: string;
+        status?: boolean;
+    }): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
+    createTax(body: {
+        charge_head: string;
+        gst_rate?: number;
+        cgst?: number;
+        sgst?: number;
+        igst?: number;
+        hsn_sac?: string;
+        configurable?: boolean;
+    }): Promise<{
+        ok: boolean;
+    }>;
+    deleteTax(id: number): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
+    listAdditionalCharges(): Promise<{
+        id: number;
+        amount: number;
+        gst_rate: number;
+        gst_applicable: boolean;
+        status: boolean;
+        charge_head: string;
+        charge_type: "fixed" | "percentage";
+        hsn_sac: string | null;
+        description: string | null;
+    }[]>;
+    createAdditionalCharge(body: {
+        charge_head: string;
+        charge_type?: 'fixed' | 'percentage';
+        amount: number;
+        gst_applicable?: boolean;
+        gst_rate?: number;
+        hsn_sac?: string;
+        description?: string;
+    }): Promise<{
+        ok: boolean;
+    }>;
+    updateAdditionalCharge(id: number, body: {
+        charge_head?: string;
+        charge_type?: 'fixed' | 'percentage';
+        amount?: number;
+        gst_applicable?: boolean;
+        gst_rate?: number;
+        hsn_sac?: string;
+        description?: string;
+        status?: boolean;
+    }): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
+    deleteAdditionalCharge(id: number): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
+    getTdsSettings(): Promise<{
+        id: number;
+        default_rate: number;
+        threshold: number;
+        section_code: string;
+        financial_year_start: Date;
+        status: boolean;
+        updated_by: string | null;
+        updated_at: Date | null;
+    }>;
+    updateTdsSettings(body: {
+        default_rate?: number;
+        threshold?: number;
+        section_code?: string;
+        financial_year_start?: string;
+        status?: boolean;
+        updated_by?: string;
+    }): Promise<{
+        ok: boolean;
+    }>;
+    calculateOrderCharges(input: {
+        order_value: number;
+        vendor_id?: number;
+        same_state?: boolean;
+    }): Promise<{
+        order_value: number;
+        matched_slab: {
+            id: number;
+            min_order_value: number;
+            max_order_value: number;
+            fixed_charge: number;
+            extra_charge: number;
+            gst_rate: number;
+            gst_on_extra: boolean;
+            vendor_id: number | null;
+        };
+        breakdown: {
+            fixed_charge: number;
+            extra_charge: number;
+            base_charge: number;
+            gst_base: number;
+            gst_rate: number;
+            gst_amount: number;
+            cgst: number;
+            sgst: number;
+            igst: number;
+            total_deduction: number;
+        };
+        vendor_payout: number;
+        tax_mode: string;
+    }>;
+    listInvoices(limit?: number, offset?: number): Promise<{
+        total: number;
+        invoices: {
+            invoice_no: string;
+            order_id: number;
+            issued_on: Date | null;
+            customer: {
+                id: bigint;
+                f_name: string | null;
+                l_name: string | null;
+                email: string | null;
+            } | null;
+            restaurant: {
+                id: bigint;
+                name: string;
+            } | null;
+            subtotal: number;
+            tax: number;
+            delivery_charge: number;
+            total: number;
+            cgst: number;
+            sgst: number;
+            igst: number;
+            payment_method: string | null;
+            status: string;
+        }[];
+    }>;
+    getInvoice(orderId: number): Promise<{
+        invoice_no: string;
+        issued_on: Date | null;
+        bill_from: {
+            name: string;
+            address: string;
+            gstin: string;
+            state: string;
+            state_code: string;
+        };
+        bill_to: {
+            name: string;
+            email: string | null;
+            phone: string | null;
+            address: string | null;
+        };
+        items: {
+            id: number;
+            name: string;
+            hsn: string;
+            qty: number;
+            unit_price: number;
+            subtotal: number;
+            tax: number;
+        }[];
+        summary: {
+            subtotal: number;
+            delivery_charge: number;
+            tax_total: number;
+            cgst: number;
+            sgst: number;
+            igst: number;
+            grand_total: number;
+        };
+        payment_method: string | null;
+        payment_status: string;
+    }>;
+    tdsReport(opts: {
+        vendor_id?: number;
+        rate?: number;
+        threshold?: number;
+    }): Promise<{
+        tds_rate: number;
+        threshold: number;
+        rows: {
+            restaurant_id: number;
+            restaurant: string | null;
+            vendor_id: number | null;
+            orders: number;
+            gross_payout: number;
+            admin_commission_pct: number;
+            admin_cut: number;
+            net_vendor_payout: number;
+            tds_applies: boolean;
+            tds_amount: number;
+            final_disbursement: number;
+        }[];
+    }>;
+}

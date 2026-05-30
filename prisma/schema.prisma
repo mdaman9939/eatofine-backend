@@ -1,0 +1,2181 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "windows"]
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model account_transactions {
+  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  from_type       String
+  from_id         BigInt
+  current_balance Decimal   @db.Decimal(24, 2)
+  amount          Decimal   @db.Decimal(24, 2)
+  method          String
+  ref             String?
+  created_at      DateTime? @db.Timestamp(0)
+  updated_at      DateTime? @db.Timestamp(0)
+  type            String    @default("collected") @db.VarChar(20)
+  created_by      String    @default("admin") @db.VarChar(20)
+}
+
+model add_ons {
+  id                BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  name              String?
+  price             Decimal   @default(0.00) @db.Decimal(24, 2)
+  created_at        DateTime? @db.Timestamp(0)
+  updated_at        DateTime? @db.Timestamp(0)
+  restaurant_id     BigInt    @db.UnsignedBigInt
+  status            Boolean   @default(true)
+  stock_type        String    @default("unlimited") @db.VarChar(20)
+  addon_stock       Int       @default(0)
+  sell_count        Int       @default(0)
+  addon_category_id BigInt?   @db.UnsignedBigInt
+}
+
+model addon_categories {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  name       String    @db.VarChar(255)
+  status     Boolean   @default(true)
+  slug       String?   @db.VarChar(255)
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+}
+
+model addon_settings {
+  id              String    @id @db.Char(36)
+  key_name        String?
+  live_values     String?   @db.LongText
+  test_values     String?   @db.LongText
+  settings_type   String?   @db.VarChar(255)
+  mode            String    @default("live") @db.VarChar(20)
+  is_active       Boolean   @default(true)
+  created_at      DateTime? @db.Timestamp(0)
+  updated_at      DateTime? @db.Timestamp(0)
+  additional_data String?   @db.LongText
+
+  @@index([id], map: "payment_settings_id_index")
+}
+
+model admin_features {
+  id          BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  title       String?   @db.VarChar(100)
+  sub_title   String?   @db.VarChar(100)
+  description String?   @db.Text
+  image       String?   @db.VarChar(100)
+  status      Boolean   @default(true)
+  created_at  DateTime? @db.Timestamp(0)
+  updated_at  DateTime? @db.Timestamp(0)
+}
+
+model admin_roles {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  name       String    @db.VarChar(100)
+  modules    String?   @db.Text
+  status     Boolean   @default(true)
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model admin_special_criterias {
+  title  String? @db.VarChar(100)
+  image  String? @db.VarChar(100)
+  status Boolean @default(true)
+
+  @@ignore
+}
+
+model admin_testimonials {
+  id             BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  name           String?   @db.VarChar(100)
+  designation    String?   @db.VarChar(100)
+  review         String?   @db.Text
+  reviewer_image String?   @db.VarChar(255)
+  company_image  String?   @db.VarChar(255)
+  status         Boolean   @default(true)
+  created_at     DateTime? @db.Timestamp(0)
+  updated_at     DateTime? @db.Timestamp(0)
+}
+
+model admin_wallets {
+  id                       BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  admin_id                 BigInt    @db.UnsignedBigInt
+  total_commission_earning Decimal   @default(0.00) @db.Decimal(24, 2)
+  digital_received         Decimal   @default(0.00) @db.Decimal(24, 2)
+  manual_received          Decimal   @default(0.00) @db.Decimal(24, 2)
+  created_at               DateTime? @db.Timestamp(0)
+  updated_at               DateTime? @db.Timestamp(0)
+  delivery_charge          Decimal   @default(0.00) @db.Decimal(24, 2)
+}
+
+model admins {
+  id             BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  f_name         String?   @db.VarChar(100)
+  l_name         String?   @db.VarChar(100)
+  phone          String?   @db.VarChar(20)
+  email          String    @unique(map: "admins_email_unique") @db.VarChar(100)
+  image          String?   @db.VarChar(100)
+  password       String    @db.VarChar(100)
+  remember_token String?   @db.VarChar(100)
+  created_at     DateTime? @db.Timestamp(0)
+  updated_at     DateTime? @db.Timestamp(0)
+  role_id        BigInt    @db.UnsignedBigInt
+  zone_id        BigInt?   @db.UnsignedBigInt
+  is_logged_in   Boolean   @default(true)
+}
+
+model advertisements {
+  id                BigInt                  @id @default(autoincrement()) @db.UnsignedBigInt
+  restaurant_id     BigInt                  @db.UnsignedBigInt
+  add_type          advertisements_add_type @default(restaurant_promotion)
+  title             String?                 @db.VarChar(255)
+  description       String?                 @db.Text
+  start_date        DateTime                @db.Date
+  end_date          DateTime                @db.Date
+  pause_note        String?                 @db.Text
+  cancellation_note String?                 @db.Text
+  cover_image       String?                 @db.VarChar(255)
+  profile_image     String?                 @db.VarChar(255)
+  video_attachment  String?                 @db.VarChar(255)
+  priority          Int?
+  is_rating_active  Boolean                 @default(false)
+  is_review_active  Boolean                 @default(false)
+  is_paid           Boolean                 @default(false)
+  is_updated        Boolean                 @default(false)
+  created_by_id     BigInt                  @db.UnsignedBigInt
+  created_by_type   String                  @db.VarChar(255)
+  status            advertisements_status   @default(pending)
+  created_at        DateTime?               @db.Timestamp(0)
+  updated_at        DateTime?               @db.Timestamp(0)
+}
+
+model allergies {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  allergy    String    @db.VarChar(255)
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+}
+
+model allergy_food {
+  id         BigInt @id @default(autoincrement()) @db.UnsignedBigInt
+  food_id    BigInt @db.UnsignedBigInt
+  allergy_id BigInt @db.UnsignedBigInt
+}
+
+model allergy_item_campaign {
+  id               BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  item_campaign_id BigInt    @db.UnsignedBigInt
+  allergy_id       BigInt    @db.UnsignedBigInt
+  created_at       DateTime? @db.Timestamp(0)
+  updated_at       DateTime? @db.Timestamp(0)
+
+  @@index([allergy_id], map: "allergy_item_campaign_allergy_id_index")
+  @@index([item_campaign_id], map: "allergy_item_campaign_item_campaign_id_index")
+}
+
+model analytic_scripts {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  name       String    @db.VarChar(255)
+  type       String?   @db.VarChar(255)
+  script_id  String?   @db.Text
+  script     String?   @db.LongText
+  is_active  Boolean   @default(false)
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+}
+
+model attributes {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  name       String?   @db.VarChar(100)
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+}
+
+model banners {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  title      String
+  type       String
+  image      String?
+  status     Boolean   @default(true)
+  data       String
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+  zone_id    BigInt    @db.UnsignedBigInt
+}
+
+model business_settings {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  key        String
+  value      String?   @db.Text
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+}
+
+model cache {
+  key        String @id @db.VarChar(255)
+  value      String @db.MediumText
+  expiration Int
+}
+
+model cache_locks {
+  key        String @id @db.VarChar(255)
+  owner      String @db.VarChar(255)
+  expiration Int
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model campaign_restaurant {
+  campaign_id     BigInt  @db.UnsignedBigInt
+  restaurant_id   BigInt  @db.UnsignedBigInt
+  campaign_status String? @default("pending") @db.VarChar(10)
+
+  @@ignore
+}
+
+model campaigns {
+  id          BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  title       String?
+  image       String?   @db.VarChar(100)
+  description String?   @db.Text
+  status      Boolean   @default(true)
+  admin_id    BigInt?   @db.UnsignedBigInt
+  created_at  DateTime? @db.Timestamp(0)
+  updated_at  DateTime? @db.Timestamp(0)
+  start_date  DateTime? @db.Date
+  end_date    DateTime? @db.Date
+  start_time  DateTime? @db.Time(0)
+  end_time    DateTime? @db.Time(0)
+  slug        String?   @db.VarChar(255)
+}
+
+model carts {
+  id                BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  user_id           BigInt    @db.UnsignedBigInt
+  item_id           BigInt    @db.UnsignedBigInt
+  is_guest          Boolean   @default(false)
+  add_on_ids        String?   @db.Text
+  add_on_qtys       String?   @db.Text
+  item_type         String    @db.VarChar(255)
+  price             Float
+  quantity          Int
+  variations        String?   @db.Text
+  created_at        DateTime? @db.Timestamp(0)
+  updated_at        DateTime? @db.Timestamp(0)
+  variation_options String?   @db.Text
+}
+
+model cash_back_histories {
+  id                BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  cash_back_id      BigInt?   @db.UnsignedBigInt
+  order_id          BigInt?   @db.UnsignedBigInt
+  user_id           BigInt?   @db.UnsignedBigInt
+  cashback_type     String    @db.VarChar(255)
+  calculated_amount Float     @default(0.000)
+  cashback_amount   Float     @default(0.000)
+  min_purchase      Float     @default(0.000)
+  max_discount      Float     @default(0.000)
+  created_at        DateTime? @db.Timestamp(0)
+  updated_at        DateTime? @db.Timestamp(0)
+}
+
+model cash_backs {
+  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  title           String    @db.VarChar(255)
+  customer_id     String?   @default("[\"all\"]") @db.VarChar(255)
+  cashback_type   String    @db.VarChar(255)
+  same_user_limit Int       @default(1)
+  total_used      Int       @default(0)
+  cashback_amount Float     @default(0.000)
+  min_purchase    Float     @default(0.000)
+  max_discount    Float     @default(0.000)
+  start_date      DateTime? @db.Date
+  end_date        DateTime? @db.Date
+  status          Boolean   @default(true)
+  created_at      DateTime? @db.Timestamp(0)
+  updated_at      DateTime? @db.Timestamp(0)
+}
+
+model categories {
+  id               BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  name             String
+  image            String    @default("def.png")
+  parent_id        Int
+  position         Int
+  status           Boolean   @default(true)
+  created_at       DateTime? @db.Timestamp(0)
+  updated_at       DateTime? @db.Timestamp(0)
+  priority         Int       @default(0)
+  slug             String?   @db.VarChar(255)
+  meta_title       String?   @db.VarChar(100)
+  meta_description String?   @db.Text
+  meta_image       String?   @db.VarChar(100)
+  meta_data        String?   @db.LongText
+}
+
+model characteristic_restaurant {
+  id                BigInt @id @default(autoincrement()) @db.UnsignedBigInt
+  restaurant_id     BigInt @db.UnsignedBigInt
+  characteristic_id BigInt @db.UnsignedBigInt
+}
+
+model characteristics {
+  id             BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  characteristic String    @db.VarChar(255)
+  created_at     DateTime? @db.Timestamp(0)
+  updated_at     DateTime? @db.Timestamp(0)
+}
+
+model contact_messages {
+  id            BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  name          String    @db.VarChar(255)
+  email         String    @db.VarChar(255)
+  mobile_number String?   @db.VarChar(255)
+  subject       String?   @db.VarChar(255)
+  message       String    @db.Text
+  reply         String?   @db.Text
+  feedback      String?   @default("0") @db.VarChar(255)
+  seen          Boolean?  @default(false)
+  status        Boolean?  @default(true)
+  created_at    DateTime? @db.Timestamp(0)
+  updated_at    DateTime? @db.Timestamp(0)
+}
+
+model conversations {
+  id                   BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  sender_id            BigInt?   @db.UnsignedBigInt
+  created_at           DateTime? @db.Timestamp(0)
+  updated_at           DateTime? @db.Timestamp(0)
+  sender_type          String    @db.VarChar(255)
+  receiver_id          BigInt    @db.UnsignedBigInt
+  receiver_type        String    @db.VarChar(255)
+  last_message_id      BigInt?   @db.UnsignedBigInt
+  last_message_time    DateTime? @db.Timestamp(0)
+  unread_message_count Int       @default(0)
+}
+
+model coupons {
+  id            BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  title         String?
+  code          String?   @unique(map: "coupons_code_unique") @db.VarChar(100)
+  start_date    DateTime? @db.Date
+  expire_date   DateTime? @db.Date
+  min_purchase  Decimal   @default(0.00) @db.Decimal(24, 2)
+  max_discount  Decimal   @default(0.00) @db.Decimal(24, 2)
+  discount      Decimal   @default(0.00) @db.Decimal(24, 2)
+  discount_type String    @default("percentage") @db.VarChar(15)
+  coupon_type   String    @default("default")
+  limit         Int?
+  status        Boolean   @default(true)
+  created_at    DateTime? @db.Timestamp(0)
+  updated_at    DateTime? @db.Timestamp(0)
+  data          String?
+  total_uses    BigInt?   @default(0)
+  created_by    String?   @default("admin") @db.VarChar(50)
+  customer_id   String?   @default("[\"all\"]") @db.VarChar(255)
+  slug          String?   @db.VarChar(255)
+  restaurant_id BigInt?   @db.UnsignedBigInt
+}
+
+model cuisine_restaurant {
+  id            BigInt @id @default(autoincrement()) @db.UnsignedBigInt
+  restaurant_id BigInt @db.UnsignedBigInt
+  cuisine_id    BigInt @db.UnsignedBigInt
+}
+
+model cuisines {
+  id               BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  name             String    @db.VarChar(255)
+  image            String?   @db.VarChar(255)
+  status           Boolean   @default(true)
+  slug             String?   @db.VarChar(255)
+  created_at       DateTime? @db.Timestamp(0)
+  updated_at       DateTime? @db.Timestamp(0)
+  meta_title       String?   @db.VarChar(100)
+  meta_description String?   @db.Text
+  meta_image       String?   @db.VarChar(100)
+  meta_data        String?   @db.LongText
+}
+
+model currencies {
+  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  country         String?
+  currency_code   String?
+  currency_symbol String?
+  exchange_rate   Decimal?  @db.Decimal(8, 2)
+  created_at      DateTime? @db.Timestamp(0)
+  updated_at      DateTime? @db.Timestamp(0)
+}
+
+model customer_addresses {
+  id                    BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  address_type          String    @db.VarChar(100)
+  contact_person_number String    @db.VarChar(20)
+  address               String?   @db.Text
+  latitude              String?
+  longitude             String?
+  user_id               BigInt?   @db.UnsignedBigInt
+  contact_person_name   String?   @db.VarChar(100)
+  created_at            DateTime? @db.Timestamp(0)
+  updated_at            DateTime? @db.Timestamp(0)
+  zone_id               BigInt?   @db.UnsignedBigInt
+  floor                 String?   @db.VarChar(255)
+  road                  String?   @db.VarChar(255)
+  house                 String?   @db.VarChar(255)
+  is_default            Boolean   @default(false)
+
+  @@index([user_id], map: "customer_addresses_user_id_index")
+  @@index([zone_id], map: "customer_addresses_zone_id_index")
+}
+
+model d_m_reviews {
+  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  delivery_man_id BigInt    @db.UnsignedBigInt
+  user_id         BigInt    @db.UnsignedBigInt
+  order_id        BigInt    @db.UnsignedBigInt
+  comment         String?   @db.MediumText
+  attachment      String?
+  rating          Int       @default(0)
+  created_at      DateTime? @db.Timestamp(0)
+  updated_at      DateTime? @db.Timestamp(0)
+  status          Boolean?  @default(true)
+}
+
+model data_settings {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  key        String    @db.VarChar(255)
+  value      String?   @db.Text
+  type       String    @db.VarChar(255)
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+}
+
+model delivery_histories {
+  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  order_id        BigInt?   @db.UnsignedBigInt
+  delivery_man_id BigInt?   @db.UnsignedBigInt
+  time            DateTime? @db.DateTime(0)
+  longitude       String?
+  latitude        String?
+  location        String?
+  created_at      DateTime? @db.Timestamp(0)
+  updated_at      DateTime? @db.Timestamp(0)
+}
+
+model delivery_man_devices {
+  id                BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  delivery_man_id   BigInt    @db.UnsignedBigInt
+  device_id         String    @unique(map: "delivery_man_devices_device_id_unique") @db.VarChar(255)
+  device_name       String?   @db.VarChar(255)
+  biometric_token   String?   @db.VarChar(255)
+  biometric_enabled Boolean   @default(false)
+  last_login_at     DateTime? @db.Timestamp(0)
+  created_at        DateTime? @db.Timestamp(0)
+  updated_at        DateTime? @db.Timestamp(0)
+}
+
+model delivery_man_shift {
+  id              BigInt       @id @default(autoincrement()) @db.UnsignedBigInt
+  delivery_man_id BigInt       @db.UnsignedBigInt
+  shift_id        BigInt       @db.UnsignedBigInt
+  created_at      DateTime?    @db.Timestamp(0)
+  updated_at      DateTime?    @db.Timestamp(0)
+  delivery_men    delivery_men @relation(fields: [delivery_man_id], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "delivery_man_shift_delivery_man_id_foreign")
+  shifts          shifts       @relation(fields: [shift_id], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "delivery_man_shift_shift_id_foreign")
+
+  @@index([delivery_man_id], map: "delivery_man_shift_delivery_man_id_foreign")
+  @@index([shift_id], map: "delivery_man_shift_shift_id_foreign")
+}
+
+model delivery_man_wallets {
+  id               BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  delivery_man_id  BigInt    @db.UnsignedBigInt
+  collected_cash   Decimal   @default(0.00) @db.Decimal(24, 2)
+  created_at       DateTime? @db.Timestamp(0)
+  updated_at       DateTime? @db.Timestamp(0)
+  total_earning    Decimal   @default(0.00) @db.Decimal(24, 2)
+  total_withdrawn  Decimal   @default(0.00) @db.Decimal(24, 2)
+  pending_withdraw Decimal   @default(0.00) @db.Decimal(24, 2)
+}
+
+model delivery_men {
+  id                   BigInt                          @id @default(autoincrement()) @db.UnsignedBigInt
+  f_name               String?                         @db.VarChar(100)
+  l_name               String?                         @db.VarChar(100)
+  phone                String                          @unique(map: "delivery_men_phone_unique") @db.VarChar(20)
+  email                String?                         @db.VarChar(100)
+  identity_number      String?                         @db.VarChar(30)
+  identity_type        String?                         @db.VarChar(50)
+  identity_image       String                          @db.Text
+  image                String?                         @db.VarChar(100)
+  password             String                          @db.VarChar(100)
+  auth_token           String?
+  fcm_token            String?
+  zone_id              BigInt?
+  created_at           DateTime?                       @db.Timestamp(0)
+  updated_at           DateTime?                       @db.Timestamp(0)
+  status               Boolean                         @default(true)
+  active               Boolean                         @default(true)
+  earning              Boolean                         @default(true)
+  current_orders       Int                             @default(0)
+  type                 String                          @default("zone_wise")
+  restaurant_id        BigInt?
+  application_status   delivery_men_application_status @default(approved)
+  order_count          Int                             @default(0) @db.UnsignedInt
+  assigned_order_count Int                             @default(0) @db.UnsignedInt
+  vehicle_id           BigInt?                         @db.UnsignedBigInt
+  shift_id             BigInt?                         @db.UnsignedBigInt
+  additional_data      String?                         @db.Text
+  additional_documents String?                         @db.Text
+  current_language_key String?                         @default("en") @db.VarChar(255)
+  delivery_man_shift   delivery_man_shift[]
+}
+
+model disbursement_details {
+  id                  BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  disbursement_id     BigInt    @db.UnsignedBigInt
+  restaurant_id       BigInt?   @db.UnsignedBigInt
+  delivery_man_id     BigInt?   @db.UnsignedBigInt
+  disbursement_amount Float     @default(0.000)
+  payment_method      BigInt    @db.UnsignedBigInt
+  status              String    @default("pending") @db.VarChar(255)
+  created_at          DateTime? @db.Timestamp(0)
+  updated_at          DateTime? @db.Timestamp(0)
+}
+
+model disbursement_withdrawal_methods {
+  id                   BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  restaurant_id        BigInt?   @db.UnsignedBigInt
+  delivery_man_id      BigInt?   @db.UnsignedBigInt
+  withdrawal_method_id BigInt    @db.UnsignedBigInt
+  method_name          String    @db.VarChar(255)
+  method_fields        String    @db.Text
+  is_default           Int       @default(0) @db.TinyInt
+  created_at           DateTime? @db.Timestamp(0)
+  updated_at           DateTime? @db.Timestamp(0)
+  is_active            Boolean   @default(true)
+}
+
+model disbursements {
+  id           BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  title        String    @db.VarChar(255)
+  description  String?   @db.Text
+  total_amount Float     @default(0.000)
+  status       String    @default("pending") @db.VarChar(255)
+  created_for  String    @db.VarChar(255)
+  created_at   DateTime? @db.Timestamp(0)
+  updated_at   DateTime? @db.Timestamp(0)
+}
+
+model discounts {
+  id            BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  start_date    DateTime? @db.Date
+  end_date      DateTime? @db.Date
+  start_time    DateTime? @db.Time(0)
+  end_time      DateTime? @db.Time(0)
+  min_purchase  Decimal   @default(0.00) @db.Decimal(24, 2)
+  max_discount  Decimal   @default(0.00) @db.Decimal(24, 2)
+  discount      Decimal   @default(0.00) @db.Decimal(24, 2)
+  discount_type String    @default("percentage") @db.VarChar(15)
+  restaurant_id BigInt    @db.UnsignedBigInt
+  created_at    DateTime? @db.Timestamp(0)
+  updated_at    DateTime? @db.Timestamp(0)
+}
+
+model email_templates {
+  id               BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  title            String?   @db.VarChar(100)
+  body             String?   @db.Text
+  background_image String?   @db.VarChar(100)
+  image            String?   @db.VarChar(100)
+  logo             String?   @db.VarChar(100)
+  icon             String?   @db.VarChar(100)
+  button_name      String?   @db.VarChar(100)
+  button_url       String?   @db.VarChar(255)
+  footer_text      String?   @db.VarChar(255)
+  copyright_text   String?   @db.VarChar(255)
+  type             String?   @db.VarChar(255)
+  email_type       String?   @db.VarChar(255)
+  email_template   String?   @db.VarChar(255)
+  privacy          Boolean   @default(false)
+  refund           Boolean   @default(false)
+  cancelation      Boolean   @default(false)
+  contact          Boolean   @default(false)
+  facebook         Boolean   @default(false)
+  instagram        Boolean   @default(false)
+  twitter          Boolean   @default(false)
+  linkedin         Boolean   @default(false)
+  pinterest        Boolean   @default(false)
+  status           Boolean   @default(true)
+  created_at       DateTime? @db.Timestamp(0)
+  updated_at       DateTime? @db.Timestamp(0)
+  body_2           String?   @db.Text
+}
+
+model email_verifications {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  email      String?
+  token      String?
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+}
+
+model employee_roles {
+  id            BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  name          String    @db.VarChar(100)
+  modules       String?   @db.Text
+  status        Boolean   @default(true)
+  created_at    DateTime? @db.Timestamp(0)
+  updated_at    DateTime? @db.Timestamp(0)
+  restaurant_id BigInt?   @db.UnsignedBigInt
+}
+
+model expenses {
+  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  type            String    @default("custom") @db.VarChar(255)
+  amount          Decimal   @default(0.000) @db.Decimal(23, 3)
+  order_id        BigInt?   @db.UnsignedBigInt
+  created_at      DateTime? @db.Timestamp(0)
+  updated_at      DateTime? @db.Timestamp(0)
+  created_by      String?   @default("admin") @db.VarChar(50)
+  restaurant_id   BigInt?   @db.UnsignedBigInt
+  description     String?   @db.Text
+  delivery_man_id BigInt?   @db.UnsignedBigInt
+  user_id         BigInt?   @db.UnsignedBigInt
+}
+
+model f_a_q_s {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  question   String    @db.VarChar(255)
+  answer     String    @db.Text
+  page_type  String?   @db.VarChar(255)
+  user_type  String?   @db.VarChar(255)
+  status     Boolean   @default(true)
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+}
+
+model failed_jobs {
+  id         BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  uuid       String   @unique(map: "failed_jobs_uuid_unique")
+  connection String   @db.Text
+  queue      String   @db.Text
+  payload    String   @db.LongText
+  exception  String   @db.LongText
+  failed_at  DateTime @default(now()) @db.Timestamp(0)
+}
+
+model food {
+  id                    BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  name                  String?
+  description           String?   @db.Text
+  image                 String?   @db.VarChar(30)
+  category_id           BigInt?   @db.UnsignedBigInt
+  category_ids          String?
+  variations            String?   @db.Text
+  add_ons               String?
+  attributes            String?
+  choice_options        String?   @db.Text
+  price                 Decimal   @default(0.00) @db.Decimal(24, 2)
+  tax                   Decimal   @default(0.00) @db.Decimal(24, 2)
+  tax_type              String    @default("percent") @db.VarChar(20)
+  discount              Decimal   @default(0.00) @db.Decimal(24, 2)
+  discount_type         String    @default("percent") @db.VarChar(20)
+  available_time_starts DateTime? @db.Time(0)
+  available_time_ends   DateTime? @db.Time(0)
+  veg                   Boolean   @default(false)
+  status                Boolean   @default(true)
+  restaurant_id         BigInt    @db.UnsignedBigInt
+  created_at            DateTime? @db.Timestamp(0)
+  updated_at            DateTime? @db.Timestamp(0)
+  order_count           Int       @default(0)
+  avg_rating            Float     @default(0.00000000000000)
+  rating_count          Int       @default(0)
+  rating                String?   @db.VarChar(255)
+  recommended           Boolean   @default(false)
+  slug                  String?   @db.VarChar(255)
+  maximum_cart_quantity Int?
+  is_halal              Boolean   @default(false)
+  item_stock            Int       @default(0)
+  sell_count            Int       @default(0)
+  stock_type            String    @default("unlimited") @db.VarChar(20)
+}
+
+model food_nutrition {
+  id           BigInt @id @default(autoincrement()) @db.UnsignedBigInt
+  food_id      BigInt @db.UnsignedBigInt
+  nutrition_id BigInt @db.UnsignedBigInt
+}
+
+model food_seo_data {
+  id                      BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  food_id                 BigInt?   @db.UnsignedBigInt
+  item_campaign_id        BigInt?   @db.UnsignedBigInt
+  title                   String?   @db.VarChar(255)
+  description             String?   @db.VarChar(255)
+  index                   String?   @db.VarChar(255)
+  no_follow               String?   @db.VarChar(255)
+  no_image_index          String?   @db.VarChar(255)
+  no_archive              String?   @db.VarChar(255)
+  no_snippet              String?   @db.VarChar(255)
+  max_snippet             String?   @db.VarChar(255)
+  max_snippet_value       String?   @db.VarChar(255)
+  max_video_preview       String?   @db.VarChar(255)
+  max_video_preview_value String?   @db.VarChar(255)
+  max_image_preview       String?   @db.VarChar(255)
+  max_image_preview_value String?   @db.VarChar(255)
+  image                   String?   @db.VarChar(255)
+  created_at              DateTime? @db.Timestamp(0)
+  updated_at              DateTime? @db.Timestamp(0)
+
+  @@index([food_id], map: "food_seo_data_food_id_index")
+  @@index([item_campaign_id], map: "food_seo_data_item_campaign_id_index")
+}
+
+model food_tag {
+  id      BigInt @id @default(autoincrement()) @db.UnsignedBigInt
+  food_id BigInt @db.UnsignedBigInt
+  tag_id  BigInt @db.UnsignedBigInt
+}
+
+model guests {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  ip_address String?   @db.VarChar(255)
+  fcm_token  String?   @db.VarChar(255)
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+}
+
+model incentive_logs {
+  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  delivery_man_id BigInt    @db.UnsignedBigInt
+  zone_id         BigInt    @db.UnsignedBigInt
+  earning         Decimal   @default(0.000) @db.Decimal(23, 3)
+  incentive       Decimal   @default(0.000) @db.Decimal(23, 3)
+  date            DateTime? @db.Date
+  today_earning   Decimal   @default(0.000) @db.Decimal(23, 3)
+  working_hours   Decimal   @default(0.000) @db.Decimal(23, 3)
+  status          String?   @db.VarChar(255)
+  created_at      DateTime? @db.Timestamp(0)
+  updated_at      DateTime? @db.Timestamp(0)
+}
+
+model incentives {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  zone_id    BigInt    @db.UnsignedBigInt
+  earning    Decimal   @db.Decimal(23, 3)
+  incentive  Decimal   @db.Decimal(23, 3)
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+}
+
+model item_campaign_nutrition {
+  id               BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  item_campaign_id BigInt    @db.UnsignedBigInt
+  nutrition_id     BigInt    @db.UnsignedBigInt
+  created_at       DateTime? @db.Timestamp(0)
+  updated_at       DateTime? @db.Timestamp(0)
+
+  @@index([item_campaign_id], map: "item_campaign_nutrition_item_campaign_id_index")
+  @@index([nutrition_id], map: "item_campaign_nutrition_nutrition_id_index")
+}
+
+model item_campaigns {
+  id                    BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  title                 String?
+  image                 String?   @db.VarChar(100)
+  description           String?   @db.Text
+  status                Boolean   @default(true)
+  admin_id              BigInt    @db.UnsignedBigInt
+  start_date            DateTime? @db.Date
+  end_date              DateTime? @db.Date
+  start_time            DateTime? @db.Time(0)
+  end_time              DateTime? @db.Time(0)
+  category_id           BigInt?   @db.UnsignedBigInt
+  category_ids          String?
+  variations            String?   @db.Text
+  add_ons               String?
+  attributes            String?
+  choice_options        String?   @db.Text
+  price                 Decimal   @default(0.00) @db.Decimal(24, 2)
+  tax                   Decimal   @default(0.00) @db.Decimal(24, 2)
+  tax_type              String    @default("percent") @db.VarChar(20)
+  discount              Decimal   @default(0.00) @db.Decimal(24, 2)
+  discount_type         String    @default("percent") @db.VarChar(20)
+  restaurant_id         BigInt    @db.UnsignedBigInt
+  created_at            DateTime? @db.Timestamp(0)
+  updated_at            DateTime? @db.Timestamp(0)
+  veg                   Boolean   @default(false)
+  slug                  String?   @db.VarChar(255)
+  maximum_cart_quantity Int?
+}
+
+model logs {
+  id             BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  logable_id     BigInt    @db.UnsignedBigInt
+  logable_type   String    @db.VarChar(255)
+  action_type    String    @db.VarChar(50)
+  model          String    @db.VarChar(255)
+  model_id       BigInt    @db.UnsignedBigInt
+  action_details String?   @db.VarChar(255)
+  ip_address     String?   @db.VarChar(255)
+  before_state   String?   @db.LongText
+  after_state    String?   @db.LongText
+  restaurant_id  BigInt?   @db.UnsignedBigInt
+  created_at     DateTime? @db.Timestamp(0)
+  updated_at     DateTime? @db.Timestamp(0)
+}
+
+model loyalty_point_transactions {
+  id               BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  user_id          BigInt?   @db.UnsignedBigInt
+  transaction_id   String    @db.Char(36)
+  credit           Decimal   @default(0.000) @db.Decimal(24, 3)
+  debit            Decimal   @default(0.000) @db.Decimal(24, 3)
+  balance          Decimal   @default(0.000) @db.Decimal(24, 3)
+  reference        String?
+  reference_id     String?   @db.VarChar(255)
+  transaction_type String?
+  created_at       DateTime? @db.Timestamp(0)
+  updated_at       DateTime? @db.Timestamp(0)
+}
+
+model mail_configs {
+  id            BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  name          String
+  host          String
+  driver        String
+  port          String
+  username      String
+  email         String
+  encryption    String
+  password      String
+  restaurant_id BigInt    @db.UnsignedBigInt
+  created_at    DateTime? @db.Timestamp(0)
+  updated_at    DateTime? @db.Timestamp(0)
+}
+
+model messages {
+  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  conversation_id BigInt?   @db.UnsignedBigInt
+  sender_id       BigInt?   @db.UnsignedBigInt
+  message         String?   @db.Text
+  file            String?   @db.Text
+  is_seen         Boolean   @default(false)
+  created_at      DateTime? @db.Timestamp(0)
+  updated_at      DateTime? @db.Timestamp(0)
+}
+
+model migrations {
+  id        Int    @id @default(autoincrement()) @db.UnsignedInt
+  migration String
+  batch     Int
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model newsletters {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  email      String    @unique(map: "newsletters_email_unique") @db.VarChar(255)
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+}
+
+model notification_messages {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  user_type  String    @default("user") @db.VarChar(20)
+  key        String?   @db.VarChar(255)
+  message    String?   @db.Text
+  status     Boolean   @default(true)
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+}
+
+model notification_settings {
+  id                       BigInt                                         @id @default(autoincrement()) @db.UnsignedBigInt
+  title                    String?                                        @db.VarChar(255)
+  sub_title                String?                                        @db.Text
+  key                      String?                                        @db.VarChar(255)
+  type                     notification_settings_type                     @default(admin)
+  mail_status              notification_settings_mail_status              @default(disable)
+  sms_status               notification_settings_sms_status               @default(disable)
+  push_notification_status notification_settings_push_notification_status @default(disable)
+  created_at               DateTime?                                      @db.Timestamp(0)
+  updated_at               DateTime?                                      @db.Timestamp(0)
+}
+
+model notifications {
+  id          BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  title       String?
+  description String?   @db.Text
+  image       String?   @db.VarChar(50)
+  status      Boolean   @default(true)
+  created_at  DateTime? @db.Timestamp(0)
+  updated_at  DateTime? @db.Timestamp(0)
+  tergat      String?
+  zone_id     BigInt?   @db.UnsignedBigInt
+}
+
+model nutritions {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  nutrition  String    @db.VarChar(255)
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+}
+
+model oauth_access_tokens {
+  id         String    @id @db.VarChar(100)
+  user_id    BigInt?   @db.UnsignedBigInt
+  client_id  BigInt    @db.UnsignedBigInt
+  name       String?
+  scopes     String?   @db.Text
+  revoked    Boolean
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+  expires_at DateTime? @db.DateTime(0)
+
+  @@index([user_id], map: "oauth_access_tokens_user_id_index")
+}
+
+model oauth_auth_codes {
+  id         String    @id @db.VarChar(100)
+  user_id    BigInt    @db.UnsignedBigInt
+  client_id  BigInt    @db.UnsignedBigInt
+  scopes     String?   @db.Text
+  revoked    Boolean
+  expires_at DateTime? @db.DateTime(0)
+
+  @@index([user_id], map: "oauth_auth_codes_user_id_index")
+}
+
+model oauth_clients {
+  id                     BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  user_id                BigInt?   @db.UnsignedBigInt
+  name                   String
+  secret                 String?   @db.VarChar(100)
+  provider               String?
+  redirect               String    @db.Text
+  personal_access_client Boolean
+  password_client        Boolean
+  revoked                Boolean
+  created_at             DateTime? @db.Timestamp(0)
+  updated_at             DateTime? @db.Timestamp(0)
+
+  @@index([user_id], map: "oauth_clients_user_id_index")
+}
+
+model oauth_personal_access_clients {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  client_id  BigInt    @db.UnsignedBigInt
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+}
+
+model oauth_refresh_tokens {
+  id              String    @id @db.VarChar(100)
+  access_token_id String    @db.VarChar(100)
+  revoked         Boolean
+  expires_at      DateTime? @db.DateTime(0)
+
+  @@index([access_token_id], map: "oauth_refresh_tokens_access_token_id_index")
+}
+
+model offline_payment_methods {
+  id                  BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  method_name         String    @db.VarChar(255)
+  method_fields       String    @db.Text
+  method_informations String    @db.Text
+  status              Int       @default(0) @db.TinyInt
+  created_at          DateTime? @db.Timestamp(0)
+  updated_at          DateTime? @db.Timestamp(0)
+}
+
+model offline_payments {
+  id            BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  order_id      BigInt    @db.UnsignedBigInt
+  payment_info  String?   @db.LongText
+  status        String    @default("pending") @db.VarChar(10)
+  note          String?   @db.Text
+  customer_note String?   @db.Text
+  method_fields String?   @db.Text
+  created_at    DateTime? @db.Timestamp(0)
+  updated_at    DateTime? @db.Timestamp(0)
+}
+
+model order_cancel_reasons {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  reason     String    @db.VarChar(255)
+  user_type  String    @db.VarChar(50)
+  status     Boolean   @default(true)
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+  is_default Boolean   @default(false)
+}
+
+model order_delivery_histories {
+  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  order_id        BigInt?   @db.UnsignedBigInt
+  delivery_man_id BigInt?   @db.UnsignedBigInt
+  start_time      DateTime? @db.DateTime(0)
+  end_time        DateTime? @db.DateTime(0)
+  start_location  String?
+  end_location    String?
+  created_at      DateTime? @db.Timestamp(0)
+  updated_at      DateTime? @db.Timestamp(0)
+}
+
+model order_details {
+  id                     BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  food_id                BigInt?   @db.UnsignedBigInt
+  order_id               BigInt?   @db.UnsignedBigInt
+  price                  Decimal   @default(0.00) @db.Decimal(24, 2)
+  food_details           String?   @db.Text
+  variation              String?   @db.Text
+  add_ons                String?   @db.Text
+  discount_on_food       Decimal?  @db.Decimal(24, 2)
+  discount_type          String    @default("amount") @db.VarChar(20)
+  quantity               Int       @default(1)
+  tax_amount             Decimal   @default(1.00) @db.Decimal(24, 2)
+  variant                String?
+  created_at             DateTime? @db.Timestamp(0)
+  updated_at             DateTime? @db.Timestamp(0)
+  item_campaign_id       BigInt?   @db.UnsignedBigInt
+  total_add_on_price     Decimal   @default(0.00) @db.Decimal(24, 2)
+  category_id            Int?
+  discount_on_product_by String?   @db.VarChar(255)
+  tax_status             String?   @db.VarChar(255)
+  discount_percentage    Float?    @default(0.00000000)
+  addon_discount         Float?    @default(0.00000000)
+}
+
+model order_edit_logs {
+  id         BigInt                     @id @default(autoincrement()) @db.UnsignedBigInt
+  order_id   BigInt                     @db.UnsignedBigInt
+  log        String?                    @db.VarChar(255)
+  edited_by  order_edit_logs_edited_by?
+  created_at DateTime?                  @db.Timestamp(0)
+  updated_at DateTime?                  @db.Timestamp(0)
+
+  @@index([order_id], map: "order_edit_logs_order_id_index")
+}
+
+model order_payments {
+  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  order_id        BigInt    @db.UnsignedBigInt
+  transaction_ref String?   @db.VarChar(255)
+  amount          Decimal   @default(0.00) @db.Decimal(8, 2)
+  payment_status  String    @db.VarChar(50)
+  payment_method  String    @db.VarChar(100)
+  created_at      DateTime? @db.Timestamp(0)
+  updated_at      DateTime? @db.Timestamp(0)
+}
+
+model order_references {
+  id           BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  order_id     BigInt    @db.UnsignedBigInt
+  token_number String?   @db.VarChar(255)
+  table_number String?   @db.VarChar(255)
+  created_at   DateTime? @db.Timestamp(0)
+  updated_at   DateTime? @db.Timestamp(0)
+}
+
+model order_taxes {
+  id                  BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  tax_name            String    @db.VarChar(255)
+  tax_type            String    @db.VarChar(255)
+  tax_on              String    @db.VarChar(255)
+  tax_rate            Float     @default(0.00000000)
+  tax_amount          Float     @default(0.00000000)
+  before_tax_amount   Float     @default(0.00000000)
+  after_tax_amount    Float     @default(0.00000000)
+  tax_payer           String?   @db.VarChar(255)
+  country_code        String?   @db.VarChar(20)
+  order_id            BigInt?   @db.UnsignedBigInt
+  order_type          String?   @db.VarChar(255)
+  quantity            Int?      @default(1)
+  tax_id              BigInt    @db.UnsignedBigInt
+  taxable_id          BigInt?   @db.UnsignedBigInt
+  taxable_type        String?   @db.VarChar(255)
+  store_id            BigInt?   @db.UnsignedBigInt
+  store_type          String?   @db.VarChar(255)
+  system_tax_setup_id BigInt    @db.UnsignedBigInt
+  created_at          DateTime? @db.Timestamp(0)
+  updated_at          DateTime? @db.Timestamp(0)
+
+  @@index([country_code], map: "order_taxes_country_code_index")
+}
+
+model order_transactions {
+  id                            BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  vendor_id                     BigInt    @db.UnsignedBigInt
+  delivery_man_id               BigInt?   @db.UnsignedBigInt
+  order_id                      BigInt    @db.UnsignedBigInt
+  order_amount                  Decimal   @db.Decimal(24, 2)
+  restaurant_amount             Decimal   @db.Decimal(24, 2)
+  admin_commission              Decimal   @db.Decimal(24, 2)
+  received_by                   String
+  status                        String?
+  created_at                    DateTime? @db.Timestamp(0)
+  updated_at                    DateTime? @db.Timestamp(0)
+  delivery_charge               Decimal   @default(0.00) @db.Decimal(24, 2)
+  original_delivery_charge      Decimal   @default(0.00) @db.Decimal(24, 2)
+  tax                           Decimal   @default(0.00) @db.Decimal(24, 2)
+  zone_id                       BigInt?   @db.UnsignedBigInt
+  dm_tips                       Float     @default(0.00)
+  delivery_fee_comission        Float     @default(0.00)
+  admin_expense                 Decimal?  @default(0.000) @db.Decimal(23, 3)
+  restaurant_expense            Float?    @default(0.000)
+  commission_percentage         Float?    @default(0.000)
+  is_subscribed                 Boolean   @default(false)
+  discount_amount_by_restaurant Float?    @default(0.000)
+  is_subscription               Boolean?  @default(false)
+  additional_charge             Float     @default(0.000)
+  extra_packaging_amount        Float     @default(0.000)
+  ref_bonus_amount              Float     @default(0.000)
+
+  @@index([zone_id], map: "order_transactions_zone_id_index")
+}
+
+model orders {
+  id                         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  user_id                    BigInt?   @db.UnsignedBigInt
+  order_amount               Decimal   @default(0.00) @db.Decimal(24, 2)
+  coupon_discount_amount     Decimal   @default(0.00) @db.Decimal(24, 2)
+  coupon_discount_title      String?
+  payment_status             String    @default("unpaid")
+  order_status               String    @default("pending")
+  total_tax_amount           Decimal   @default(0.00) @db.Decimal(24, 2)
+  payment_method             String?   @db.VarChar(30)
+  transaction_reference      String?
+  delivery_address_id        BigInt?
+  delivery_man_id            BigInt?   @db.UnsignedBigInt
+  coupon_code                String?
+  order_note                 String?   @db.Text
+  order_type                 String    @default("delivery")
+  checked                    Boolean   @default(false)
+  restaurant_id              BigInt    @db.UnsignedBigInt
+  created_at                 DateTime? @db.Timestamp(0)
+  updated_at                 DateTime? @db.Timestamp(0)
+  delivery_charge            Decimal   @default(0.00) @db.Decimal(24, 2)
+  delivery_type              String?   @db.VarChar(255)
+  delivery_type_charge       Decimal   @default(0.0000) @db.Decimal(10, 4)
+  schedule_at                DateTime? @db.Timestamp(0)
+  callback                   String?
+  otp                        String?
+  pending                    DateTime? @db.Timestamp(0)
+  accepted                   DateTime? @db.Timestamp(0)
+  confirmed                  DateTime? @db.Timestamp(0)
+  processing                 DateTime? @db.Timestamp(0)
+  handover                   DateTime? @db.Timestamp(0)
+  picked_up                  DateTime? @db.Timestamp(0)
+  delivered                  DateTime? @db.Timestamp(0)
+  canceled                   DateTime? @db.Timestamp(0)
+  refund_requested           DateTime? @db.Timestamp(0)
+  refunded                   DateTime? @db.Timestamp(0)
+  delivery_address           String?   @db.Text
+  scheduled                  Boolean   @default(false)
+  restaurant_discount_amount Decimal   @db.Decimal(24, 2)
+  original_delivery_charge   Decimal   @default(0.00) @db.Decimal(24, 2)
+  failed                     DateTime? @db.Timestamp(0)
+  adjusment                  Decimal   @default(0.00) @db.Decimal(24, 2)
+  edited                     Boolean   @default(false)
+  zone_id                    BigInt?   @db.UnsignedBigInt
+  dm_tips                    Float     @default(0.00)
+  processing_time            String?   @db.VarChar(10)
+  free_delivery_by           String?   @db.VarChar(255)
+  refund_request_canceled    DateTime? @db.Timestamp(0)
+  cancellation_reason        String?   @db.VarChar(255)
+  canceled_by                String?   @db.VarChar(50)
+  tax_status                 String?   @db.VarChar(50)
+  coupon_created_by          String?   @db.VarChar(50)
+  vehicle_id                 BigInt?   @db.UnsignedBigInt
+  discount_on_product_by     String    @default("vendor") @db.VarChar(50)
+  distance                   Float?    @default(0.000)
+  subscription_id            BigInt?   @db.UnsignedBigInt
+  cancellation_note          String?   @db.Text
+  tax_percentage             Float?
+  delivery_instruction       String?   @db.Text
+  unavailable_item_note      String?   @db.VarChar(255)
+  cutlery                    Boolean   @default(false)
+  additional_charge          Float     @default(0.000)
+  partially_paid_amount      Float     @default(0.000)
+  order_proof                String?   @db.VarChar(255)
+  is_guest                   Boolean   @default(false)
+  cash_back_id               BigInt?   @db.UnsignedBigInt
+  extra_packaging_amount     Float     @default(0.000)
+  ref_bonus_amount           Float     @default(0.000)
+  bring_change_amount        Int?      @default(0)
+  tax_type                   String?   @db.VarChar(255)
+  is_pos                     Boolean   @default(false)
+
+  @@index([delivery_man_id], map: "orders_delivery_man_id_index")
+  @@index([restaurant_id], map: "orders_restaurant_id_index")
+  @@index([subscription_id], map: "orders_subscription_id_index")
+  @@index([user_id], map: "orders_user_id_index")
+  @@index([zone_id], map: "orders_zone_id_index")
+}
+
+model page_seo_data {
+  id          BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  page_name   String    @unique(map: "page_seo_data_page_name_unique") @db.VarChar(255)
+  slug        String?   @db.VarChar(255)
+  title       String    @db.VarChar(255)
+  description String    @db.VarChar(255)
+  image       String?   @db.VarChar(255)
+  meta_data   String?   @db.LongText
+  status      Boolean   @default(true)
+  created_at  DateTime? @db.Timestamp(0)
+  updated_at  DateTime? @db.Timestamp(0)
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model password_resets {
+  email           String?   @db.VarChar(255)
+  token           String
+  created_at      DateTime? @db.Timestamp(0)
+  otp_hit_count   Int       @default(0) @db.TinyInt
+  is_blocked      Boolean   @default(false)
+  is_temp_blocked Boolean   @default(false)
+  temp_block_time DateTime? @db.Timestamp(0)
+  created_by      String?   @default("user") @db.VarChar(50)
+  phone           String?   @db.VarChar(50)
+
+  @@index([email], map: "password_resets_email_index")
+  @@ignore
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model payment_requests {
+  id                     String    @db.Char(36)
+  payer_id               String?   @db.VarChar(64)
+  receiver_id            String?   @db.VarChar(64)
+  payment_amount         Decimal   @default(0.00) @db.Decimal(24, 2)
+  gateway_callback_url   String?
+  success_hook           String?   @db.VarChar(100)
+  failure_hook           String?   @db.VarChar(100)
+  transaction_id         String?   @db.VarChar(100)
+  currency_code          String    @default("USD") @db.VarChar(20)
+  payment_method         String?   @db.VarChar(50)
+  additional_data        String?   @db.LongText
+  is_paid                Boolean   @default(false)
+  created_at             DateTime? @db.Timestamp(0)
+  updated_at             DateTime? @db.Timestamp(0)
+  payer_information      String?   @db.LongText
+  external_redirect_link String?   @db.VarChar(255)
+  receiver_information   String?   @db.LongText
+  attribute_id           String?   @db.VarChar(64)
+  attribute              String?   @db.VarChar(255)
+  payment_platform       String?   @db.VarChar(255)
+
+  @@ignore
+}
+
+model phone_verifications {
+  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  phone           String    @unique(map: "phone_verifications_phone_unique")
+  token           String
+  created_at      DateTime? @db.Timestamp(0)
+  updated_at      DateTime? @db.Timestamp(0)
+  otp_hit_count   Int       @default(0) @db.TinyInt
+  is_blocked      Boolean   @default(false)
+  is_temp_blocked Boolean   @default(false)
+  temp_block_time DateTime? @db.Timestamp(0)
+}
+
+model priority_lists {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  name       String    @db.VarChar(255)
+  value      String    @db.VarChar(255)
+  type       String    @db.VarChar(255)
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+}
+
+model provide_d_m_earnings {
+  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  delivery_man_id BigInt    @db.UnsignedBigInt
+  amount          Decimal   @default(0.00) @db.Decimal(24, 2)
+  method          String?
+  ref             String?
+  created_at      DateTime? @db.Timestamp(0)
+  updated_at      DateTime? @db.Timestamp(0)
+}
+
+model react_faqs {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  question   String?   @db.VarChar(100)
+  answer     String?   @db.VarChar(150)
+  priority   Int?
+  status     Boolean   @default(true)
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+}
+
+model react_opportunities {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  title      String?   @db.VarChar(100)
+  sub_title  String?   @db.VarChar(100)
+  image      String?   @db.VarChar(100)
+  status     Boolean   @default(true)
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+}
+
+model react_promotional_banners {
+  id          BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  title       String?   @db.VarChar(100)
+  description String?   @db.Text
+  image       String?   @db.VarChar(100)
+  status      Boolean   @default(true)
+  created_at  DateTime? @db.Timestamp(0)
+  updated_at  DateTime? @db.Timestamp(0)
+}
+
+model react_services {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  title      String?   @db.VarChar(100)
+  sub_title  String?   @db.VarChar(100)
+  image      String?   @db.VarChar(100)
+  status     Boolean   @default(true)
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+}
+
+model react_testimonials {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  name       String    @db.VarChar(255)
+  image      String?   @db.VarChar(255)
+  review     String?   @db.Text
+  status     Boolean   @default(true)
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+}
+
+model recent_searches {
+  id             BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  user_id        BigInt?   @db.UnsignedBigInt
+  user_type      String?   @db.VarChar(255)
+  route_name     String?   @db.VarChar(255)
+  route_uri      String?   @db.VarChar(255)
+  route_full_url String?   @db.VarChar(255)
+  created_at     DateTime? @db.Timestamp(0)
+  updated_at     DateTime? @db.Timestamp(0)
+}
+
+model refund_reasons {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  reason     String    @db.VarChar(255)
+  status     Boolean?  @default(true)
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+}
+
+model refunds {
+  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  order_id        BigInt    @db.UnsignedBigInt
+  user_id         BigInt    @db.UnsignedBigInt
+  order_status    String    @db.VarChar(50)
+  image           String?   @db.VarChar(255)
+  customer_reason String?   @db.VarChar(255)
+  customer_note   String?   @db.Text
+  admin_note      String?   @db.Text
+  refund_amount   Decimal   @default(0.000) @db.Decimal(24, 3)
+  refund_status   String    @db.VarChar(50)
+  refund_method   String    @db.VarChar(100)
+  created_at      DateTime? @db.Timestamp(0)
+  updated_at      DateTime? @db.Timestamp(0)
+}
+
+model restaurant_configs {
+  id                                                    BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  restaurant_id                                         BigInt    @db.UnsignedBigInt
+  instant_order                                         Boolean   @default(false)
+  customer_date_order_sratus                            Boolean   @default(false)
+  customer_order_date                                   Int       @default(0)
+  created_at                                            DateTime? @db.Timestamp(0)
+  updated_at                                            DateTime? @db.Timestamp(0)
+  halal_tag_status                                      Boolean   @default(false)
+  extra_packaging_status                                Boolean   @default(false)
+  is_extra_packaging_active                             Boolean   @default(false)
+  extra_packaging_amount                                Float?
+  dine_in                                               Boolean   @default(false)
+  schedule_advance_dine_in_booking_duration             Int       @default(0)
+  schedule_advance_dine_in_booking_duration_time_format String    @default("min") @db.VarChar(10)
+  can_edit_order                                        Boolean?  @default(false)
+  section_wise_ai_use_count                             Int       @default(0)
+  image_wise_ai_use_count                               Int       @default(0)
+  opening_closing_status                                Boolean   @default(false)
+  same_time_for_every_day                               Boolean   @default(false)
+
+  @@index([restaurant_id], map: "restaurant_configs_restaurant_id_index")
+}
+
+model restaurant_notification_settings {
+  id                       BigInt                                                    @id @default(autoincrement()) @db.UnsignedBigInt
+  title                    String?                                                   @db.VarChar(255)
+  sub_title                String?                                                   @db.Text
+  key                      String?                                                   @db.VarChar(255)
+  restaurant_id            BigInt                                                    @db.UnsignedBigInt
+  mail_status              restaurant_notification_settings_mail_status              @default(disable)
+  sms_status               restaurant_notification_settings_sms_status               @default(disable)
+  push_notification_status restaurant_notification_settings_push_notification_status @default(disable)
+  created_at               DateTime?                                                 @db.Timestamp(0)
+  updated_at               DateTime?                                                 @db.Timestamp(0)
+}
+
+model restaurant_schedule {
+  id            BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  restaurant_id BigInt    @db.UnsignedBigInt
+  day           Int
+  opening_time  DateTime? @db.Time(0)
+  closing_time  DateTime? @db.Time(0)
+  created_at    DateTime? @db.Timestamp(0)
+  updated_at    DateTime? @db.Timestamp(0)
+}
+
+model restaurant_subscriptions {
+  id                    BigInt                               @id @default(autoincrement()) @db.UnsignedBigInt
+  package_id            BigInt                               @db.UnsignedBigInt
+  restaurant_id         BigInt                               @db.UnsignedBigInt
+  expiry_date           DateTime                             @db.Date
+  max_order             String                               @db.VarChar(255)
+  max_product           String                               @db.VarChar(255)
+  pos                   Boolean                              @default(false)
+  mobile_app            Boolean                              @default(false)
+  chat                  Boolean                              @default(false)
+  review                Boolean                              @default(false)
+  self_delivery         Boolean                              @default(false)
+  status                Boolean                              @default(true)
+  total_package_renewed Int                                  @default(0)
+  created_at            DateTime?                            @db.Timestamp(0)
+  updated_at            DateTime?                            @db.Timestamp(0)
+  validity              Int                                  @default(0)
+  is_trial              Boolean                              @default(false)
+  renewed_at            DateTime?                            @db.DateTime(0)
+  is_canceled           Boolean                              @default(false)
+  canceled_by           restaurant_subscriptions_canceled_by @default(none)
+}
+
+model restaurant_tag {
+  id            BigInt @id @default(autoincrement()) @db.UnsignedBigInt
+  restaurant_id BigInt @db.UnsignedBigInt
+  tag_id        BigInt @db.UnsignedBigInt
+}
+
+model restaurant_wallets {
+  id               BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  vendor_id        BigInt    @db.UnsignedBigInt
+  total_earning    Decimal   @default(0.00) @db.Decimal(24, 2)
+  total_withdrawn  Decimal   @default(0.00) @db.Decimal(24, 2)
+  pending_withdraw Decimal   @default(0.00) @db.Decimal(24, 2)
+  collected_cash   Decimal   @default(0.00) @db.Decimal(24, 2)
+  created_at       DateTime? @db.Timestamp(0)
+  updated_at       DateTime? @db.Timestamp(0)
+}
+
+model restaurant_zone {
+  id            BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  restaurant_id BigInt    @db.UnsignedBigInt
+  zone_id       BigInt    @db.UnsignedBigInt
+  created_at    DateTime? @db.Timestamp(0)
+  updated_at    DateTime? @db.Timestamp(0)
+}
+
+model restaurants {
+  id                        BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  name                      String
+  phone                     String    @unique(map: "restaurants_phone_unique") @db.VarChar(20)
+  email                     String?   @db.VarChar(100)
+  logo                      String?
+  latitude                  String?
+  longitude                 String?
+  address                   String?   @db.Text
+  footer_text               String?   @db.Text
+  minimum_order             Decimal   @default(0.00) @db.Decimal(24, 2)
+  comission                 Decimal?  @db.Decimal(24, 2)
+  schedule_order            Boolean   @default(false)
+  opening_time              DateTime? @default(dbgenerated("('10:00:00')")) @db.Time(0)
+  closeing_time             DateTime? @default(dbgenerated("('23:00:00')")) @db.Time(0)
+  status                    Boolean   @default(true)
+  vendor_id                 BigInt    @db.UnsignedBigInt
+  created_at                DateTime? @db.Timestamp(0)
+  updated_at                DateTime? @db.Timestamp(0)
+  free_delivery             Boolean   @default(false)
+  rating                    String?
+  cover_photo               String?
+  delivery                  Boolean   @default(true)
+  take_away                 Boolean   @default(true)
+  food_section              Boolean   @default(true)
+  tax                       Decimal   @default(0.00) @db.Decimal(24, 2)
+  zone_id                   BigInt?   @db.UnsignedBigInt
+  reviews_section           Boolean   @default(true)
+  active                    Boolean   @default(true)
+  off_day                   String    @default(" ")
+  gst                       String?
+  self_delivery_system      Boolean   @default(false)
+  pos_system                Boolean   @default(false)
+  minimum_shipping_charge   Decimal   @default(0.00) @db.Decimal(24, 2)
+  delivery_time             String?   @default("30-40")
+  veg                       Boolean   @default(true)
+  non_veg                   Boolean   @default(true)
+  order_count               Int       @default(0) @db.UnsignedInt
+  total_order               Int       @default(0) @db.UnsignedInt
+  per_km_shipping_charge    Float?
+  restaurant_model          String?   @default("commission") @db.VarChar(50)
+  maximum_shipping_charge   Float?
+  slug                      String?   @db.VarChar(255)
+  order_subscription_active Boolean?  @default(false)
+  cutlery                   Boolean   @default(false)
+  meta_title                String?   @db.VarChar(100)
+  meta_description          String?   @db.Text
+  meta_image                String?   @db.VarChar(100)
+  meta_data                 String?   @db.LongText
+  announcement              Boolean   @default(false)
+  announcement_message      String?   @db.VarChar(255)
+  qr_code                   String?   @db.Text
+  free_delivery_distance    String?   @db.VarChar(255)
+  additional_data           String?   @db.Text
+  additional_documents      String?   @db.Text
+  package_id                BigInt?   @db.UnsignedBigInt
+  tin                       String?   @db.VarChar(255)
+  tin_expire_date           DateTime? @db.Date
+  tin_certificate_image     String?   @db.VarChar(255)
+}
+
+model reviews {
+  id               BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  food_id          BigInt    @db.UnsignedBigInt
+  user_id          BigInt    @db.UnsignedBigInt
+  comment          String?   @db.MediumText
+  attachment       String?
+  rating           Int       @default(0)
+  order_id         BigInt?   @db.UnsignedBigInt
+  created_at       DateTime? @db.Timestamp(0)
+  updated_at       DateTime? @db.Timestamp(0)
+  item_campaign_id BigInt?   @db.UnsignedBigInt
+  status           Boolean?  @default(true)
+  restaurant_id    BigInt?   @db.UnsignedBigInt
+  reply            String?   @db.Text
+  reply_at         DateTime? @db.DateTime(0)
+
+  @@index([food_id], map: "reviews_food_id_index")
+  @@index([order_id], map: "reviews_order_id_index")
+  @@index([restaurant_id], map: "reviews_restaurant_id_index")
+  @@index([user_id], map: "reviews_user_id_index")
+}
+
+model shifts {
+  id                 BigInt               @id @default(autoincrement()) @db.UnsignedBigInt
+  name               String               @db.VarChar(255)
+  start_time         DateTime?            @db.Time(0)
+  end_time           DateTime?            @db.Time(0)
+  status             Boolean              @default(true)
+  is_full_day        Boolean              @default(false)
+  created_at         DateTime?            @db.Timestamp(0)
+  updated_at         DateTime?            @db.Timestamp(0)
+  delivery_man_shift delivery_man_shift[]
+}
+
+model social_media {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  name       String    @db.VarChar(255)
+  link       String    @db.VarChar(255)
+  status     Boolean   @default(true)
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+}
+
+model soft_credentials {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  key        String?
+  value      String?   @db.LongText
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+}
+
+model storages {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  data_type  String    @db.VarChar(255)
+  data_id    String    @db.VarChar(100)
+  key        String?   @db.VarChar(255)
+  value      String    @db.VarChar(255)
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+
+  @@index([data_id], map: "storages_data_id_index")
+  @@index([value], map: "storages_value_index")
+}
+
+model subscription_billing_and_refund_histories {
+  id               BigInt                                                     @id @default(autoincrement()) @db.UnsignedBigInt
+  restaurant_id    BigInt                                                     @db.UnsignedBigInt
+  subscription_id  BigInt                                                     @db.UnsignedBigInt
+  package_id       BigInt?                                                    @db.UnsignedBigInt
+  transaction_type subscription_billing_and_refund_histories_transaction_type @default(pending_bill)
+  amount           Float
+  is_success       Boolean                                                    @default(false)
+  reference        String?
+  created_at       DateTime?                                                  @db.Timestamp(0)
+  updated_at       DateTime?                                                  @db.Timestamp(0)
+}
+
+model subscription_logs {
+  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  order_id        BigInt    @db.UnsignedBigInt
+  delivery_man_id BigInt?   @db.UnsignedBigInt
+  subscription_id BigInt    @db.UnsignedBigInt
+  order_status    String?   @db.VarChar(255)
+  schedule_at     DateTime? @db.Timestamp(0)
+  accepted        DateTime? @db.Timestamp(0)
+  confirmed       DateTime? @db.Timestamp(0)
+  processing      DateTime? @db.Timestamp(0)
+  handover        DateTime? @db.Timestamp(0)
+  picked_up       DateTime? @db.Timestamp(0)
+  delivered       DateTime? @db.Timestamp(0)
+  canceled        DateTime? @db.Timestamp(0)
+  failed          DateTime? @db.Timestamp(0)
+  created_at      DateTime? @db.Timestamp(0)
+  updated_at      DateTime? @db.Timestamp(0)
+}
+
+model subscription_packages {
+  id            BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  package_name  String
+  price         Float
+  validity      Int
+  max_order     String    @default("unlimited") @db.VarChar(255)
+  max_product   String    @default("unlimited") @db.VarChar(255)
+  pos           Boolean   @default(false)
+  mobile_app    Boolean   @default(false)
+  chat          Boolean   @default(false)
+  review        Boolean   @default(false)
+  self_delivery Boolean   @default(false)
+  status        Boolean   @default(true)
+  default       Boolean   @default(false)
+  colour        String?   @db.VarChar(50)
+  text          String?   @db.Text
+  created_at    DateTime? @db.Timestamp(0)
+  updated_at    DateTime? @db.Timestamp(0)
+}
+
+model subscription_pauses {
+  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  subscription_id BigInt    @db.UnsignedBigInt
+  from            DateTime? @db.Date
+  to              DateTime? @db.Date
+  note            String?   @db.Text
+  created_at      DateTime? @db.Timestamp(0)
+  updated_at      DateTime? @db.Timestamp(0)
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model subscription_schedules {
+  subscription_id BigInt    @db.UnsignedBigInt
+  type            String?   @db.VarChar(255)
+  day             Int?
+  time            DateTime? @db.Time(0)
+  created_at      DateTime? @db.Timestamp(0)
+  updated_at      DateTime? @db.Timestamp(0)
+
+  @@ignore
+}
+
+model subscription_transactions {
+  id                         String                              @id @db.Char(36)
+  package_id                 BigInt                              @db.UnsignedBigInt
+  restaurant_id              BigInt                              @db.UnsignedBigInt
+  price                      Float                               @default(0.000)
+  validity                   Int                                 @default(0)
+  payment_method             String
+  reference                  String?
+  paid_amount                Float
+  discount                   Int                                 @default(0)
+  package_details            String                              @db.LongText
+  created_by                 String                              @db.VarChar(50)
+  created_at                 DateTime?                           @db.Timestamp(0)
+  updated_at                 DateTime?                           @db.Timestamp(0)
+  payment_status             String                              @default("success") @db.VarChar(50)
+  transaction_status         Boolean                             @default(true)
+  restaurant_subscription_id BigInt?                             @db.UnsignedBigInt
+  previous_due               Float                               @default(0.000)
+  is_trial                   Boolean                             @default(false)
+  plan_type                  subscription_transactions_plan_type @default(old_subscription)
+}
+
+model subscriptions {
+  id             BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  status         String?   @db.VarChar(255)
+  start_at       DateTime? @db.Date
+  end_at         DateTime? @db.Date
+  note           String?   @db.Text
+  type           String?   @db.VarChar(255)
+  quantity       Int       @default(0)
+  user_id        BigInt    @db.UnsignedBigInt
+  restaurant_id  BigInt    @db.UnsignedBigInt
+  billing_amount Decimal   @default(0.000) @db.Decimal(23, 3)
+  paid_amount    Decimal   @default(0.000) @db.Decimal(23, 3)
+  created_at     DateTime? @db.Timestamp(0)
+  updated_at     DateTime? @db.Timestamp(0)
+}
+
+model system_tax_setups {
+  id           BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  tax_type     String    @default("order_wise") @db.VarChar(100)
+  country_code String?   @db.VarChar(20)
+  tax_payer    String?   @default("vendor") @db.VarChar(20)
+  tax_ids      String?   @db.TinyText
+  is_default   Boolean   @default(false)
+  is_active    Boolean   @default(true)
+  is_included  Boolean   @default(false)
+  created_at   DateTime? @db.Timestamp(0)
+  updated_at   DateTime? @db.Timestamp(0)
+
+  @@index([country_code], map: "system_tax_setups_country_code_index")
+}
+
+model tags {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  tag        String    @db.VarChar(255)
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+}
+
+model tax_additional_setups {
+  id                  BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  name                String    @db.VarChar(255)
+  system_tax_setup_id BigInt?   @db.UnsignedBigInt
+  tax_ids             String?   @db.TinyText
+  is_active           Boolean   @default(true)
+  created_at          DateTime? @db.Timestamp(0)
+  updated_at          DateTime? @db.Timestamp(0)
+
+  @@index([name], map: "tax_additional_setups_name_index")
+}
+
+model taxables {
+  id                  BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  taxable_type        String    @db.VarChar(255)
+  taxable_id          BigInt    @db.UnsignedBigInt
+  tax_id              BigInt    @db.UnsignedBigInt
+  system_tax_setup_id BigInt    @db.UnsignedBigInt
+  created_at          DateTime? @db.Timestamp(0)
+  updated_at          DateTime? @db.Timestamp(0)
+}
+
+model taxes {
+  id           BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  name         String    @db.VarChar(255)
+  tax_rate     Float     @default(0.00000000)
+  country_code String?   @db.VarChar(20)
+  is_default   Boolean   @default(false)
+  is_active    Boolean   @default(true)
+  created_at   DateTime? @db.Timestamp(0)
+  updated_at   DateTime? @db.Timestamp(0)
+
+  @@index([country_code], map: "taxes_country_code_index")
+}
+
+model time_logs {
+  id           BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  user_id      BigInt    @db.UnsignedBigInt
+  date         DateTime  @db.Date
+  online       DateTime? @db.Time(0)
+  offline      DateTime? @db.Time(0)
+  working_hour Decimal   @default(0.000) @db.Decimal(23, 3)
+  created_at   DateTime? @db.Timestamp(0)
+  updated_at   DateTime? @db.Timestamp(0)
+  shift_id     BigInt?   @db.UnsignedBigInt
+}
+
+model track_deliverymen {
+  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  order_id        BigInt?   @db.UnsignedBigInt
+  delivery_man_id BigInt?   @db.UnsignedBigInt
+  longitude       String?   @db.VarChar(20)
+  latitude        String?   @db.VarChar(20)
+  created_at      DateTime? @db.Timestamp(0)
+  updated_at      DateTime? @db.Timestamp(0)
+}
+
+model translations {
+  id                   BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  translationable_type String    @db.VarChar(255)
+  translationable_id   BigInt    @db.UnsignedBigInt
+  locale               String    @db.VarChar(255)
+  key                  String?   @db.VarChar(255)
+  value                String?   @db.Text
+  created_at           DateTime? @db.Timestamp(0)
+  updated_at           DateTime? @db.Timestamp(0)
+
+  @@index([locale], map: "translations_locale_index")
+  @@index([translationable_id], map: "translations_translationable_id_index")
+}
+
+model user_infos {
+  id             BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  f_name         String?   @db.VarChar(255)
+  l_name         String?   @db.VarChar(255)
+  phone          String?   @db.VarChar(20)
+  email          String?   @db.VarChar(100)
+  image          String?   @db.VarChar(100)
+  admin_id       BigInt?   @db.UnsignedBigInt
+  user_id        BigInt?   @db.UnsignedBigInt
+  vendor_id      BigInt?   @db.UnsignedBigInt
+  deliveryman_id BigInt?   @db.UnsignedBigInt
+  created_at     DateTime? @db.Timestamp(0)
+  updated_at     DateTime? @db.Timestamp(0)
+}
+
+model user_notifications {
+  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  data            String?   @db.Text
+  status          Boolean   @default(true)
+  user_id         BigInt?   @db.UnsignedBigInt
+  vendor_id       BigInt?   @db.UnsignedBigInt
+  delivery_man_id BigInt?   @db.UnsignedBigInt
+  created_at      DateTime? @db.Timestamp(0)
+  updated_at      DateTime? @db.Timestamp(0)
+}
+
+model users {
+  id                   BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  f_name               String?   @db.VarChar(100)
+  l_name               String?   @db.VarChar(100)
+  phone                String?   @unique(map: "users_phone_unique") @db.VarChar(255)
+  email                String?   @db.VarChar(100)
+  image                String?   @db.VarChar(100)
+  is_phone_verified    Boolean   @default(false)
+  email_verified_at    DateTime? @db.Timestamp(0)
+  password             String?   @db.VarChar(100)
+  auth_token           String?
+  remember_token       String?   @db.VarChar(100)
+  created_at           DateTime? @db.Timestamp(0)
+  updated_at           DateTime? @db.Timestamp(0)
+  interest             String?
+  cm_firebase_token    String?
+  status               Boolean   @default(true)
+  order_count          Int       @default(0)
+  login_medium         String?
+  social_id            String?
+  zone_id              BigInt?   @db.UnsignedBigInt
+  wallet_balance       Decimal   @default(0.000) @db.Decimal(24, 3)
+  loyalty_point        Decimal   @default(0.000) @db.Decimal(24, 3)
+  ref_code             String?   @unique(map: "users_ref_code_unique")
+  ref_by               BigInt?   @db.UnsignedBigInt
+  temp_token           String?   @db.VarChar(255)
+  current_language_key String?   @default("en") @db.VarChar(255)
+  is_email_verified    Boolean   @default(false)
+
+  @@index([zone_id], map: "users_zone_id_index")
+  @@index([auth_token], map: "idx_users_auth_token")
+}
+
+model variation_options {
+  id           BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  food_id      BigInt    @db.UnsignedBigInt
+  variation_id BigInt    @db.UnsignedBigInt
+  option_name  String    @db.VarChar(255)
+  option_price Float     @default(0.000)
+  total_stock  Int       @default(0)
+  stock_type   String    @default("unlimited") @db.VarChar(20)
+  sell_count   Int       @default(0)
+  created_at   DateTime? @db.Timestamp(0)
+  updated_at   DateTime? @db.Timestamp(0)
+}
+
+model variations {
+  id          BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  food_id     BigInt    @db.UnsignedBigInt
+  name        String    @db.VarChar(255)
+  type        String    @default("multi") @db.VarChar(20)
+  min         Int       @default(0)
+  max         Int       @default(0)
+  is_required Boolean   @default(false)
+  created_at  DateTime? @db.Timestamp(0)
+  updated_at  DateTime? @db.Timestamp(0)
+}
+
+model vehicles {
+  id                     BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  type                   String    @db.VarChar(255)
+  starting_coverage_area Float
+  maximum_coverage_area  Float
+  extra_charges          Float
+  status                 Boolean   @default(false)
+  created_at             DateTime? @db.Timestamp(0)
+  updated_at             DateTime? @db.Timestamp(0)
+}
+
+model vendor_employees {
+  id               BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  f_name           String?   @db.VarChar(100)
+  l_name           String?   @db.VarChar(100)
+  phone            String?   @db.VarChar(20)
+  email            String    @unique(map: "vendor_employees_email_unique") @db.VarChar(100)
+  image            String?   @db.VarChar(100)
+  employee_role_id BigInt    @db.UnsignedBigInt
+  vendor_id        BigInt    @db.UnsignedBigInt
+  restaurant_id    BigInt    @db.UnsignedBigInt
+  password         String    @db.VarChar(100)
+  status           Boolean   @default(true)
+  remember_token   String?   @db.VarChar(100)
+  firebase_token   String?
+  auth_token       String?
+  created_at       DateTime? @db.Timestamp(0)
+  updated_at       DateTime? @db.Timestamp(0)
+}
+
+model vendors {
+  id                   BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  f_name               String    @db.VarChar(100)
+  l_name               String?   @db.VarChar(100)
+  phone                String    @unique(map: "vendors_phone_unique") @db.VarChar(20)
+  email                String    @unique(map: "vendors_email_unique") @db.VarChar(100)
+  email_verified_at    DateTime? @db.Timestamp(0)
+  password             String    @db.VarChar(100)
+  remember_token       String?   @db.VarChar(100)
+  created_at           DateTime? @db.Timestamp(0)
+  updated_at           DateTime? @db.Timestamp(0)
+  bank_name            String?
+  branch               String?
+  holder_name          String?
+  account_no           String?
+  image                String?
+  status               Boolean?  @default(true)
+  firebase_token       String?
+  auth_token           String?
+  fcm_token_web        String?
+  current_language_key String?   @default("en") @db.VarChar(255)
+}
+
+model visitor_logs {
+  id               BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  visitor_log_type String    @db.VarChar(255)
+  visitor_log_id   BigInt    @db.UnsignedBigInt
+  user_id          BigInt?   @db.UnsignedBigInt
+  visit_count      Int       @default(0)
+  order_count      Int       @default(0)
+  created_at       DateTime? @db.Timestamp(0)
+  updated_at       DateTime? @db.Timestamp(0)
+}
+
+model wallet_bonuses {
+  id                   BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  title                String    @db.VarChar(255)
+  description          String?   @db.Text
+  bonus_type           String    @db.VarChar(255)
+  bonus_amount         Float     @default(0.000)
+  minimum_add_amount   Float     @default(0.000)
+  maximum_bonus_amount Float     @default(0.000)
+  start_date           DateTime? @db.Date
+  end_date             DateTime? @db.Date
+  status               Boolean   @default(true)
+  created_at           DateTime? @db.Timestamp(0)
+  updated_at           DateTime? @db.Timestamp(0)
+}
+
+model wallet_payments {
+  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  user_id         BigInt    @db.UnsignedBigInt
+  transaction_ref String?   @db.VarChar(255)
+  amount          Decimal   @default(0.00) @db.Decimal(8, 2)
+  payment_status  String    @db.VarChar(50)
+  payment_method  String    @db.VarChar(100)
+  created_at      DateTime? @db.Timestamp(0)
+  updated_at      DateTime? @db.Timestamp(0)
+}
+
+model wallet_transactions {
+  id               BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  user_id          BigInt?   @db.UnsignedBigInt
+  transaction_id   String    @db.Char(36)
+  credit           Decimal   @default(0.000) @db.Decimal(24, 3)
+  debit            Decimal   @default(0.000) @db.Decimal(24, 3)
+  admin_bonus      Decimal   @default(0.000) @db.Decimal(24, 3)
+  balance          Decimal   @default(0.000) @db.Decimal(24, 3)
+  transaction_type String?
+  reference        String?
+  reference_id     String?   @db.VarChar(255)
+  created_at       DateTime? @db.Timestamp(0)
+  updated_at       DateTime? @db.Timestamp(0)
+  delivery_man_id  BigInt?   @db.UnsignedBigInt
+}
+
+model websockets_statistics_entries {
+  id                      Int       @id @default(autoincrement()) @db.UnsignedInt
+  app_id                  String    @db.VarChar(255)
+  peak_connection_count   Int
+  websocket_message_count Int
+  api_message_count       Int
+  created_at              DateTime? @db.Timestamp(0)
+  updated_at              DateTime? @db.Timestamp(0)
+}
+
+model wishlists {
+  id            BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  user_id       BigInt    @db.UnsignedBigInt
+  food_id       BigInt?   @db.UnsignedBigInt
+  created_at    DateTime? @db.Timestamp(0)
+  updated_at    DateTime? @db.Timestamp(0)
+  restaurant_id BigInt?   @db.UnsignedBigInt
+}
+
+model withdraw_requests {
+  id                       BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  vendor_id                BigInt?   @db.UnsignedBigInt
+  admin_id                 BigInt?   @db.UnsignedBigInt
+  transaction_note         String?
+  amount                   Decimal   @default(0.000) @db.Decimal(23, 3)
+  approved                 Boolean   @default(false)
+  created_at               DateTime? @db.Timestamp(0)
+  updated_at               DateTime? @db.Timestamp(0)
+  delivery_man_id          BigInt?   @db.UnsignedBigInt
+  withdrawal_method_id     BigInt?   @db.UnsignedBigInt
+  withdrawal_method_fields String?   @db.LongText
+  type                     String    @default("manual") @db.VarChar(20)
+}
+
+model withdrawal_methods {
+  id            BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  method_name   String    @db.VarChar(255)
+  method_fields String    @db.Text
+  is_default    Int       @default(0) @db.TinyInt
+  is_active     Int       @default(1) @db.TinyInt
+  created_at    DateTime? @db.Timestamp(0)
+  updated_at    DateTime? @db.Timestamp(0)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model zone_delivery_options {
+  id                   BigInt                              @id @default(autoincrement()) @db.UnsignedBigInt
+  zone_id              BigInt                              @db.UnsignedBigInt
+  delivery_type        zone_delivery_options_delivery_type @default(standard)
+  extra_charge         Decimal?                            @db.Decimal(10, 4)
+  reduce_charge        Decimal?                            @db.Decimal(10, 4)
+  add_delivery_time    Int?
+  reduce_delivery_time Int?
+  created_at           DateTime?                           @db.Timestamp(0)
+  updated_at           DateTime?                           @db.Timestamp(0)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model zones {
+  id                                BigInt                 @id @default(autoincrement()) @db.UnsignedBigInt
+  name                              String                 @unique(map: "zones_name_unique")
+  coordinates                       Unsupported("polygon")
+  status                            Boolean                @default(true)
+  created_at                        DateTime?              @db.Timestamp(0)
+  updated_at                        DateTime?              @db.Timestamp(0)
+  restaurant_wise_topic             String?
+  customer_wise_topic               String?
+  deliveryman_wise_topic            String?
+  minimum_shipping_charge           Float?
+  per_km_shipping_charge            Float?
+  maximum_shipping_charge           Float?
+  max_cod_order_amount              Float?
+  increased_delivery_fee            Float                  @default(0.00)
+  increased_delivery_fee_status     Boolean                @default(false)
+  increase_delivery_charge_message  String?                @db.VarChar(255)
+  additional_delivery_option_status Boolean                @default(false)
+  minimum_delivery_time             Int?
+  minimum_delivery_charge           Decimal?               @db.Decimal(10, 4)
+  display_name                      String?                @db.VarChar(255)
+  is_default                        Boolean                @default(false)
+}
+
+enum advertisements_add_type {
+  video_promotion
+  restaurant_promotion
+}
+
+enum zone_delivery_options_delivery_type {
+  standard
+  express
+  slightly_delay
+}
+
+enum order_edit_logs_edited_by {
+  customer
+  admin
+  vendor
+  delivery_man
+}
+
+enum notification_settings_type {
+  admin
+  customer
+  restaurant
+  deliveryman
+}
+
+enum subscription_billing_and_refund_histories_transaction_type {
+  pending_bill
+  refund
+}
+
+enum notification_settings_mail_status {
+  active
+  inactive
+  disable
+}
+
+enum restaurant_notification_settings_mail_status {
+  active
+  inactive
+  disable
+}
+
+enum notification_settings_sms_status {
+  active
+  inactive
+  disable
+}
+
+enum restaurant_notification_settings_sms_status {
+  active
+  inactive
+  disable
+}
+
+enum notification_settings_push_notification_status {
+  active
+  inactive
+  disable
+}
+
+enum restaurant_notification_settings_push_notification_status {
+  active
+  inactive
+  disable
+}
+
+enum subscription_transactions_plan_type {
+  renew
+  new_plan
+  first_purchased
+  free_trial
+  old_subscription
+}
+
+enum advertisements_status {
+  pending
+  running
+  approved
+  expired
+  denied
+  paused
+}
+
+enum restaurant_subscriptions_canceled_by {
+  none
+  admin
+  restaurant
+}
+
+enum delivery_men_application_status {
+  approved
+  denied
+  pending
+}

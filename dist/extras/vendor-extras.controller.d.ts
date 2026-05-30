@@ -1,0 +1,696 @@
+import type { AuthedRequest } from '../auth/auth.guard';
+import { PrismaService } from '../prisma/prisma.service';
+export declare class VendorExtrasController {
+    private readonly prisma;
+    constructor(prisma: PrismaService);
+    profile(req: AuthedRequest): Promise<{
+        id?: undefined;
+        f_name?: undefined;
+        l_name?: undefined;
+        email?: undefined;
+        phone?: undefined;
+        image?: undefined;
+        status?: undefined;
+        restaurants?: undefined;
+    } | {
+        id: number;
+        f_name: string;
+        l_name: string | null;
+        email: string;
+        phone: string;
+        image: string | null;
+        status: boolean | null;
+        restaurants: {
+            id: number;
+            comission: number | null;
+            minimum_order: number;
+            name: string;
+            status: boolean;
+            logo: string | null;
+            address: string | null;
+            phone: string;
+            take_away: boolean;
+            delivery: boolean;
+            restaurant_model: string | null;
+        }[];
+    }>;
+    updateProfile(req: AuthedRequest, body: {
+        f_name?: string;
+        l_name?: string;
+        email?: string;
+        phone?: string;
+    }): Promise<{
+        message: string;
+    }>;
+    fcmToken(): {
+        message: string;
+    };
+    toggleActive(req: AuthedRequest, body: {
+        status?: boolean;
+    }): Promise<{
+        message: string;
+    }>;
+    toggleOpen(): {
+        message: string;
+    };
+    announce(): {
+        message: string;
+    };
+    bankInfo(): {
+        message: string;
+    };
+    basicInfo(): {
+        message: string;
+    };
+    businessSetup(): {
+        message: string;
+    };
+    addDineInTable(): {
+        message: string;
+    };
+    remove(): {
+        message: string;
+    };
+    currentOrders(req: AuthedRequest): Promise<{
+        id: number;
+        user_id: number | null;
+        restaurant_id: number;
+        order_amount: number;
+        created_at: Date | null;
+        updated_at: Date | null;
+        distance: number | null;
+        zone_id: bigint | null;
+        cutlery: boolean;
+        vehicle_id: bigint | null;
+        pending: Date | null;
+        order_status: string;
+        payment_status: string;
+        payment_method: string | null;
+        order_type: string;
+        total_tax_amount: import("@prisma/client/runtime/library").Decimal;
+        delivery_charge: import("@prisma/client/runtime/library").Decimal;
+        coupon_discount_amount: import("@prisma/client/runtime/library").Decimal;
+        additional_charge: number;
+        restaurant_discount_amount: import("@prisma/client/runtime/library").Decimal;
+        delivered: Date | null;
+        delivery_man_id: bigint | null;
+        cancellation_note: string | null;
+        tax_type: string | null;
+        is_guest: boolean;
+        coupon_discount_title: string | null;
+        transaction_reference: string | null;
+        delivery_address_id: bigint | null;
+        coupon_code: string | null;
+        order_note: string | null;
+        checked: boolean;
+        delivery_type: string | null;
+        delivery_type_charge: import("@prisma/client/runtime/library").Decimal;
+        schedule_at: Date | null;
+        callback: string | null;
+        otp: string | null;
+        accepted: Date | null;
+        confirmed: Date | null;
+        processing: Date | null;
+        handover: Date | null;
+        picked_up: Date | null;
+        canceled: Date | null;
+        refund_requested: Date | null;
+        refunded: Date | null;
+        delivery_address: string | null;
+        scheduled: boolean;
+        original_delivery_charge: import("@prisma/client/runtime/library").Decimal;
+        failed: Date | null;
+        adjusment: import("@prisma/client/runtime/library").Decimal;
+        edited: boolean;
+        dm_tips: number;
+        processing_time: string | null;
+        free_delivery_by: string | null;
+        refund_request_canceled: Date | null;
+        cancellation_reason: string | null;
+        canceled_by: string | null;
+        tax_status: string | null;
+        coupon_created_by: string | null;
+        discount_on_product_by: string;
+        subscription_id: bigint | null;
+        tax_percentage: number | null;
+        delivery_instruction: string | null;
+        unavailable_item_note: string | null;
+        partially_paid_amount: number;
+        order_proof: string | null;
+        cash_back_id: bigint | null;
+        extra_packaging_amount: number;
+        ref_bonus_amount: number;
+        bring_change_amount: number | null;
+        is_pos: boolean;
+    }[]>;
+    completedOrders(req: AuthedRequest): Promise<{
+        orders: {
+            id: number;
+            user_id: number | null;
+            restaurant_id: number;
+            order_amount: number;
+            created_at: Date | null;
+            updated_at: Date | null;
+            distance: number | null;
+            zone_id: bigint | null;
+            cutlery: boolean;
+            vehicle_id: bigint | null;
+            pending: Date | null;
+            order_status: string;
+            payment_status: string;
+            payment_method: string | null;
+            order_type: string;
+            total_tax_amount: import("@prisma/client/runtime/library").Decimal;
+            delivery_charge: import("@prisma/client/runtime/library").Decimal;
+            coupon_discount_amount: import("@prisma/client/runtime/library").Decimal;
+            additional_charge: number;
+            restaurant_discount_amount: import("@prisma/client/runtime/library").Decimal;
+            delivered: Date | null;
+            delivery_man_id: bigint | null;
+            cancellation_note: string | null;
+            tax_type: string | null;
+            is_guest: boolean;
+            coupon_discount_title: string | null;
+            transaction_reference: string | null;
+            delivery_address_id: bigint | null;
+            coupon_code: string | null;
+            order_note: string | null;
+            checked: boolean;
+            delivery_type: string | null;
+            delivery_type_charge: import("@prisma/client/runtime/library").Decimal;
+            schedule_at: Date | null;
+            callback: string | null;
+            otp: string | null;
+            accepted: Date | null;
+            confirmed: Date | null;
+            processing: Date | null;
+            handover: Date | null;
+            picked_up: Date | null;
+            canceled: Date | null;
+            refund_requested: Date | null;
+            refunded: Date | null;
+            delivery_address: string | null;
+            scheduled: boolean;
+            original_delivery_charge: import("@prisma/client/runtime/library").Decimal;
+            failed: Date | null;
+            adjusment: import("@prisma/client/runtime/library").Decimal;
+            edited: boolean;
+            dm_tips: number;
+            processing_time: string | null;
+            free_delivery_by: string | null;
+            refund_request_canceled: Date | null;
+            cancellation_reason: string | null;
+            canceled_by: string | null;
+            tax_status: string | null;
+            coupon_created_by: string | null;
+            discount_on_product_by: string;
+            subscription_id: bigint | null;
+            tax_percentage: number | null;
+            delivery_instruction: string | null;
+            unavailable_item_note: string | null;
+            partially_paid_amount: number;
+            order_proof: string | null;
+            cash_back_id: bigint | null;
+            extra_packaging_amount: number;
+            ref_bonus_amount: number;
+            bring_change_amount: number | null;
+            is_pos: boolean;
+        }[];
+        total_size: number;
+    }>;
+    vendorOrder(idStr?: string): Promise<{
+        id: number;
+        user_id: number | null;
+        restaurant_id: number;
+        order_amount: number;
+        created_at: Date | null;
+        updated_at: Date | null;
+        distance: number | null;
+        zone_id: bigint | null;
+        cutlery: boolean;
+        vehicle_id: bigint | null;
+        pending: Date | null;
+        order_status: string;
+        payment_status: string;
+        payment_method: string | null;
+        order_type: string;
+        total_tax_amount: import("@prisma/client/runtime/library").Decimal;
+        delivery_charge: import("@prisma/client/runtime/library").Decimal;
+        coupon_discount_amount: import("@prisma/client/runtime/library").Decimal;
+        additional_charge: number;
+        restaurant_discount_amount: import("@prisma/client/runtime/library").Decimal;
+        delivered: Date | null;
+        delivery_man_id: bigint | null;
+        cancellation_note: string | null;
+        tax_type: string | null;
+        is_guest: boolean;
+        coupon_discount_title: string | null;
+        transaction_reference: string | null;
+        delivery_address_id: bigint | null;
+        coupon_code: string | null;
+        order_note: string | null;
+        checked: boolean;
+        delivery_type: string | null;
+        delivery_type_charge: import("@prisma/client/runtime/library").Decimal;
+        schedule_at: Date | null;
+        callback: string | null;
+        otp: string | null;
+        accepted: Date | null;
+        confirmed: Date | null;
+        processing: Date | null;
+        handover: Date | null;
+        picked_up: Date | null;
+        canceled: Date | null;
+        refund_requested: Date | null;
+        refunded: Date | null;
+        delivery_address: string | null;
+        scheduled: boolean;
+        original_delivery_charge: import("@prisma/client/runtime/library").Decimal;
+        failed: Date | null;
+        adjusment: import("@prisma/client/runtime/library").Decimal;
+        edited: boolean;
+        dm_tips: number;
+        processing_time: string | null;
+        free_delivery_by: string | null;
+        refund_request_canceled: Date | null;
+        cancellation_reason: string | null;
+        canceled_by: string | null;
+        tax_status: string | null;
+        coupon_created_by: string | null;
+        discount_on_product_by: string;
+        subscription_id: bigint | null;
+        tax_percentage: number | null;
+        delivery_instruction: string | null;
+        unavailable_item_note: string | null;
+        partially_paid_amount: number;
+        order_proof: string | null;
+        cash_back_id: bigint | null;
+        extra_packaging_amount: number;
+        ref_bonus_amount: number;
+        bring_change_amount: number | null;
+        is_pos: boolean;
+    } | null>;
+    updateOrder(): {
+        message: string;
+    };
+    sendOrderOtp(): {
+        otp: string;
+        message: string;
+    };
+    customerAddressUpdate(): {
+        message: string;
+    };
+    products(req: AuthedRequest, limitStr?: string, offsetStr?: string): Promise<{
+        products: {
+            id: number;
+            price: number;
+            tax: number;
+            discount: number;
+            restaurant_id: number;
+            category_id: number | null;
+            add_ons: string | null;
+            attributes: string | null;
+            variations: string | null;
+            created_at: Date | null;
+            updated_at: Date | null;
+            name: string | null;
+            status: boolean;
+            image: string | null;
+            order_count: number;
+            rating: string | null;
+            veg: boolean;
+            slug: string | null;
+            description: string | null;
+            discount_type: string;
+            recommended: boolean;
+            avg_rating: number;
+            item_stock: number;
+            stock_type: string;
+            category_ids: string | null;
+            choice_options: string | null;
+            tax_type: string;
+            available_time_starts: Date | null;
+            available_time_ends: Date | null;
+            rating_count: number;
+            maximum_cart_quantity: number | null;
+            is_halal: boolean;
+            sell_count: number;
+        }[];
+        total_size: number;
+        limit: number;
+        offset: number;
+    }>;
+    productDetails(idStr?: string): Promise<{
+        id: number;
+        price: number;
+        tax: number;
+        discount: number;
+        restaurant_id: number;
+        category_id: number | null;
+        add_ons: string | null;
+        attributes: string | null;
+        variations: string | null;
+        created_at: Date | null;
+        updated_at: Date | null;
+        name: string | null;
+        status: boolean;
+        image: string | null;
+        order_count: number;
+        rating: string | null;
+        veg: boolean;
+        slug: string | null;
+        description: string | null;
+        discount_type: string;
+        recommended: boolean;
+        avg_rating: number;
+        item_stock: number;
+        stock_type: string;
+        category_ids: string | null;
+        choice_options: string | null;
+        tax_type: string;
+        available_time_starts: Date | null;
+        available_time_ends: Date | null;
+        rating_count: number;
+        maximum_cart_quantity: number | null;
+        is_halal: boolean;
+        sell_count: number;
+    } | null>;
+    productSearch(): {
+        products: never[];
+        total_size: number;
+    };
+    productStatus(): {
+        message: string;
+    };
+    productRecommended(): {
+        message: string;
+    };
+    updateStock(): {
+        message: string;
+    };
+    productStore(): {
+        message: string;
+    };
+    productUpdate(): {
+        message: string;
+    };
+    productDelete(): {
+        message: string;
+    };
+    productReviews(idStr?: string): Promise<{
+        id: number;
+        food_id: number;
+        user_id: number;
+        comment: string | null;
+        rating: number;
+        reply: string | null;
+    }[]>;
+    productReply(): {
+        message: string;
+    };
+    productLimits(): {
+        remaining: string;
+    };
+    categories(): Promise<{
+        id: number;
+        name: string;
+        image: string;
+        status: boolean;
+    }[]>;
+    childCategories(idStr?: string): Promise<{
+        id: number;
+        name: string;
+        image: string;
+        status: boolean;
+    }[]>;
+    categoryProducts(): {
+        products: never[];
+        total_size: number;
+    };
+    vendorAddons(req: AuthedRequest): Promise<{
+        id: number;
+        restaurant_id: number;
+        addon_category_id: number | null;
+        price: number;
+        created_at: Date | null;
+        updated_at: Date | null;
+        name: string | null;
+        status: boolean;
+        stock_type: string;
+        sell_count: number;
+        addon_stock: number;
+    }[] | {
+        addons: never[];
+    }>;
+    addonStore(): {
+        message: string;
+    };
+    addonUpdate(): {
+        message: string;
+    };
+    addonDelete(): {
+        message: string;
+    };
+    attributes(): Promise<{
+        id: number;
+        name: string | null;
+    }[]>;
+    vendorDmList(req: AuthedRequest): Promise<{
+        id: number;
+        f_name: string | null;
+        l_name: string | null;
+        phone: string;
+        status: boolean;
+        application_status: import("@prisma/client").$Enums.delivery_men_application_status;
+    }[] | {
+        delivery_men: never[];
+        total_size: number;
+    }>;
+    getDmList(req: AuthedRequest): Promise<{
+        id: number;
+        f_name: string | null;
+        l_name: string | null;
+        phone: string;
+        status: boolean;
+        application_status: import("@prisma/client").$Enums.delivery_men_application_status;
+    }[] | {
+        delivery_men: never[];
+        total_size: number;
+    }>;
+    dmPreview(): null;
+    dmStore(): {
+        message: string;
+    };
+    dmUpdate(): {
+        message: string;
+    };
+    dmDelete(): {
+        message: string;
+    };
+    dmStatus(): {
+        message: string;
+    };
+    dmAssign(): {
+        message: string;
+    };
+    vendorCouponList(): {
+        coupons: never[];
+        total_size: number;
+    };
+    vendorCouponStore(): {
+        message: string;
+    };
+    vendorCouponUpdate(): {
+        message: string;
+    };
+    vendorCouponStatus(): {
+        message: string;
+    };
+    vendorCouponDelete(): {
+        message: string;
+    };
+    vendorCouponView(): {};
+    walletPaymentList(): {
+        data: never[];
+        total_size: number;
+    };
+    collectedCash(): {
+        message: string;
+    };
+    walletAdjustment(): {
+        message: string;
+    };
+    withdrawMethods(): Promise<{
+        id: number;
+        method_name: string;
+        method_fields: string;
+        is_default: number;
+    }[]>;
+    withdrawStore(): {
+        message: string;
+    };
+    withdrawDefault(): {
+        message: string;
+    };
+    withdrawDelete(): {
+        message: string;
+    };
+    getWithdrawMethods(): Promise<{
+        id: number;
+        method_name: string;
+        method_fields: string;
+        is_default: number;
+    }[]>;
+    getWithdrawList(): {
+        data: never[];
+        total_size: number;
+    };
+    requestWithdraw(): {
+        message: string;
+    };
+    earningReport(): {
+        total: number;
+        today: number;
+        this_week: number;
+        this_month: number;
+    };
+    orderReport(): {
+        delivered: number;
+        canceled: number;
+        returned: number;
+    };
+    foodReport(): {
+        data: never[];
+    };
+    campaignReport(): {
+        data: never[];
+    };
+    taxReport(): {
+        data: never[];
+        total: number;
+    };
+    disbursementReport(): {
+        data: never[];
+        total: number;
+    };
+    expenseReport(): {
+        data: never[];
+        total: number;
+    };
+    transactionReport(): {
+        data: never[];
+        total: number;
+    };
+    generateStatement(): {
+        message: string;
+    };
+    searchedFood(): {
+        products: never[];
+    };
+    vendorNotifications(): Promise<{
+        id: number;
+        title: string | null;
+        description: string | null;
+    }[]>;
+    messageList(): {
+        conversations: never[];
+        total_size: number;
+    };
+    messageDetails(): {
+        messages: never[];
+    };
+    messageSearch(): {
+        conversations: never[];
+    };
+    messageSend(): {
+        message: string;
+    };
+    basicCampaigns(): never[];
+    campaignJoin(): {
+        message: string;
+    };
+    campaignLeave(): {
+        message: string;
+    };
+    ads(req: AuthedRequest): Promise<{
+        id: number;
+        restaurant_id: number;
+        created_by_id: number;
+        created_at: Date | null;
+        updated_at: Date | null;
+        status: import("@prisma/client").$Enums.advertisements_status;
+        description: string | null;
+        priority: number | null;
+        title: string | null;
+        add_type: import("@prisma/client").$Enums.advertisements_add_type;
+        start_date: Date;
+        end_date: Date;
+        pause_note: string | null;
+        cancellation_note: string | null;
+        cover_image: string | null;
+        profile_image: string | null;
+        video_attachment: string | null;
+        is_rating_active: boolean;
+        is_review_active: boolean;
+        is_paid: boolean;
+        is_updated: boolean;
+        created_by_type: string;
+    }[]>;
+    adDetails(): null;
+    adStore(): {
+        message: string;
+    };
+    adUpdate(): {
+        message: string;
+    };
+    adStatus(): {
+        message: string;
+    };
+    adCopy(): {
+        message: string;
+    };
+    adDelete(): {
+        message: string;
+    };
+    businessPlan(): {
+        commission: number;
+        subscription: number;
+    };
+    packageView(): {
+        package: null;
+        transactions: never[];
+    };
+    subscriptionTransaction(): {
+        message: string;
+    };
+    subscriptionPayment(): {
+        redirect_url: null;
+    };
+    cancelSubscription(): {
+        message: string;
+    };
+    schedule(req: AuthedRequest): Promise<{
+        id: number;
+        restaurant_id: number;
+        created_at: Date | null;
+        updated_at: Date | null;
+        opening_time: Date | null;
+        day: number;
+        closing_time: Date | null;
+    }[]>;
+    scheduleStore(): {
+        message: string;
+    };
+    posCustomers(): {
+        users: never[];
+        total_size: number;
+    };
+    posOrders(): {
+        orders: never[];
+        total_size: number;
+    };
+    posPlaceOrder(): {
+        message: string;
+    };
+    characteristicSuggestions(): never[];
+}

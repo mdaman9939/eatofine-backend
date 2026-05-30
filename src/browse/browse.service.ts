@@ -1,0 +1,637 @@
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { MongoDataService } from '../mongo/mongo-data.service';
+
+interface MongoRestaurantDoc {
+  mysql_id?: number;
+  name?: string;
+  phone?: string;
+  email?: string;
+  logo?: string;
+  cover_photo?: string;
+  latitude?: number | string;
+  longitude?: number | string;
+  address?: string;
+  minimum_order?: number;
+  delivery_time?: string;
+  rating?: string | number;
+  avg_rating?: number;
+  rating_count?: number;
+  free_delivery?: boolean;
+  delivery?: boolean;
+  take_away?: boolean;
+  veg?: boolean;
+  non_veg?: boolean;
+  minimum_shipping_charge?: number;
+  schedule_order?: boolean;
+  status?: boolean;
+  active?: boolean;
+  mysql_zone_id?: number;
+  mysql_vendor_id?: number;
+  opening_time?: Date | string | null;
+  closeing_time?: Date | string | null;
+  food_section?: boolean;
+  open?: number;
+  order_count?: number;
+  comission?: number;
+  restaurant_model?: string;
+}
+
+interface MongoFoodDoc {
+  mysql_id?: number;
+  name?: string;
+  description?: string;
+  image?: string;
+  mysql_category_id?: number;
+  category_ids?: string | unknown;
+  variations?: unknown;
+  add_ons?: unknown;
+  attributes?: unknown;
+  choice_options?: unknown;
+  price?: number;
+  tax?: number;
+  tax_type?: string;
+  discount?: number;
+  discount_type?: string;
+  veg?: boolean;
+  status?: boolean;
+  mysql_restaurant_id?: number;
+  avg_rating?: number;
+  rating_count?: number;
+  recommended?: boolean;
+  order_count?: number;
+}
+
+interface MongoCategoryDoc {
+  mysql_id?: number;
+  name?: string;
+  image?: string;
+  parent_id?: number;
+}
+
+@Injectable()
+export class BrowseService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mongo: MongoDataService,
+  ) {}
+
+  /** Feature flag — when "1", browse reads route to MongoDB instead of MySQL. */
+  private useMongo(): boolean {
+    const v = (process.env.USE_MONGO_BROWSE ?? '').toLowerCase();
+    return v === '1' || v === 'true' || v === 'yes';
+  }
+
+  private storageBase(): string {
+    return process.env.STORAGE_BASE_URL ?? 'http://192.168.0.159:3000/storage';
+  }
+  private fullUrl(folder: string, file?: string | null) {
+    return file ? `${this.storageBase()}/${folder}/${file}` : null;
+  }
+
+  private mapRestaurant(r: {
+    id: bigint;
+    name: string;
+    phone: string;
+    email: string | null;
+    logo: string | null;
+    cover_photo: string | null;
+    latitude: string | null;
+    longitude: string | null;
+    address: string | null;
+    minimum_order: number | { toString(): string };
+    delivery_time: string | null;
+    rating: string | null;
+    avg_rating?: number;
+    rating_count?: number;
+    free_delivery: boolean;
+    delivery: boolean;
+    take_away: boolean;
+    veg: boolean;
+    non_veg: boolean;
+    minimum_shipping_charge: number | { toString(): string };
+    schedule_order: boolean;
+    status: boolean;
+    active: boolean;
+    zone_id: bigint | null;
+    vendor_id: bigint;
+    opening_time: Date | null;
+    closeing_time: Date | null;
+    food_section: boolean;
+    open?: number;
+  }) {
+    return {
+      id: r.id,
+      name: r.name,
+      phone: r.phone,
+      email: r.email,
+      logo: r.logo,
+      logo_full_url: this.fullUrl('restaurant', r.logo),
+      cover_photo: r.cover_photo,
+      cover_photo_full_url: this.fullUrl('restaurant/cover', r.cover_photo),
+      latitude: r.latitude,
+      longitude: r.longitude,
+      address: r.address,
+      minimum_order: Number(r.minimum_order ?? 0),
+      delivery_time: r.delivery_time ?? '30-40',
+      avg_rating: r.avg_rating ?? 0,
+      rating_count: r.rating_count ?? 0,
+      free_delivery: r.free_delivery ? 1 : 0,
+      delivery: r.delivery ? 1 : 0,
+      take_away: r.take_away ? 1 : 0,
+      veg: r.veg ? 1 : 0,
+      non_veg: r.non_veg ? 1 : 0,
+      minimum_shipping_charge: Number(r.minimum_shipping_charge ?? 0),
+      schedule_order: r.schedule_order ? 1 : 0,
+      status: r.status ? 1 : 0,
+      active: r.active ? 1 : 0,
+      open: r.open ?? 1,
+      zone_id: r.zone_id,
+      vendor_id: r.vendor_id,
+      opening_time: r.opening_time,
+      closeing_time: r.closeing_time,
+      food_section: r.food_section ? 1 : 0,
+    };
+  }
+
+  /** Map MongoDB restaurant doc → response shape (mirrors mapRestaurant). */
+  private mapRestaurantMongo(r: MongoRestaurantDoc) {
+    return {
+      id: Number(r.mysql_id ?? 0),
+      name: r.name ?? null,
+      phone: r.phone ?? null,
+      email: r.email ?? null,
+      logo: r.logo ?? null,
+      logo_full_url: this.fullUrl('restaurant', r.logo ?? null),
+      cover_photo: r.cover_photo ?? null,
+      cover_photo_full_url: this.fullUrl('restaurant/cover', r.cover_photo ?? null),
+      latitude: r.latitude != null ? String(r.latitude) : null,
+      longitude: r.longitude != null ? String(r.longitude) : null,
+      address: r.address ?? null,
+      minimum_order: Number(r.minimum_order ?? 0),
+      delivery_time: r.delivery_time ?? '30-40',
+      avg_rating: r.avg_rating ?? 0,
+      rating_count: r.rating_count ?? 0,
+      free_delivery: r.free_delivery ? 1 : 0,
+      delivery: r.delivery ? 1 : 0,
+      take_away: r.take_away ? 1 : 0,
+      veg: r.veg ? 1 : 0,
+      non_veg: r.non_veg ? 1 : 0,
+      minimum_shipping_charge: Number(r.minimum_shipping_charge ?? 0),
+      schedule_order: r.schedule_order ? 1 : 0,
+      status: r.status ? 1 : 0,
+      active: r.active ? 1 : 0,
+      open: r.open ?? 1,
+      zone_id: r.mysql_zone_id != null ? Number(r.mysql_zone_id) : null,
+      vendor_id: Number(r.mysql_vendor_id ?? 0),
+      opening_time: r.opening_time ?? null,
+      closeing_time: r.closeing_time ?? null,
+      food_section: r.food_section ? 1 : 0,
+    };
+  }
+
+  private mapFood(
+    f: {
+      id: bigint;
+      name: string | null;
+      description: string | null;
+      image: string | null;
+      category_id: bigint | null;
+      category_ids: string | null;
+      variations: string | null;
+      add_ons: string | null;
+      attributes: string | null;
+      choice_options: string | null;
+      price: number | { toString(): string };
+      tax: number | { toString(): string };
+      tax_type: string;
+      discount: number | { toString(): string };
+      discount_type: string;
+      veg: boolean;
+      status: boolean;
+      restaurant_id: bigint;
+      avg_rating: number;
+      rating_count: number;
+      recommended: boolean;
+    },
+    restaurantName?: string,
+  ) {
+    const safeParse = (s: string | null) => {
+      if (!s) return [];
+      try {
+        return JSON.parse(s);
+      } catch {
+        return [];
+      }
+    };
+    return {
+      id: f.id,
+      name: f.name,
+      description: f.description,
+      image: f.image,
+      image_full_url: this.fullUrl('product', f.image),
+      category_id: f.category_id,
+      category_ids: safeParse(f.category_ids),
+      variations: safeParse(f.variations),
+      add_ons: safeParse(f.add_ons),
+      attributes: safeParse(f.attributes),
+      choice_options: safeParse(f.choice_options),
+      price: Number(f.price),
+      tax: Number(f.tax),
+      tax_type: f.tax_type,
+      discount: Number(f.discount),
+      discount_type: f.discount_type,
+      veg: f.veg ? 1 : 0,
+      status: f.status ? 1 : 0,
+      restaurant_id: f.restaurant_id,
+      restaurant_name: restaurantName ?? null,
+      avg_rating: f.avg_rating,
+      rating_count: f.rating_count,
+      recommended: f.recommended ? 1 : 0,
+    };
+  }
+
+  /** Map MongoDB food doc → response shape (mirrors mapFood). */
+  private mapFoodMongo(f: MongoFoodDoc, restaurantName?: string) {
+    const safeParse = (s: unknown): unknown => {
+      if (s == null) return [];
+      if (typeof s !== 'string') return s;
+      try {
+        return JSON.parse(s);
+      } catch {
+        return [];
+      }
+    };
+    return {
+      id: Number(f.mysql_id ?? 0),
+      name: f.name ?? null,
+      description: f.description ?? null,
+      image: f.image ?? null,
+      image_full_url: this.fullUrl('product', f.image ?? null),
+      category_id: f.mysql_category_id != null ? Number(f.mysql_category_id) : null,
+      category_ids: safeParse(f.category_ids),
+      variations: safeParse(f.variations),
+      add_ons: safeParse(f.add_ons),
+      attributes: safeParse(f.attributes),
+      choice_options: safeParse(f.choice_options),
+      price: Number(f.price ?? 0),
+      tax: Number(f.tax ?? 0),
+      tax_type: f.tax_type ?? 'percent',
+      discount: Number(f.discount ?? 0),
+      discount_type: f.discount_type ?? 'percent',
+      veg: f.veg ? 1 : 0,
+      status: f.status ? 1 : 0,
+      restaurant_id: Number(f.mysql_restaurant_id ?? 0),
+      restaurant_name: restaurantName ?? null,
+      avg_rating: Number(f.avg_rating ?? 0),
+      rating_count: Number(f.rating_count ?? 0),
+      recommended: f.recommended ? 1 : 0,
+    };
+  }
+
+  async getRestaurants(opts: { zoneId?: number; limit: number; offset: number; filter?: string }) {
+    if (this.useMongo()) {
+      const filter: Record<string, unknown> = { status: true, active: true };
+      if (opts.zoneId) filter.mysql_zone_id = Number(opts.zoneId);
+      const total = await this.mongo.count('restaurants', filter);
+      const rows = await this.mongo.findMany<MongoRestaurantDoc>('restaurants', filter, {
+        limit: opts.limit,
+        skip: Math.max(0, (opts.offset - 1) * opts.limit),
+        sort: { mysql_id: 1 },
+      });
+      return {
+        filter_data: opts.filter ?? 'all',
+        total_size: total,
+        limit: String(opts.limit),
+        offset: String(opts.offset),
+        restaurants: rows.map((r) => this.mapRestaurantMongo(r)),
+      };
+    }
+    const where: { status: boolean; active?: boolean; zone_id?: bigint } = { status: true, active: true };
+    if (opts.zoneId) where.zone_id = BigInt(opts.zoneId);
+    const total = await this.prisma.restaurants.count({ where });
+    const rows = await this.prisma.restaurants.findMany({
+      where,
+      take: opts.limit,
+      skip: Math.max(0, (opts.offset - 1) * opts.limit),
+      orderBy: { id: 'asc' },
+    });
+    return {
+      filter_data: opts.filter ?? 'all',
+      total_size: total,
+      limit: String(opts.limit),
+      offset: String(opts.offset),
+      restaurants: rows.map((r) => this.mapRestaurant(r)),
+    };
+  }
+
+  async getRestaurantsLatest(zoneId?: number, limit = 10, offset = 1) {
+    if (this.useMongo()) {
+      return this.queryRestaurantsOrderedMongo(zoneId, limit, offset, { mysql_id: -1 });
+    }
+    return this.queryRestaurantsOrdered(zoneId, limit, offset, { id: 'desc' });
+  }
+
+  async getRestaurantsPopular(zoneId?: number, limit = 10, offset = 1) {
+    if (this.useMongo()) {
+      return this.queryRestaurantsOrderedMongo(zoneId, limit, offset, { order_count: -1 });
+    }
+    return this.queryRestaurantsOrdered(zoneId, limit, offset, { order_count: 'desc' });
+  }
+
+  private async queryRestaurantsOrderedMongo(
+    zoneId: number | undefined,
+    limit: number,
+    offset: number,
+    sort: Record<string, 1 | -1>,
+  ) {
+    const filter: Record<string, unknown> = { status: true, active: true };
+    if (zoneId) filter.mysql_zone_id = Number(zoneId);
+    const total = await this.mongo.count('restaurants', filter);
+    const rows = await this.mongo.findMany<MongoRestaurantDoc>('restaurants', filter, {
+      limit,
+      skip: Math.max(0, (offset - 1) * limit),
+      sort,
+    });
+    return {
+      total_size: total,
+      limit: String(limit),
+      offset: String(offset),
+      restaurants: rows.map((r) => this.mapRestaurantMongo(r)),
+    };
+  }
+
+  private async queryRestaurantsOrdered(
+    zoneId: number | undefined,
+    limit: number,
+    offset: number,
+    orderBy: Record<string, 'asc' | 'desc'>,
+  ) {
+    const where: { status: boolean; active?: boolean; zone_id?: bigint } = { status: true, active: true };
+    if (zoneId) where.zone_id = BigInt(zoneId);
+    const total = await this.prisma.restaurants.count({ where });
+    const rows = await this.prisma.restaurants.findMany({
+      where,
+      take: limit,
+      skip: Math.max(0, (offset - 1) * limit),
+      orderBy,
+    });
+    return {
+      total_size: total,
+      limit: String(limit),
+      offset: String(offset),
+      restaurants: rows.map((r) => this.mapRestaurant(r)),
+    };
+  }
+
+  async getRestaurantDetails(id: number) {
+    if (this.useMongo()) {
+      const r = await this.mongo.findByMysqlId<MongoRestaurantDoc>('restaurants', Number(id));
+      if (!r) return null;
+      const foods = await this.mongo.findMany<MongoFoodDoc>(
+        'foods',
+        { mysql_restaurant_id: Number(id), status: true },
+        { sort: { mysql_id: 1 } },
+      );
+      const categoryIdsRaw = foods
+        .map((f) => f.mysql_category_id)
+        .filter((cid): cid is number => cid != null);
+      const uniqueCatIds = Array.from(new Set(categoryIdsRaw.map((n) => Number(n))));
+      const cats = uniqueCatIds.length
+        ? await this.mongo.findMany<MongoCategoryDoc>('categories', {
+            mysql_id: { $in: uniqueCatIds },
+          })
+        : [];
+      return {
+        ...this.mapRestaurantMongo(r),
+        foods: foods.map((f) => this.mapFoodMongo(f, r.name)),
+        categories: cats.map((c) => ({
+          id: Number(c.mysql_id ?? 0),
+          name: c.name ?? null,
+          image: c.image ?? null,
+          image_full_url: this.fullUrl('category', c.image ?? null),
+          parent_id: c.parent_id ?? 0,
+        })),
+      };
+    }
+    const r = await this.prisma.restaurants.findUnique({ where: { id: BigInt(id) } });
+    if (!r) return null;
+    const foods = await this.prisma.food.findMany({
+      where: { restaurant_id: r.id, status: true },
+      orderBy: { id: 'asc' },
+    });
+    const categoryIdsRaw = foods
+      .map((f) => f.category_id)
+      .filter((cid): cid is bigint => cid !== null);
+    const uniqueCatIds = Array.from(new Set(categoryIdsRaw.map((bi) => Number(bi))));
+    const cats = uniqueCatIds.length
+      ? await this.prisma.categories.findMany({ where: { id: { in: uniqueCatIds.map((n) => BigInt(n)) } } })
+      : [];
+    return {
+      ...this.mapRestaurant(r),
+      foods: foods.map((f) => this.mapFood(f, r.name)),
+      categories: cats.map((c) => ({
+        id: c.id,
+        name: c.name,
+        image: c.image,
+        image_full_url: this.fullUrl('category', c.image),
+        parent_id: c.parent_id ?? 0,
+      })),
+    };
+  }
+
+  async getProductsLatest(zoneId?: number, limit = 10, offset = 1) {
+    if (this.useMongo()) {
+      return this.queryFoodsOrderedMongo(zoneId, limit, offset, { mysql_id: -1 });
+    }
+    return this.queryFoodsOrdered(zoneId, limit, offset, { id: 'desc' });
+  }
+  async getProductsPopular(zoneId?: number, limit = 10, offset = 1) {
+    if (this.useMongo()) {
+      return this.queryFoodsOrderedMongo(zoneId, limit, offset, { order_count: -1 });
+    }
+    return this.queryFoodsOrdered(zoneId, limit, offset, { order_count: 'desc' });
+  }
+  async getProductsRecommended(zoneId?: number, limit = 10, offset = 1) {
+    if (this.useMongo()) {
+      return this.queryFoodsOrderedMongo(zoneId, limit, offset, { mysql_id: 1 }, { recommended: true });
+    }
+    return this.queryFoodsOrdered(zoneId, limit, offset, { id: 'asc' }, { recommended: true });
+  }
+  async getProductsMostReviewed(zoneId?: number, limit = 10, offset = 1) {
+    if (this.useMongo()) {
+      return this.queryFoodsOrderedMongo(zoneId, limit, offset, { rating_count: -1 });
+    }
+    return this.queryFoodsOrdered(zoneId, limit, offset, { rating_count: 'desc' });
+  }
+
+  private async queryFoodsOrderedMongo(
+    zoneId: number | undefined,
+    limit: number,
+    offset: number,
+    sort: Record<string, 1 | -1>,
+    extraFilter: Record<string, unknown> = {},
+  ) {
+    const restaurantFilter: Record<string, unknown> = { status: true, active: true };
+    if (zoneId) restaurantFilter.mysql_zone_id = Number(zoneId);
+    const restaurants = await this.mongo.findMany<MongoRestaurantDoc>(
+      'restaurants',
+      restaurantFilter,
+      { projection: { mysql_id: 1, name: 1 } },
+    );
+    const restaurantNameById = new Map<number, string | undefined>(
+      restaurants.map((r) => [Number(r.mysql_id ?? 0), r.name]),
+    );
+    const restaurantIds = restaurants.map((r) => Number(r.mysql_id ?? 0));
+    const foodFilter: Record<string, unknown> = {
+      status: true,
+      mysql_restaurant_id: { $in: restaurantIds },
+      ...extraFilter,
+    };
+    const total = await this.mongo.count('foods', foodFilter);
+    const rows = await this.mongo.findMany<MongoFoodDoc>('foods', foodFilter, {
+      limit,
+      skip: Math.max(0, (offset - 1) * limit),
+      sort,
+    });
+    return {
+      total_size: total,
+      limit: String(limit),
+      offset: String(offset),
+      products: rows.map((f) =>
+        this.mapFoodMongo(f, restaurantNameById.get(Number(f.mysql_restaurant_id ?? 0)) ?? undefined),
+      ),
+    };
+  }
+
+  private async queryFoodsOrdered(
+    zoneId: number | undefined,
+    limit: number,
+    offset: number,
+    orderBy: Record<string, 'asc' | 'desc'>,
+    extraWhere: Record<string, unknown> = {},
+  ) {
+    const restaurantWhere: { status: boolean; active?: boolean; zone_id?: bigint } = {
+      status: true,
+      active: true,
+    };
+    if (zoneId) restaurantWhere.zone_id = BigInt(zoneId);
+    const restaurants = await this.prisma.restaurants.findMany({
+      where: restaurantWhere,
+      select: { id: true, name: true },
+    });
+    const restaurantNameById = new Map(restaurants.map((r) => [r.id, r.name]));
+    const restaurantIds = restaurants.map((r) => r.id);
+    const total = await this.prisma.food.count({
+      where: { status: true, restaurant_id: { in: restaurantIds }, ...extraWhere },
+    });
+    const rows = await this.prisma.food.findMany({
+      where: { status: true, restaurant_id: { in: restaurantIds }, ...extraWhere },
+      take: limit,
+      skip: Math.max(0, (offset - 1) * limit),
+      orderBy,
+    });
+    return {
+      total_size: total,
+      limit: String(limit),
+      offset: String(offset),
+      products: rows.map((f) => this.mapFood(f, restaurantNameById.get(f.restaurant_id) ?? undefined)),
+    };
+  }
+
+  async getProductDetails(id: number) {
+    if (this.useMongo()) {
+      const f = await this.mongo.findByMysqlId<MongoFoodDoc>('foods', Number(id));
+      if (!f) return null;
+      const r = f.mysql_restaurant_id != null
+        ? await this.mongo.findByMysqlId<MongoRestaurantDoc>('restaurants', Number(f.mysql_restaurant_id))
+        : null;
+      return this.mapFoodMongo(f, r?.name);
+    }
+    const f = await this.prisma.food.findUnique({ where: { id: BigInt(id) } });
+    if (!f) return null;
+    const r = await this.prisma.restaurants.findUnique({ where: { id: f.restaurant_id } });
+    return this.mapFood(f, r?.name);
+  }
+
+  async getCategoryProducts(categoryId: number, limit = 10, offset = 1) {
+    if (this.useMongo()) {
+      const filter: Record<string, unknown> = { status: true, mysql_category_id: Number(categoryId) };
+      const total = await this.mongo.count('foods', filter);
+      const rows = await this.mongo.findMany<MongoFoodDoc>('foods', filter, {
+        limit,
+        skip: Math.max(0, (offset - 1) * limit),
+      });
+      return {
+        total_size: total,
+        limit: String(limit),
+        offset: String(offset),
+        products: rows.map((f) => this.mapFoodMongo(f)),
+      };
+    }
+    const where = { status: true, category_id: BigInt(categoryId) };
+    const total = await this.prisma.food.count({ where });
+    const rows = await this.prisma.food.findMany({
+      where,
+      take: limit,
+      skip: Math.max(0, (offset - 1) * limit),
+    });
+    return {
+      total_size: total,
+      limit: String(limit),
+      offset: String(offset),
+      products: rows.map((f) => this.mapFood(f)),
+    };
+  }
+
+  async getCategoryRestaurants(categoryId: number, limit = 10, offset = 1) {
+    if (this.useMongo()) {
+      const foods = await this.mongo.findMany<MongoFoodDoc>(
+        'foods',
+        { status: true, mysql_category_id: Number(categoryId) },
+        { projection: { mysql_restaurant_id: 1 } },
+      );
+      const restaurantIds = Array.from(
+        new Set(
+          foods
+            .map((f) => f.mysql_restaurant_id)
+            .filter((rid): rid is number => rid != null)
+            .map((n) => Number(n)),
+        ),
+      );
+      const filter: Record<string, unknown> = {
+        status: true,
+        mysql_id: { $in: restaurantIds },
+      };
+      const total = await this.mongo.count('restaurants', filter);
+      const rows = await this.mongo.findMany<MongoRestaurantDoc>('restaurants', filter, {
+        limit,
+        skip: Math.max(0, (offset - 1) * limit),
+      });
+      return {
+        total_size: total,
+        limit: String(limit),
+        offset: String(offset),
+        restaurants: rows.map((r) => this.mapRestaurantMongo(r)),
+      };
+    }
+    const foods = await this.prisma.food.findMany({
+      where: { status: true, category_id: BigInt(categoryId) },
+      select: { restaurant_id: true },
+    });
+    const restaurantIds = Array.from(new Set(foods.map((f) => f.restaurant_id)));
+    const where = { status: true, id: { in: restaurantIds } };
+    const total = await this.prisma.restaurants.count({ where });
+    const rows = await this.prisma.restaurants.findMany({
+      where,
+      take: limit,
+      skip: Math.max(0, (offset - 1) * limit),
+    });
+    return {
+      total_size: total,
+      limit: String(limit),
+      offset: String(offset),
+      restaurants: rows.map((r) => this.mapRestaurant(r)),
+    };
+  }
+}

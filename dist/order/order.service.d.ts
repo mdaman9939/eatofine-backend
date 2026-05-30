@@ -1,0 +1,118 @@
+import { PrismaService } from '../prisma/prisma.service';
+import { MongoDataService } from '../mongo/mongo-data.service';
+export declare class OrderService {
+    private readonly prisma;
+    private readonly mongo;
+    constructor(prisma: PrismaService, mongo: MongoDataService);
+    private useMongo;
+    placeOrder(userId: bigint, body: {
+        cart?: Array<{
+            item_id?: number;
+            quantity?: number;
+            price?: number;
+            variations?: unknown[];
+            add_on_ids?: number[];
+            add_on_qtys?: number[];
+        }>;
+        order_amount?: number;
+        payment_method?: string;
+        order_type?: string;
+        restaurant_id?: number;
+        distance?: number;
+        address?: string;
+        latitude?: string;
+        longitude?: string;
+        contact_person_name?: string;
+        contact_person_number?: string;
+        address_type?: string;
+        road?: string;
+        house?: string;
+        floor?: string;
+        delivery_address_id?: number;
+        coupon_code?: string;
+        order_note?: string;
+        schedule_at?: string;
+    }): Promise<{
+        message: string;
+        order_id: number;
+        total_ammount: number;
+    }>;
+    trackOrder(orderId: number): Promise<{
+        id: number;
+        order_status: string | undefined;
+        payment_status: string | undefined;
+        payment_method: string | undefined;
+        order_amount: number;
+        restaurant_id: number | null;
+        delivery_man_id: number | null;
+        pending: Date | null;
+        accepted: Date | null;
+        confirmed: Date | null;
+        processing: Date | null;
+        handover: Date | null;
+        picked_up: Date | null;
+        delivered: Date | null;
+        otp: string | null;
+    } | {
+        id: bigint;
+        order_status: string;
+        payment_status: string;
+        payment_method: string | null;
+        order_amount: number;
+        restaurant_id: bigint;
+        delivery_man_id: bigint | null;
+        pending: Date | null;
+        accepted: Date | null;
+        confirmed: Date | null;
+        processing: Date | null;
+        handover: Date | null;
+        picked_up: Date | null;
+        delivered: Date | null;
+        otp: string | null;
+    }>;
+    customerOrderList(userId: bigint): Promise<{
+        total_size: number;
+        limit: number;
+        offset: number;
+        orders: {
+            id: number;
+            order_status: string | undefined;
+            payment_status: string | undefined;
+            order_amount: number;
+            payment_method: string | undefined;
+            restaurant_id: number | null;
+            created_at: Date | null;
+        }[];
+    } | {
+        total_size: number;
+        limit: number;
+        offset: number;
+        orders: {
+            id: bigint;
+            order_status: string;
+            payment_status: string;
+            order_amount: number;
+            payment_method: string | null;
+            restaurant_id: bigint;
+            created_at: Date | null;
+        }[];
+    }>;
+    cancellationReasons(): Promise<{
+        reasons: {
+            id: number | null;
+            reason: string | null;
+            user_type: string | null;
+            status: boolean;
+        }[];
+    } | {
+        reasons: never[] | {
+            id: bigint;
+            created_at: Date | null;
+            updated_at: Date | null;
+            status: boolean;
+            is_default: boolean;
+            reason: string;
+            user_type: string;
+        }[];
+    }>;
+}
