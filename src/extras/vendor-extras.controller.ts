@@ -219,15 +219,17 @@ export class VendorExtrasController {
         phone: v.phone ?? null,
         image: v.image ?? null,
         status: v.status ?? null,
-        // ── Wallet (required by WalletScreen) ────────────────────────
+        // ── Wallet (JSON keys MUST match ProfileModel.fromJson in the
+        //    Flutter app — `adjust_able` and `Payable_Balance` are
+        //    intentionally misnamed there, so we match them here.) ──
         cash_in_hands: cashInHands,
         balance,
         total_earning: totalEarning,
         withdraw_able_balance: balance,
-        payable_balance: balance,
+        Payable_Balance: balance,                // sic — capital P in Flutter
         pending_withdraw: pendingWithdraw,
-        already_withdrawn: alreadyWithdrawn,
-        adjustable: true,
+        total_withdrawn: alreadyWithdrawn,       // Flutter maps this → alreadyWithdrawn
+        adjust_able: true,                       // sic — Flutter uses adjust_able, not adjustable
         over_flow_warning: false,
         over_flow_block_warning: false,
         dynamic_balance: balance,
@@ -249,26 +251,12 @@ export class VendorExtrasController {
         subscription_other_data: null,
         subscription_transactions: false,
         // ── Role / permissions ───────────────────────────────────────
-        roles: ['owner'],
+        // CRITICAL: empty roles → ProfileController._allowPermission grants
+        // ALL module permissions. If we sent ['owner'] here, the controller
+        // tries to look up an 'owner' module key (which doesn't exist) and
+        // denies access to every screen ("You have no permission…").
+        roles: [],
         employee_info: null,
-        module_permission: {
-          my_shop: true,
-          order: true,
-          product: true,
-          chat: true,
-          campaign: true,
-          report_statics: true,
-          coupon: true,
-          deliveryman: true,
-          reviews_section: true,
-          my_wallet: true,
-          notification_setup: true,
-          custom_role: true,
-          food_section: true,
-          addon: true,
-          attribute: true,
-          subscription: true,
-        },
         restaurants: restaurants.map((r) => ({
           id: Number(r.mysql_id),
           name: r.name ?? null,
