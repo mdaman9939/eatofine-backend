@@ -24,20 +24,24 @@ import { MigrationModule } from './mongo/migration.module';
 @Module({
   imports: [
     NestConfig.forRoot({ isGlobal: true }),
-    // Two throttler buckets: a permissive global default + a strict `auth`
-    // bucket that login/signup endpoints opt into via @Throttle({auth: ...}).
-    // Tweak via env: AUTH_THROTTLE_LIMIT (default 5) over AUTH_THROTTLE_TTL ms
-    // (default 15 minutes).
+    // Two throttler buckets: a permissive global default + an `auth` bucket
+    // for login/signup. Defaults tuned for the demo phase — bump down with
+    // env vars once the app is in front of real users.
+    //
+    //   AUTH_THROTTLE_LIMIT  (default 30) attempts per IP
+    //   AUTH_THROTTLE_TTL    (default 300000 ms = 5 min)  window
+    //
+    // For hardened production, set AUTH_THROTTLE_LIMIT=5 AUTH_THROTTLE_TTL=900000.
     ThrottlerModule.forRoot([
       {
         name: 'default',
         ttl: 60_000,
-        limit: 120,
+        limit: 240,
       },
       {
         name: 'auth',
-        ttl: parseInt(process.env.AUTH_THROTTLE_TTL ?? '900000', 10),
-        limit: parseInt(process.env.AUTH_THROTTLE_LIMIT ?? '5', 10),
+        ttl: parseInt(process.env.AUTH_THROTTLE_TTL ?? '300000', 10),
+        limit: parseInt(process.env.AUTH_THROTTLE_LIMIT ?? '30', 10),
       },
     ]),
     PrismaModule,
