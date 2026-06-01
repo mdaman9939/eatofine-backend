@@ -155,18 +155,120 @@ export class VendorExtrasController {
     if (this.useMongo()) {
       const v = await this.mongo.findByMysqlId<MongoVendorDoc>('vendors', Number(req.actor!.id));
       if (!v) return {};
+      const vendorId = Number(v.mysql_id);
       const restaurants = await this.mongo.findMany<MongoRestaurantDoc>(
         'restaurants',
-        { mysql_vendor_id: Number(v.mysql_id) },
+        { mysql_vendor_id: vendorId },
       );
+      const restaurantIds = restaurants.map((r) => Number(r.mysql_id));
+
+      // Wallet — fields the Flutter ProfileModel needs to render WalletScreen
+      // without crashing on `!` null-check operators. Falls back to zeros if
+      // no wallet record exists for this vendor.
+      const wallet = await this.mongo.findOne<{
+        vendor_id?: number; mysql_vendor_id?: number; mysql_restaurant_id?: number;
+        balance?: number | string | null; total_earning?: number | string | null;
+        collected_cash?: number | string | null; total_withdrawn?: number | string | null;
+        pending_withdraw?: number | string | null;
+      }>('restaurant_wallets', { $or: [
+        { vendor_id: vendorId },
+        { mysql_vendor_id: vendorId },
+        ...(restaurantIds.length > 0 ? [{ mysql_restaurant_id: { $in: restaurantIds } }] : []),
+      ] });
+
+      const totalEarning = toNum(wallet?.total_earning) ?? 0;
+      const balance = toNum(wallet?.balance) ?? 0;
+      const cashInHands = toNum(wallet?.collected_cash) ?? 0;
+      const alreadyWithdrawn = toNum(wallet?.total_withdrawn) ?? 0;
+      const pendingWithdraw = toNum(wallet?.pending_withdraw) ?? 0;
+
+      // Order stats — Today / This Week / This Month tiles on the dashboard.
+      // All time-bucketed in JS to avoid Mongo aggregation pipeline complexity.
+      let todaysCount = 0, weekCount = 0, monthCount = 0, totalOrders = 0;
+      let todaysEarn = 0, weekEarn = 0, monthEarn = 0;
+      if (restaurantIds.length > 0) {
+        const now = Date.now();
+        const dayMs = 86_400_000;
+        const orders = await this.mongo.findMany<{
+          mysql_restaurant_id?: number; order_status?: string; order_amount?: number | string;
+          created_at?: Date | string;
+        }>('orders', { mysql_restaurant_id: { $in: restaurantIds } });
+        totalOrders = orders.length;
+        for (const o of orders) {
+          const ts = o.created_at ? new Date(o.created_at).getTime() : 0;
+          if (!Number.isFinite(ts)) continue;
+          const age = now - ts;
+          const amount = toNum(o.order_amount) ?? 0;
+          if (age <= dayMs) { todaysCount++; if (o.order_status === 'delivered') todaysEarn += amount; }
+          if (age <= 7 * dayMs) { weekCount++; if (o.order_status === 'delivered') weekEarn += amount; }
+          if (age <= 30 * dayMs) { monthCount++; if (o.order_status === 'delivered') monthEarn += amount; }
+        }
+      }
+
+      // member_since_days — how long the vendor has existed.
+      const vCreatedAt = (v as unknown as Record<string, unknown>).created_at;
+      const memberSince = vCreatedAt
+        ? Math.max(0, Math.floor((Date.now() - new Date(vCreatedAt as string | number | Date).getTime()) / 86_400_000))
+        : 30;
+
       return {
-        id: Number(v.mysql_id),
+        id: vendorId,
         f_name: v.f_name ?? null,
         l_name: v.l_name ?? null,
         email: v.email ?? null,
         phone: v.phone ?? null,
         image: v.image ?? null,
         status: v.status ?? null,
+        // ── Wallet (required by WalletScreen) ────────────────────────
+        cash_in_hands: cashInHands,
+        balance,
+        total_earning: totalEarning,
+        withdraw_able_balance: balance,
+        payable_balance: balance,
+        pending_withdraw: pendingWithdraw,
+        already_withdrawn: alreadyWithdrawn,
+        adjustable: true,
+        over_flow_warning: false,
+        over_flow_block_warning: false,
+        dynamic_balance: balance,
+        dynamic_balance_type: 'positive',
+        show_pay_now_button: false,
+        // ── Dashboard stats ──────────────────────────────────────────
+        order_count: totalOrders,
+        product_count: 0,
+        review_count: 0,
+        todays_order_count: todaysCount,
+        this_week_order_count: weekCount,
+        this_month_order_count: monthCount,
+        todays_earning: todaysEarn,
+        this_week_earning: weekEarn,
+        this_month_earning: monthEarn,
+        member_since_days: memberSince,
+        // ── Subscriptions (defaults — feature not wired up) ──────────
+        subscription: null,
+        subscription_other_data: null,
+        subscription_transactions: false,
+        // ── Role / permissions ───────────────────────────────────────
+        roles: ['owner'],
+        employee_info: null,
+        module_permission: {
+          my_shop: true,
+          order: true,
+          product: true,
+          chat: true,
+          campaign: true,
+          report_statics: true,
+          coupon: true,
+          deliveryman: true,
+          reviews_section: true,
+          my_wallet: true,
+          notification_setup: true,
+          custom_role: true,
+          food_section: true,
+          addon: true,
+          attribute: true,
+          subscription: true,
+        },
         restaurants: restaurants.map((r) => ({
           id: Number(r.mysql_id),
           name: r.name ?? null,
