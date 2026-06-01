@@ -6,15 +6,39 @@ services:
     region: singapore
     buildCommand: npm install && npx prisma generate && npm run build
     startCommand: npm run start:prod
-    healthCheckPath: /api/v1
+    healthCheckPath: /health
     envVars:
       - key: NODE_VERSION
         value: 20
-      - key: DATABASE_URL
-        sync: false      # set this manually in Render dashboard
+      - key: NODE_ENV
+        value: production
+
+      # ── MongoDB Atlas — set these in Render dashboard ─────────────────
+      - key: MONGO_USER
+        sync: false      # e.g. aman_admin
+      - key: MONGO_PASSWORD
+        sync: false      # literal password — encoder runs at boot
+      - key: MONGO_HOSTS
+        sync: false      # ac-...mongodb.net:27017,ac-...mongodb.net:27017,...
+      - key: MONGO_DATABASE
+        sync: false      # eatofine
+      - key: MONGO_REPLICA_SET
+        sync: false      # atlas-fv6e0i-shard-0
+      - key: MONGO_AUTH_SOURCE
+        sync: false      # admin
+
+      # ── Auth & CORS ───────────────────────────────────────────────────
       - key: JWT_SECRET
-        sync: false
+        sync: false      # 32-byte hex: openssl rand -hex 32
       - key: CORS_ORIGINS
-        sync: false      # e.g. https://eatofine.vercel.app
+        sync: false      # e.g. https://eatofine-admin.vercel.app
       - key: STORAGE_BASE_URL
-        sync: false      # e.g. https://eatofine-api.onrender.com/storage
+        sync: false      # e.g. https://eatofine-backend.onrender.com/storage
+
+      # ── Optional ──────────────────────────────────────────────────────
+      - key: STRICT_ENV_CHECK
+        value: "0"       # set to "1" to escalate env warnings to boot failures
+      - key: AUTH_THROTTLE_LIMIT
+        value: "5"
+      - key: AUTH_THROTTLE_TTL
+        value: "900000"  # 15 min in ms
