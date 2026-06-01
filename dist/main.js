@@ -34,15 +34,25 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const core_1 = require("@nestjs/core");
+const common_1 = require("@nestjs/common");
 const path = __importStar(require("path"));
 const app_module_1 = require("./app.module");
+const env_validation_1 = require("./common/env.validation");
+const all_exceptions_filter_1 = require("./common/all-exceptions.filter");
 BigInt.prototype.toJSON = function () {
     return Number(this);
 };
 async function bootstrap() {
+    (0, env_validation_1.validateEnv)();
     const app = await core_1.NestFactory.create(app_module_1.AppModule, {
         logger: ['error', 'warn', 'log'],
     });
+    app.useGlobalPipes(new common_1.ValidationPipe({
+        whitelist: true,
+        transform: true,
+        forbidNonWhitelisted: false,
+    }));
+    app.useGlobalFilters(new all_exceptions_filter_1.AllExceptionsFilter());
     app.setGlobalPrefix('api/v1', { exclude: ['/', 'health', 'storage/(.*)'] });
     const corsOrigins = (process.env.CORS_ORIGINS ?? '')
         .split(',')

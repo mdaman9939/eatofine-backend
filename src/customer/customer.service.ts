@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+﻿import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 
@@ -74,14 +74,14 @@ export class CustomerService {
     private readonly mongo: MongoDataService,
   ) {}
 
-  /** Feature flag — when "1", customer reads/writes route to MongoDB. */
+  /** Feature flag â€” when "1", customer reads/writes route to MongoDB. */
   private useMongo(): boolean {
     const v = (process.env.USE_MONGO_CUSTOMER ?? '').toLowerCase();
     return v === '1' || v === 'true' || v === 'yes';
   }
 
   private storageBase(): string {
-    return process.env.STORAGE_BASE_URL ?? 'http://192.168.0.159:3000/storage';
+    return process.env.STORAGE_BASE_URL ?? 'http://127.0.0.1:3000/storage';
   }
 
   async info(userId: bigint) {
@@ -524,7 +524,7 @@ export class CustomerService {
 
   async clearCart(identity: CartIdentity) {
     if (this.useMongo()) {
-      // No deleteMany helper exposed — loop deleteOne so we can rely on the
+      // No deleteMany helper exposed â€” loop deleteOne so we can rely on the
       // existing MongoDataService surface.
       const rows = await this.mongo.findMany<MongoCartDoc>('carts', {
         user_id: Number(identity.id),

@@ -10,6 +10,7 @@ exports.AppModule = void 0;
 const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
 const core_1 = require("@nestjs/core");
+const throttler_1 = require("@nestjs/throttler");
 const app_controller_1 = require("./app.controller");
 const prisma_module_1 = require("./prisma/prisma.module");
 const business_settings_module_1 = require("./business-settings/business-settings.module");
@@ -35,6 +36,18 @@ exports.AppModule = AppModule = __decorate([
     (0, common_1.Module)({
         imports: [
             config_1.ConfigModule.forRoot({ isGlobal: true }),
+            throttler_1.ThrottlerModule.forRoot([
+                {
+                    name: 'default',
+                    ttl: 60_000,
+                    limit: 120,
+                },
+                {
+                    name: 'auth',
+                    ttl: parseInt(process.env.AUTH_THROTTLE_TTL ?? '900000', 10),
+                    limit: parseInt(process.env.AUTH_THROTTLE_LIMIT ?? '5', 10),
+                },
+            ]),
             prisma_module_1.PrismaModule,
             business_settings_module_1.BusinessSettingsModule,
             auth_module_1.AuthModule,
@@ -53,7 +66,10 @@ exports.AppModule = AppModule = __decorate([
             migration_module_1.MigrationModule,
         ],
         controllers: [app_controller_1.AppController],
-        providers: [{ provide: core_1.APP_GUARD, useClass: auth_guard_1.AuthGuard }],
+        providers: [
+            { provide: core_1.APP_GUARD, useClass: throttler_1.ThrottlerGuard },
+            { provide: core_1.APP_GUARD, useClass: auth_guard_1.AuthGuard },
+        ],
     })
 ], AppModule);
 //# sourceMappingURL=app.module.js.map

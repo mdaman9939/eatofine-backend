@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+﻿import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 
@@ -51,21 +51,21 @@ export class OpsService {
     private readonly mongo: MongoDataService,
   ) {}
 
-  /** Feature flag — when "1", ops reads/writes route to MongoDB instead of MySQL. */
+  /** Feature flag â€” when "1", ops reads/writes route to MongoDB instead of MySQL. */
   private useMongo(): boolean {
     const v = (process.env.USE_MONGO_OPS ?? '').toLowerCase();
     return v === '1' || v === 'true' || v === 'yes';
   }
 
   private storageBase(): string {
-    return process.env.STORAGE_BASE_URL ?? 'http://192.168.0.159:3000/storage';
+    return process.env.STORAGE_BASE_URL ?? 'http://127.0.0.1:3000/storage';
   }
 
   private async restaurantForVendor(vendorId: bigint) {
     return this.prisma.restaurants.findFirst({ where: { vendor_id: vendorId } });
   }
 
-  /** Mongo equivalent — restaurant doc keyed off mysql_vendor_id. */
+  /** Mongo equivalent â€” restaurant doc keyed off mysql_vendor_id. */
   private async restaurantForVendorMongo(vendorId: bigint) {
     return this.mongo.findOne<{
       mysql_id: number;
@@ -326,7 +326,7 @@ export class OpsService {
       const dm = await this.mongo.findByMysqlId<{ mysql_id: number }>('delivery_men', deliveryManId);
       if (!dm) throw new NotFoundException({ errors: [{ code: 'delivery_man_id', message: 'not_found' }] });
       const data: Record<string, unknown> = { mysql_delivery_man_id: Number(deliveryManId) };
-      // Keep existing order_status as-is — Prisma version writes back the same value, so we don't touch it.
+      // Keep existing order_status as-is â€” Prisma version writes back the same value, so we don't touch it.
       await this.mongo.updateOne('orders', { mysql_id: Number(o.mysql_id) }, data);
       return { message: 'delivery_man_assigned', order_id: Number(o.mysql_id), delivery_man_id: deliveryManId };
     }
@@ -350,7 +350,7 @@ export class OpsService {
       const restaurant = await this.restaurantForVendorMongo(vendorId);
       if (!restaurant) throw new NotFoundException({ errors: [{ code: 'restaurant', message: 'not_found' }] });
       // Mongo `delivery_men` doesn't carry restaurant_id (it isn't migrated). The
-      // Prisma version OR-matches by zone OR restaurant — here we filter by the
+      // Prisma version OR-matches by zone OR restaurant â€” here we filter by the
       // restaurant's zone only. Approved DMs only.
       const filter: Record<string, unknown> = { application_status: 'approved' };
       if (restaurant.mysql_zone_id != null) {
@@ -428,7 +428,7 @@ export class OpsService {
       const dm = await this.mongo.findByMysqlId<{ mysql_id: number; mysql_zone_id?: number }>('delivery_men', Number(dmId));
       const filter: Record<string, unknown> = {
         // Match unassigned orders: either missing or null. Prisma's
-        // `delivery_man_id: null` translates to "no assignee" — in Mongo we
+        // `delivery_man_id: null` translates to "no assignee" â€” in Mongo we
         // accept both null and absent.
         $or: [{ mysql_delivery_man_id: null }, { mysql_delivery_man_id: { $exists: false } }],
         order_status: 'handover',
@@ -525,7 +525,7 @@ export class OpsService {
     return { message: 'order_status_updated', order_status: newStatus };
   }
 
-  /** Safe JSON parse — Mongo `food_details` may already be a JSON string from
+  /** Safe JSON parse â€” Mongo `food_details` may already be a JSON string from
    * the MySQL row (migrated as-is) or null. Returns null on parse failure. */
   private tryParse(s: string): unknown {
     try {

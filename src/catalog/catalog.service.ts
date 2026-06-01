@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+﻿import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -6,7 +6,7 @@ export class CatalogService {
   constructor(private readonly prisma: PrismaService) {}
 
   private storageBase(): string {
-    return process.env.STORAGE_BASE_URL ?? 'http://192.168.0.159:3000/storage';
+    return process.env.STORAGE_BASE_URL ?? 'http://127.0.0.1:3000/storage';
   }
 
   fullUrl(folder: string, file?: string | null) {

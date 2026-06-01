@@ -8,10 +8,20 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
+var __param = (this && this.__param) || function (paramIndex, decorator) {
+    return function (target, key) { decorator(target, key, paramIndex); }
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AppController = void 0;
 const common_1 = require("@nestjs/common");
+const throttler_1 = require("@nestjs/throttler");
+const mongoose_1 = require("@nestjs/mongoose");
+const mongoose_2 = require("mongoose");
 let AppController = class AppController {
+    mongo;
+    constructor(mongo) {
+        this.mongo = mongo;
+    }
     root() {
         const uptime = process.uptime();
         const startedAt = new Date(Date.now() - uptime * 1000).toISOString();
@@ -87,14 +97,40 @@ let AppController = class AppController {
   </body>
 </html>`;
     }
-    health() {
-        return {
-            ok: true,
+    async health() {
+        const state = this.mongo?.readyState ?? 0;
+        const stateLabel = ['disconnected', 'connected', 'connecting', 'disconnecting'][state] ?? 'unknown';
+        let dbOk = false;
+        let dbLatencyMs = null;
+        let dbError = null;
+        if (state === 1 && this.mongo?.db) {
+            const started = Date.now();
+            try {
+                await this.mongo.db.admin().ping();
+                dbOk = true;
+                dbLatencyMs = Date.now() - started;
+            }
+            catch (err) {
+                dbError = err.message;
+            }
+        }
+        const body = {
+            ok: dbOk,
             service: 'eatofine-api',
-            database: 'MongoDB Atlas',
+            database: {
+                name: 'MongoDB Atlas',
+                state: stateLabel,
+                ping_ok: dbOk,
+                latency_ms: dbLatencyMs,
+                error: dbError,
+            },
             uptime_seconds: Math.round(process.uptime()),
             timestamp: new Date().toISOString(),
         };
+        if (!dbOk) {
+            throw new (await import('@nestjs/common')).ServiceUnavailableException(body);
+        }
+        return body;
     }
     apiRoot() {
         return {
@@ -129,9 +165,10 @@ __decorate([
 ], AppController.prototype, "root", null);
 __decorate([
     (0, common_1.Get)('/health'),
+    (0, common_1.Header)('cache-control', 'no-store'),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:returntype", Promise)
 ], AppController.prototype, "health", null);
 __decorate([
     (0, common_1.Get)(),
@@ -140,6 +177,9 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AppController.prototype, "apiRoot", null);
 exports.AppController = AppController = __decorate([
-    (0, common_1.Controller)()
+    (0, common_1.Controller)(),
+    (0, throttler_1.SkipThrottle)(),
+    __param(0, (0, mongoose_1.InjectConnection)()),
+    __metadata("design:paramtypes", [mongoose_2.Connection])
 ], AppController);
 //# sourceMappingURL=app.controller.js.map

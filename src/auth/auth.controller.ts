@@ -1,7 +1,15 @@
 import { BadRequestException, Body, Controller, HttpCode, Post } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 
+// All login + signup routes share the strict `auth` throttler bucket
+// (5 attempts / 15 min by default — see AUTH_THROTTLE_* env vars in
+// app.module.ts). The `default` bucket is set to {limit:0} so it doesn't
+// double-count against the auth bucket.
+const AUTH_THROTTLE = { auth: {}, default: { limit: 0, ttl: 0 } } as const;
+
 @Controller('auth')
+@Throttle(AUTH_THROTTLE)
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 

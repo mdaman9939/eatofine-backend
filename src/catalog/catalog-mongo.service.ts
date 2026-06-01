@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+﻿import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Category, CategoryDocument } from '../mongo/schemas/category.schema';
@@ -19,7 +19,7 @@ export class CatalogMongoService {
   ) {}
 
   private storageBase(): string {
-    return process.env.STORAGE_BASE_URL ?? 'http://192.168.0.159:3000/storage';
+    return process.env.STORAGE_BASE_URL ?? 'http://127.0.0.1:3000/storage';
   }
 
   private fullUrl(folder: string, file?: string | null) {

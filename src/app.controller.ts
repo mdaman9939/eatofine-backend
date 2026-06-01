@@ -1,7 +1,13 @@
 import { Controller, Get, Header } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
+import { InjectConnection } from '@nestjs/mongoose';
+import { Connection } from 'mongoose';
 
 @Controller()
+@SkipThrottle()
 export class AppController {
+  constructor(@InjectConnection() private readonly mongo: Connection) {}
+
   /** Friendly landing page so visiting the deployed base URL doesn't 404. */
   @Get('/')
   @Header('content-type', 'text/html; charset=utf-8')
@@ -81,16 +87,52 @@ export class AppController {
 </html>`;
   }
 
-  /** Simple JSON health endpoint — for uptime monitors / cron-job pings. */
+  /** Health endpoint — pings MongoDB so uptime monitors (and Render's own
+   *  health-check probe) catch DB outages, not just "is the Node process
+   *  alive". Returns 503 if Mongo is down so monitors get a real failure. */
   @Get('/health')
-  health() {
-    return {
-      ok: true,
+  @Header('cache-control', 'no-store')
+  async health() {
+    // readyState: 0=disconnected, 1=connected, 2=connecting, 3=disconnecting
+    const state = this.mongo?.readyState ?? 0;
+    const stateLabel = ['disconnected', 'connected', 'connecting', 'disconnecting'][state] ?? 'unknown';
+
+    let dbOk = false;
+    let dbLatencyMs: number | null = null;
+    let dbError: string | null = null;
+
+    if (state === 1 && this.mongo?.db) {
+      const started = Date.now();
+      try {
+        // {ping: 1} is the canonical Mongo liveness check — cheap and works
+        // regardless of which DB user we're authenticated as.
+        await this.mongo.db.admin().ping();
+        dbOk = true;
+        dbLatencyMs = Date.now() - started;
+      } catch (err) {
+        dbError = (err as Error).message;
+      }
+    }
+
+    const body = {
+      ok: dbOk,
       service: 'eatofine-api',
-      database: 'MongoDB Atlas',
+      database: {
+        name: 'MongoDB Atlas',
+        state: stateLabel,
+        ping_ok: dbOk,
+        latency_ms: dbLatencyMs,
+        error: dbError,
+      },
       uptime_seconds: Math.round(process.uptime()),
       timestamp: new Date().toISOString(),
     };
+
+    if (!dbOk) {
+      // Throwing keeps the JSON shape but lets Nest emit a 503.
+      throw new (await import('@nestjs/common')).ServiceUnavailableException(body);
+    }
+    return body;
   }
 
   /** API root (now reachable at /api/v1) — returns service metadata. */

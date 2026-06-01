@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule as NestConfig } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { PrismaModule } from './prisma/prisma.module';
 import { BusinessSettingsModule } from './business-settings/business-settings.module';
@@ -23,6 +24,22 @@ import { MigrationModule } from './mongo/migration.module';
 @Module({
   imports: [
     NestConfig.forRoot({ isGlobal: true }),
+    // Two throttler buckets: a permissive global default + a strict `auth`
+    // bucket that login/signup endpoints opt into via @Throttle({auth: ...}).
+    // Tweak via env: AUTH_THROTTLE_LIMIT (default 5) over AUTH_THROTTLE_TTL ms
+    // (default 15 minutes).
+    ThrottlerModule.forRoot([
+      {
+        name: 'default',
+        ttl: 60_000,
+        limit: 120,
+      },
+      {
+        name: 'auth',
+        ttl: parseInt(process.env.AUTH_THROTTLE_TTL ?? '900000', 10),
+        limit: parseInt(process.env.AUTH_THROTTLE_LIMIT ?? '5', 10),
+      },
+    ]),
     PrismaModule,
     BusinessSettingsModule,
     AuthModule,
@@ -41,6 +58,11 @@ import { MigrationModule } from './mongo/migration.module';
     MigrationModule,
   ],
   controllers: [AppController],
-  providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
+  providers: [
+    // Throttler runs before AuthGuard — abusive clients hit rate-limit
+    // before we waste cycles validating their JWT.
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: AuthGuard },
+  ],
 })
 export class AppModule {}

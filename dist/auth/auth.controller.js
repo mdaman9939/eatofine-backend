@@ -14,7 +14,9 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AuthController = void 0;
 const common_1 = require("@nestjs/common");
+const throttler_1 = require("@nestjs/throttler");
 const auth_service_1 = require("./auth.service");
+const AUTH_THROTTLE = { auth: {}, default: { limit: 0, ttl: 0 } };
 let AuthController = class AuthController {
     auth;
     constructor(auth) {
@@ -129,6 +131,7 @@ __decorate([
 ], AuthController.prototype, "adminLogin", null);
 exports.AuthController = AuthController = __decorate([
     (0, common_1.Controller)('auth'),
+    (0, throttler_1.Throttle)(AUTH_THROTTLE),
     __metadata("design:paramtypes", [auth_service_1.AuthService])
 ], AuthController);
 //# sourceMappingURL=auth.controller.js.map

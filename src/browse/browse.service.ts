@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+﻿import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 
@@ -76,14 +76,14 @@ export class BrowseService {
     private readonly mongo: MongoDataService,
   ) {}
 
-  /** Feature flag — when "1", browse reads route to MongoDB instead of MySQL. */
+  /** Feature flag â€” when "1", browse reads route to MongoDB instead of MySQL. */
   private useMongo(): boolean {
     const v = (process.env.USE_MONGO_BROWSE ?? '').toLowerCase();
     return v === '1' || v === 'true' || v === 'yes';
   }
 
   private storageBase(): string {
-    return process.env.STORAGE_BASE_URL ?? 'http://192.168.0.159:3000/storage';
+    return process.env.STORAGE_BASE_URL ?? 'http://127.0.0.1:3000/storage';
   }
   private fullUrl(folder: string, file?: string | null) {
     return file ? `${this.storageBase()}/${folder}/${file}` : null;
@@ -154,7 +154,7 @@ export class BrowseService {
     };
   }
 
-  /** Map MongoDB restaurant doc → response shape (mirrors mapRestaurant). */
+  /** Map MongoDB restaurant doc â†’ response shape (mirrors mapRestaurant). */
   private mapRestaurantMongo(r: MongoRestaurantDoc) {
     return {
       id: Number(r.mysql_id ?? 0),
@@ -251,7 +251,7 @@ export class BrowseService {
     };
   }
 
-  /** Map MongoDB food doc → response shape (mirrors mapFood). */
+  /** Map MongoDB food doc â†’ response shape (mirrors mapFood). */
   private mapFoodMongo(f: MongoFoodDoc, restaurantName?: string) {
     const safeParse = (s: unknown): unknown => {
       if (s == null) return [];

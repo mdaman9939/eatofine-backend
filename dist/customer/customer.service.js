@@ -25,7 +25,7 @@ let CustomerService = class CustomerService {
         return v === '1' || v === 'true' || v === 'yes';
     }
     storageBase() {
-        return process.env.STORAGE_BASE_URL ?? 'http://192.168.0.159:3000/storage';
+        return process.env.STORAGE_BASE_URL ?? 'http://127.0.0.1:3000/storage';
     }
     async info(userId) {
         if (this.useMongo()) {
