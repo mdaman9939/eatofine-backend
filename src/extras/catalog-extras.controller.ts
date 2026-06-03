@@ -336,6 +336,93 @@ export class CatalogExtrasController {
     return { menus: [], total_size: 0 };
   }
 
+  /** Full product search — invoked from customer app's search results page
+   *  with the same query params that Laravel used. Returns the same shape
+   *  as `food-or-restaurant-search` but only the products half. */
+  @Get('products/search')
+  async productsSearch(
+    @Query('name') name?: string,
+    @Query('offset') offsetStr?: string,
+    @Query('limit') limitStr?: string,
+    @Query('min_price') minPriceStr?: string,
+    @Query('max_price') maxPriceStr?: string,
+  ) {
+    const limit = parseInt(limitStr ?? '10', 10);
+    const offset = parseInt(offsetStr ?? '1', 10);
+    const minPrice = parseFloat(minPriceStr ?? '0');
+    const maxPrice = maxPriceStr ? parseFloat(maxPriceStr) : Infinity;
+    const q = (name ?? '').trim();
+    const filter: Record<string, unknown> = { status: true };
+    if (q) {
+      const escape = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.name = { $regex: escape, $options: 'i' };
+    }
+    if (!this.useMongo()) {
+      return { total_size: 0, limit, offset, products: [] };
+    }
+    const all = await this.mongo.findMany<Record<string, unknown>>('foods', filter);
+    const priceFiltered = all.filter((f) => {
+      const p = Number(f.price ?? 0);
+      return p >= minPrice && p <= maxPrice;
+    });
+    const start = Math.max(0, (offset - 1) * limit);
+    const slice = priceFiltered.slice(start, start + limit);
+    return {
+      total_size: priceFiltered.length,
+      limit, offset,
+      products: slice.map((r) => ({
+        ...r,
+        id: Number(r.mysql_id),
+        price: this.num(r.price),
+        tax: this.num(r.tax),
+        discount: this.num(r.discount),
+        restaurant_id: Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0),
+        category_id: r.mysql_category_id !== undefined && r.mysql_category_id !== null
+          ? Number(r.mysql_category_id)
+          : (r.category_id !== undefined && r.category_id !== null ? Number(r.category_id) : null),
+      })),
+    };
+  }
+
+  /** Full restaurant search — same as above but for restaurants. */
+  @Get('restaurants/search')
+  async restaurantsSearch(
+    @Query('name') name?: string,
+    @Query('offset') offsetStr?: string,
+    @Query('limit') limitStr?: string,
+  ) {
+    const limit = parseInt(limitStr ?? '10', 10);
+    const offset = parseInt(offsetStr ?? '1', 10);
+    const q = (name ?? '').trim();
+    const filter: Record<string, unknown> = { status: true };
+    if (q) {
+      const escape = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.name = { $regex: escape, $options: 'i' };
+    }
+    if (!this.useMongo()) {
+      return { total_size: 0, limit, offset, restaurants: [] };
+    }
+    const all = await this.mongo.findMany<Record<string, unknown>>('restaurants', filter);
+    const start = Math.max(0, (offset - 1) * limit);
+    const slice = all.slice(start, start + limit);
+    return {
+      total_size: all.length,
+      limit, offset,
+      restaurants: slice.map((r) => ({
+        ...r,
+        id: Number(r.mysql_id),
+        zone_id: r.mysql_zone_id !== undefined && r.mysql_zone_id !== null
+          ? Number(r.mysql_zone_id)
+          : (r.zone_id !== undefined && r.zone_id !== null ? Number(r.zone_id) : null),
+        vendor_id: Number(r.mysql_vendor_id ?? r.vendor_id ?? 0),
+        tax: this.num(r.tax),
+        minimum_order: this.num(r.minimum_order),
+        minimum_shipping_charge: this.num(r.minimum_shipping_charge),
+        comission: r.comission !== undefined && r.comission !== null ? this.num(r.comission) : null,
+      })),
+    };
+  }
+
   @Get('products/reviews')
   async productReviews(@Query('product_id') idStr?: string) {
     const id = parseInt(idStr ?? '', 10);
@@ -463,8 +550,15 @@ export class CatalogExtrasController {
         created_by_id: Number(r.mysql_created_by_id ?? r.created_by_id ?? 0),
       }));
     }
-    const rows = await this.prisma.advertisements.findMany({ where: { status: 'approved' }, orderBy: { priority: 'asc' }, take: 20 });
-    return rows.map((r) => ({ ...r, id: Number(r.id), restaurant_id: Number(r.restaurant_id), created_by_id: Number(r.created_by_id) }));
+    // Prisma fallback: catch the inevitable MySQL-unreachable error so the
+    // app keeps working in Mongo-only deployments where USE_MONGO_EXTRAS=1
+    // is the expectation, but a misroute lands here anyway.
+    try {
+      const rows = await this.prisma.advertisements.findMany({ where: { status: 'approved' }, orderBy: { priority: 'asc' }, take: 20 });
+      return rows.map((r) => ({ ...r, id: Number(r.id), restaurant_id: Number(r.restaurant_id), created_by_id: Number(r.created_by_id) }));
+    } catch {
+      return [];
+    }
   }
 
   // ── Misc lookups ─────────────────────────────────────────────────

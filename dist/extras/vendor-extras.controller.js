@@ -42,15 +42,89 @@ let VendorExtrasController = class VendorExtrasController {
             const v = await this.mongo.findByMysqlId('vendors', Number(req.actor.id));
             if (!v)
                 return {};
-            const restaurants = await this.mongo.findMany('restaurants', { mysql_vendor_id: Number(v.mysql_id) });
+            const vendorId = Number(v.mysql_id);
+            const restaurants = await this.mongo.findMany('restaurants', { mysql_vendor_id: vendorId });
+            const restaurantIds = restaurants.map((r) => Number(r.mysql_id));
+            const wallet = await this.mongo.findOne('restaurant_wallets', { $or: [
+                    { vendor_id: vendorId },
+                    { mysql_vendor_id: vendorId },
+                    ...(restaurantIds.length > 0 ? [{ mysql_restaurant_id: { $in: restaurantIds } }] : []),
+                ] });
+            const totalEarning = toNum(wallet?.total_earning) ?? 0;
+            const balance = toNum(wallet?.balance) ?? 0;
+            const cashInHands = toNum(wallet?.collected_cash) ?? 0;
+            const alreadyWithdrawn = toNum(wallet?.total_withdrawn) ?? 0;
+            const pendingWithdraw = toNum(wallet?.pending_withdraw) ?? 0;
+            let todaysCount = 0, weekCount = 0, monthCount = 0, totalOrders = 0;
+            let todaysEarn = 0, weekEarn = 0, monthEarn = 0;
+            if (restaurantIds.length > 0) {
+                const now = Date.now();
+                const dayMs = 86_400_000;
+                const orders = await this.mongo.findMany('orders', { mysql_restaurant_id: { $in: restaurantIds } });
+                totalOrders = orders.length;
+                for (const o of orders) {
+                    const ts = o.created_at ? new Date(o.created_at).getTime() : 0;
+                    if (!Number.isFinite(ts))
+                        continue;
+                    const age = now - ts;
+                    const amount = toNum(o.order_amount) ?? 0;
+                    if (age <= dayMs) {
+                        todaysCount++;
+                        if (o.order_status === 'delivered')
+                            todaysEarn += amount;
+                    }
+                    if (age <= 7 * dayMs) {
+                        weekCount++;
+                        if (o.order_status === 'delivered')
+                            weekEarn += amount;
+                    }
+                    if (age <= 30 * dayMs) {
+                        monthCount++;
+                        if (o.order_status === 'delivered')
+                            monthEarn += amount;
+                    }
+                }
+            }
+            const vCreatedAt = v.created_at;
+            const memberSince = vCreatedAt
+                ? Math.max(0, Math.floor((Date.now() - new Date(vCreatedAt).getTime()) / 86_400_000))
+                : 30;
             return {
-                id: Number(v.mysql_id),
+                id: vendorId,
                 f_name: v.f_name ?? null,
                 l_name: v.l_name ?? null,
                 email: v.email ?? null,
                 phone: v.phone ?? null,
                 image: v.image ?? null,
                 status: v.status ?? null,
+                cash_in_hands: cashInHands,
+                balance,
+                total_earning: totalEarning,
+                withdraw_able_balance: balance,
+                Payable_Balance: balance,
+                pending_withdraw: pendingWithdraw,
+                total_withdrawn: alreadyWithdrawn,
+                adjust_able: true,
+                over_flow_warning: false,
+                over_flow_block_warning: false,
+                dynamic_balance: balance,
+                dynamic_balance_type: 'positive',
+                show_pay_now_button: false,
+                order_count: totalOrders,
+                product_count: 0,
+                review_count: 0,
+                todays_order_count: todaysCount,
+                this_week_order_count: weekCount,
+                this_month_order_count: monthCount,
+                todays_earning: todaysEarn,
+                this_week_earning: weekEarn,
+                this_month_earning: monthEarn,
+                member_since_days: memberSince,
+                subscription: null,
+                subscription_other_data: null,
+                subscription_transactions: false,
+                roles: [],
+                employee_info: null,
                 restaurants: restaurants.map((r) => ({
                     id: Number(r.mysql_id),
                     name: r.name ?? null,
@@ -122,20 +196,44 @@ let VendorExtrasController = class VendorExtrasController {
     businessSetup() { return { message: 'business setup updated' }; }
     addDineInTable() { return { message: 'added' }; }
     remove() { return { message: 'Not available in demo' }; }
+    shapeOrder(rIn, detailsCount) {
+        const r = rIn;
+        const created = r.created_at;
+        const updated = r.updated_at;
+        return {
+            ...(r.legacy ?? {}),
+            ...r,
+            id: Number(r.mysql_id),
+            user_id: r.mysql_user_id !== null && r.mysql_user_id !== undefined ? Number(r.mysql_user_id) : null,
+            restaurant_id: r.mysql_restaurant_id !== null && r.mysql_restaurant_id !== undefined ? Number(r.mysql_restaurant_id) : 0,
+            order_amount: toNum(r.order_amount) ?? 0,
+            details_count: detailsCount,
+            order_status: (r.order_status ?? 'pending'),
+            order_type: (r.order_type ?? 'delivery'),
+            payment_method: (r.payment_method ?? 'cash_on_delivery'),
+            payment_status: (r.payment_status ?? 'unpaid'),
+            delivery_address: r.delivery_address ?? null,
+            created_at: created ? new Date(created).toISOString() : new Date().toISOString(),
+            updated_at: updated ? new Date(updated).toISOString() : new Date().toISOString(),
+        };
+    }
+    async detailsCountMap(orderIds) {
+        if (orderIds.length === 0)
+            return new Map();
+        const rows = await this.mongo.aggregate('order_details', [
+            { $match: { order_id: { $in: orderIds } } },
+            { $group: { _id: '$order_id', count: { $sum: 1 } } },
+        ]);
+        return new Map(rows.map((r) => [Number(r._id), r.count]));
+    }
     async currentOrders(req) {
         if (this.useMongo()) {
             const restaurant = await this.mongo.findOne('restaurants', { mysql_vendor_id: Number(req.actor.id) });
             if (!restaurant)
                 return [];
             const rows = await this.mongo.findMany('orders', { mysql_restaurant_id: Number(restaurant.mysql_id), order_status: { $in: ['accepted', 'confirmed', 'processing'] } }, { sort: { mysql_id: -1 } });
-            return rows.map((r) => ({
-                ...(r.legacy ?? {}),
-                ...r,
-                id: Number(r.mysql_id),
-                user_id: r.mysql_user_id !== null && r.mysql_user_id !== undefined ? Number(r.mysql_user_id) : null,
-                restaurant_id: r.mysql_restaurant_id !== null && r.mysql_restaurant_id !== undefined ? Number(r.mysql_restaurant_id) : 0,
-                order_amount: toNum(r.order_amount),
-            }));
+            const countsByOrderId = await this.detailsCountMap(rows.map((r) => Number(r.mysql_id)));
+            return rows.map((r) => this.shapeOrder(r, countsByOrderId.get(Number(r.mysql_id)) ?? 1));
         }
         const restaurant = await this.prisma.restaurants.findFirst({ where: { vendor_id: req.actor.id }, select: { id: true } });
         if (!restaurant)
@@ -152,15 +250,9 @@ let VendorExtrasController = class VendorExtrasController {
             if (!restaurant)
                 return { orders: [], total_size: 0 };
             const rows = await this.mongo.findMany('orders', { mysql_restaurant_id: Number(restaurant.mysql_id), order_status: { $in: ['delivered', 'canceled', 'refunded'] } }, { sort: { mysql_id: -1 }, limit: 50 });
+            const countsByOrderId = await this.detailsCountMap(rows.map((r) => Number(r.mysql_id)));
             return {
-                orders: rows.map((r) => ({
-                    ...(r.legacy ?? {}),
-                    ...r,
-                    id: Number(r.mysql_id),
-                    user_id: r.mysql_user_id !== null && r.mysql_user_id !== undefined ? Number(r.mysql_user_id) : null,
-                    restaurant_id: r.mysql_restaurant_id !== null && r.mysql_restaurant_id !== undefined ? Number(r.mysql_restaurant_id) : 0,
-                    order_amount: toNum(r.order_amount),
-                })),
+                orders: rows.map((r) => this.shapeOrder(r, countsByOrderId.get(Number(r.mysql_id)) ?? 1)),
                 total_size: rows.length,
             };
         }
@@ -180,16 +272,10 @@ let VendorExtrasController = class VendorExtrasController {
             return null;
         if (this.useMongo()) {
             const o = await this.mongo.findByMysqlId('orders', id);
-            return o
-                ? {
-                    ...(o.legacy ?? {}),
-                    ...o,
-                    id: Number(o.mysql_id),
-                    user_id: o.mysql_user_id !== null && o.mysql_user_id !== undefined ? Number(o.mysql_user_id) : null,
-                    restaurant_id: o.mysql_restaurant_id !== null && o.mysql_restaurant_id !== undefined ? Number(o.mysql_restaurant_id) : 0,
-                    order_amount: toNum(o.order_amount),
-                }
-                : null;
+            if (!o)
+                return null;
+            const counts = await this.detailsCountMap([Number(o.mysql_id)]);
+            return this.shapeOrder(o, counts.get(Number(o.mysql_id)) ?? 1);
         }
         const o = await this.prisma.orders.findUnique({ where: { id: BigInt(id) } });
         return o ? { ...o, id: Number(o.id), user_id: o.user_id ? Number(o.user_id) : null, restaurant_id: Number(o.restaurant_id), order_amount: Number(o.order_amount) } : null;

@@ -616,6 +616,21 @@ let EnhancementsService = class EnhancementsService {
             }),
         };
     }
+    flattenAddress(value) {
+        if (value == null)
+            return null;
+        if (typeof value === 'string')
+            return value;
+        if (typeof value === 'object') {
+            const v = value;
+            if (typeof v.address === 'string')
+                return v.address;
+            if (typeof v.formatted === 'string')
+                return v.formatted;
+            return null;
+        }
+        return String(value);
+    }
     async getInvoice(orderId) {
         if (this.useMongo()) {
             const order = await this.mongo.findByMysqlId('orders', orderId);
@@ -648,7 +663,7 @@ let EnhancementsService = class EnhancementsService {
                 bill_to: {
                     name: user ? `${user.f_name ?? ''} ${user.l_name ?? ''}`.trim() : 'Customer',
                     email: user?.email ?? null, phone: user?.phone ?? null,
-                    address: order.delivery_address,
+                    address: this.flattenAddress(order.delivery_address),
                 },
                 items: items.map((it) => {
                     let parsed = {};
@@ -705,7 +720,7 @@ let EnhancementsService = class EnhancementsService {
             bill_to: {
                 name: user ? `${user.f_name ?? ''} ${user.l_name ?? ''}`.trim() : 'Customer',
                 email: user?.email ?? null, phone: user?.phone ?? null,
-                address: order.delivery_address,
+                address: this.flattenAddress(order.delivery_address),
             },
             items: items.map((it) => {
                 let parsed = {};

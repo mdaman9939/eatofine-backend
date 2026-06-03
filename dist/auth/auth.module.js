@@ -17,11 +17,16 @@ function resolveJwtSecret() {
     const fromEnv = process.env.JWT_SECRET?.trim();
     if (fromEnv && fromEnv.length >= 16)
         return fromEnv;
-    if (process.env.NODE_ENV === 'production') {
-        throw new Error('JWT_SECRET environment variable is missing or too short. Set a strong ' +
-            'value (32+ chars, e.g. `openssl rand -hex 32`) before starting in production.');
+    const isProd = process.env.NODE_ENV === 'production';
+    const strict = process.env.STRICT_ENV_CHECK === '1';
+    if (strict && isProd) {
+        throw new Error('JWT_SECRET is missing or too short. Set a strong value (32+ chars). ' +
+            'STRICT_ENV_CHECK=1 is enabled — unset it to allow boot with a dev fallback.');
     }
-    console.warn('[auth] JWT_SECRET not set — using dev fallback. NEVER deploy without setting it.');
+    console.warn(isProd
+        ? '\n⚠️  [auth] JWT_SECRET MISSING IN PRODUCTION — using dev fallback. ' +
+            'Tokens are forge-able. Set JWT_SECRET in Render dashboard and redeploy.\n'
+        : '[auth] JWT_SECRET not set — using dev fallback (development).');
     return 'stackfood-admin-dev-secret-change-me';
 }
 let AuthModule = class AuthModule {

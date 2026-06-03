@@ -192,6 +192,7 @@ export declare class EnhancementsService {
             status: string;
         }[];
     }>;
+    private flattenAddress;
     getInvoice(orderId: number): Promise<{
         invoice_no: string;
         issued_on: Date | null;

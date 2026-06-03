@@ -718,6 +718,23 @@ export class EnhancementsService {
     };
   }
 
+  /** delivery_address was a plain string in the original MySQL schema, but
+   *  Mongo seed/migration sometimes stores it as { address, latitude, longitude }.
+   *  The admin invoice page renders this directly in JSX, so an object value
+   *  crashes React with "Objects are not valid as a React child". Always
+   *  flatten to a string here. */
+  private flattenAddress(value: unknown): string | null {
+    if (value == null) return null;
+    if (typeof value === 'string') return value;
+    if (typeof value === 'object') {
+      const v = value as { address?: unknown; formatted?: unknown };
+      if (typeof v.address === 'string') return v.address;
+      if (typeof v.formatted === 'string') return v.formatted;
+      return null;
+    }
+    return String(value);
+  }
+
   async getInvoice(orderId: number) {
     if (this.useMongo()) {
       const order = await this.mongo.findByMysqlId<MongoOrderDoc>('orders', orderId);
@@ -753,7 +770,7 @@ export class EnhancementsService {
         bill_to: {
           name: user ? `${user.f_name ?? ''} ${user.l_name ?? ''}`.trim() : 'Customer',
           email: user?.email ?? null, phone: user?.phone ?? null,
-          address: order.delivery_address,
+          address: this.flattenAddress(order.delivery_address),
         },
         items: items.map((it) => {
           let parsed: { name?: string } = {};
@@ -806,7 +823,7 @@ export class EnhancementsService {
       bill_to: {
         name: user ? `${user.f_name ?? ''} ${user.l_name ?? ''}`.trim() : 'Customer',
         email: user?.email ?? null, phone: user?.phone ?? null,
-        address: order.delivery_address,
+        address: this.flattenAddress(order.delivery_address),
       },
       items: items.map((it) => {
         let parsed: { name?: string } = {};

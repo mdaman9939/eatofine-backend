@@ -149,6 +149,33 @@ export declare class CatalogExtrasController {
         menus: never[];
         total_size: number;
     };
+    productsSearch(name?: string, offsetStr?: string, limitStr?: string, minPriceStr?: string, maxPriceStr?: string): Promise<{
+        total_size: number;
+        limit: number;
+        offset: number;
+        products: {
+            id: number;
+            price: number;
+            tax: number;
+            discount: number;
+            restaurant_id: number;
+            category_id: number | null;
+        }[];
+    }>;
+    restaurantsSearch(name?: string, offsetStr?: string, limitStr?: string): Promise<{
+        total_size: number;
+        limit: number;
+        offset: number;
+        restaurants: {
+            id: number;
+            zone_id: number | null;
+            vendor_id: number;
+            tax: number;
+            minimum_order: number;
+            minimum_shipping_charge: number;
+            comission: number | null;
+        }[];
+    }>;
     productReviews(idStr?: string): Promise<{
         id: number;
         food_id: number;

@@ -304,6 +304,75 @@ let CatalogExtrasController = class CatalogExtrasController {
     setMenu() {
         return { menus: [], total_size: 0 };
     }
+    async productsSearch(name, offsetStr, limitStr, minPriceStr, maxPriceStr) {
+        const limit = parseInt(limitStr ?? '10', 10);
+        const offset = parseInt(offsetStr ?? '1', 10);
+        const minPrice = parseFloat(minPriceStr ?? '0');
+        const maxPrice = maxPriceStr ? parseFloat(maxPriceStr) : Infinity;
+        const q = (name ?? '').trim();
+        const filter = { status: true };
+        if (q) {
+            const escape = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            filter.name = { $regex: escape, $options: 'i' };
+        }
+        if (!this.useMongo()) {
+            return { total_size: 0, limit, offset, products: [] };
+        }
+        const all = await this.mongo.findMany('foods', filter);
+        const priceFiltered = all.filter((f) => {
+            const p = Number(f.price ?? 0);
+            return p >= minPrice && p <= maxPrice;
+        });
+        const start = Math.max(0, (offset - 1) * limit);
+        const slice = priceFiltered.slice(start, start + limit);
+        return {
+            total_size: priceFiltered.length,
+            limit, offset,
+            products: slice.map((r) => ({
+                ...r,
+                id: Number(r.mysql_id),
+                price: this.num(r.price),
+                tax: this.num(r.tax),
+                discount: this.num(r.discount),
+                restaurant_id: Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0),
+                category_id: r.mysql_category_id !== undefined && r.mysql_category_id !== null
+                    ? Number(r.mysql_category_id)
+                    : (r.category_id !== undefined && r.category_id !== null ? Number(r.category_id) : null),
+            })),
+        };
+    }
+    async restaurantsSearch(name, offsetStr, limitStr) {
+        const limit = parseInt(limitStr ?? '10', 10);
+        const offset = parseInt(offsetStr ?? '1', 10);
+        const q = (name ?? '').trim();
+        const filter = { status: true };
+        if (q) {
+            const escape = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            filter.name = { $regex: escape, $options: 'i' };
+        }
+        if (!this.useMongo()) {
+            return { total_size: 0, limit, offset, restaurants: [] };
+        }
+        const all = await this.mongo.findMany('restaurants', filter);
+        const start = Math.max(0, (offset - 1) * limit);
+        const slice = all.slice(start, start + limit);
+        return {
+            total_size: all.length,
+            limit, offset,
+            restaurants: slice.map((r) => ({
+                ...r,
+                id: Number(r.mysql_id),
+                zone_id: r.mysql_zone_id !== undefined && r.mysql_zone_id !== null
+                    ? Number(r.mysql_zone_id)
+                    : (r.zone_id !== undefined && r.zone_id !== null ? Number(r.zone_id) : null),
+                vendor_id: Number(r.mysql_vendor_id ?? r.vendor_id ?? 0),
+                tax: this.num(r.tax),
+                minimum_order: this.num(r.minimum_order),
+                minimum_shipping_charge: this.num(r.minimum_shipping_charge),
+                comission: r.comission !== undefined && r.comission !== null ? this.num(r.comission) : null,
+            })),
+        };
+    }
     async productReviews(idStr) {
         const id = parseInt(idStr ?? '', 10);
         if (!Number.isFinite(id))
@@ -399,8 +468,13 @@ let CatalogExtrasController = class CatalogExtrasController {
                 created_by_id: Number(r.mysql_created_by_id ?? r.created_by_id ?? 0),
             }));
         }
-        const rows = await this.prisma.advertisements.findMany({ where: { status: 'approved' }, orderBy: { priority: 'asc' }, take: 20 });
-        return rows.map((r) => ({ ...r, id: Number(r.id), restaurant_id: Number(r.restaurant_id), created_by_id: Number(r.created_by_id) }));
+        try {
+            const rows = await this.prisma.advertisements.findMany({ where: { status: 'approved' }, orderBy: { priority: 'asc' }, take: 20 });
+            return rows.map((r) => ({ ...r, id: Number(r.id), restaurant_id: Number(r.restaurant_id), created_by_id: Number(r.created_by_id) }));
+        }
+        catch {
+            return [];
+        }
     }
     async allergies() {
         if (this.useMongo()) {
@@ -539,6 +613,26 @@ __decorate([
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", void 0)
 ], CatalogExtrasController.prototype, "setMenu", null);
+__decorate([
+    (0, common_1.Get)('products/search'),
+    __param(0, (0, common_1.Query)('name')),
+    __param(1, (0, common_1.Query)('offset')),
+    __param(2, (0, common_1.Query)('limit')),
+    __param(3, (0, common_1.Query)('min_price')),
+    __param(4, (0, common_1.Query)('max_price')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, String, String, String]),
+    __metadata("design:returntype", Promise)
+], CatalogExtrasController.prototype, "productsSearch", null);
+__decorate([
+    (0, common_1.Get)('restaurants/search'),
+    __param(0, (0, common_1.Query)('name')),
+    __param(1, (0, common_1.Query)('offset')),
+    __param(2, (0, common_1.Query)('limit')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, String]),
+    __metadata("design:returntype", Promise)
+], CatalogExtrasController.prototype, "restaurantsSearch", null);
 __decorate([
     (0, common_1.Get)('products/reviews'),
     __param(0, (0, common_1.Query)('product_id')),

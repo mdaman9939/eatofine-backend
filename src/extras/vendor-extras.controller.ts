@@ -359,6 +359,50 @@ export class VendorExtrasController {
   remove() { return { message: 'Not available in demo' }; }
 
   // ── Orders summary ───────────────────────────────────────────────
+
+  /** Shape every order row identically so the Flutter OrderModel never
+   *  hits `!` on a null field. The widget reads detailsCount, orderStatus,
+   *  orderType, createdAt, paymentMethod — and uses `!` on each, so missing
+   *  data here translates directly to a red-screen crash on the device. */
+  private shapeOrder(rIn: MongoOrderDoc, detailsCount: number) {
+    const r = rIn as MongoOrderDoc & Record<string, unknown>;
+    const created = (r as { created_at?: Date | string | null }).created_at;
+    const updated = (r as { updated_at?: Date | string | null }).updated_at;
+    return {
+      ...(r.legacy ?? {}),
+      ...r,
+      id: Number(r.mysql_id),
+      user_id: r.mysql_user_id !== null && r.mysql_user_id !== undefined ? Number(r.mysql_user_id) : null,
+      restaurant_id: r.mysql_restaurant_id !== null && r.mysql_restaurant_id !== undefined ? Number(r.mysql_restaurant_id) : 0,
+      order_amount: toNum(r.order_amount) ?? 0,
+      // Defaults below — Flutter `!` operators on these will not crash.
+      details_count: detailsCount,
+      order_status: (r.order_status ?? 'pending') as string,
+      order_type: ((r as { order_type?: string }).order_type ?? 'delivery') as string,
+      payment_method: ((r as { payment_method?: string }).payment_method ?? 'cash_on_delivery') as string,
+      payment_status: ((r as { payment_status?: string }).payment_status ?? 'unpaid') as string,
+      delivery_address: (r as { delivery_address?: unknown }).delivery_address ?? null,
+      created_at: created ? new Date(created).toISOString() : new Date().toISOString(),
+      updated_at: updated ? new Date(updated).toISOString() : new Date().toISOString(),
+    };
+  }
+
+  /** Bulk count items-per-order with one Mongo aggregation. Returns a Map
+   *  so callers can do detailsByOrderId.get(orderId) ?? 1 in O(1). Default
+   *  of 1 (not 0) matches the assumption "every order has ≥ 1 item" and
+   *  keeps Flutter's "item"/"items" pluralization sensible. */
+  private async detailsCountMap(orderIds: number[]): Promise<Map<number, number>> {
+    if (orderIds.length === 0) return new Map();
+    const rows = await this.mongo.aggregate<{ _id: number; count: number }>(
+      'order_details',
+      [
+        { $match: { order_id: { $in: orderIds } } },
+        { $group: { _id: '$order_id', count: { $sum: 1 } } },
+      ],
+    );
+    return new Map(rows.map((r) => [Number(r._id), r.count]));
+  }
+
   @Get('current-orders')
   async currentOrders(@Req() req: AuthedRequest) {
     if (this.useMongo()) {
@@ -369,14 +413,8 @@ export class VendorExtrasController {
         { mysql_restaurant_id: Number(restaurant.mysql_id), order_status: { $in: ['accepted', 'confirmed', 'processing'] } },
         { sort: { mysql_id: -1 } },
       );
-      return rows.map((r) => ({
-        ...(r.legacy ?? {}),
-        ...r,
-        id: Number(r.mysql_id),
-        user_id: r.mysql_user_id !== null && r.mysql_user_id !== undefined ? Number(r.mysql_user_id) : null,
-        restaurant_id: r.mysql_restaurant_id !== null && r.mysql_restaurant_id !== undefined ? Number(r.mysql_restaurant_id) : 0,
-        order_amount: toNum(r.order_amount),
-      }));
+      const countsByOrderId = await this.detailsCountMap(rows.map((r) => Number(r.mysql_id)));
+      return rows.map((r) => this.shapeOrder(r, countsByOrderId.get(Number(r.mysql_id)) ?? 1));
     }
     const restaurant = await this.prisma.restaurants.findFirst({ where: { vendor_id: req.actor!.id }, select: { id: true } });
     if (!restaurant) return [];
@@ -397,15 +435,9 @@ export class VendorExtrasController {
         { mysql_restaurant_id: Number(restaurant.mysql_id), order_status: { $in: ['delivered', 'canceled', 'refunded'] } },
         { sort: { mysql_id: -1 }, limit: 50 },
       );
+      const countsByOrderId = await this.detailsCountMap(rows.map((r) => Number(r.mysql_id)));
       return {
-        orders: rows.map((r) => ({
-          ...(r.legacy ?? {}),
-          ...r,
-          id: Number(r.mysql_id),
-          user_id: r.mysql_user_id !== null && r.mysql_user_id !== undefined ? Number(r.mysql_user_id) : null,
-          restaurant_id: r.mysql_restaurant_id !== null && r.mysql_restaurant_id !== undefined ? Number(r.mysql_restaurant_id) : 0,
-          order_amount: toNum(r.order_amount),
-        })),
+        orders: rows.map((r) => this.shapeOrder(r, countsByOrderId.get(Number(r.mysql_id)) ?? 1)),
         total_size: rows.length,
       };
     }
@@ -426,16 +458,9 @@ export class VendorExtrasController {
 
     if (this.useMongo()) {
       const o = await this.mongo.findByMysqlId<MongoOrderDoc>('orders', id);
-      return o
-        ? {
-            ...(o.legacy ?? {}),
-            ...o,
-            id: Number(o.mysql_id),
-            user_id: o.mysql_user_id !== null && o.mysql_user_id !== undefined ? Number(o.mysql_user_id) : null,
-            restaurant_id: o.mysql_restaurant_id !== null && o.mysql_restaurant_id !== undefined ? Number(o.mysql_restaurant_id) : 0,
-            order_amount: toNum(o.order_amount),
-          }
-        : null;
+      if (!o) return null;
+      const counts = await this.detailsCountMap([Number(o.mysql_id)]);
+      return this.shapeOrder(o, counts.get(Number(o.mysql_id)) ?? 1);
     }
 
     const o = await this.prisma.orders.findUnique({ where: { id: BigInt(id) } });

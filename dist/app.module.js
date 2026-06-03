@@ -40,12 +40,12 @@ exports.AppModule = AppModule = __decorate([
                 {
                     name: 'default',
                     ttl: 60_000,
-                    limit: 120,
+                    limit: 240,
                 },
                 {
                     name: 'auth',
-                    ttl: parseInt(process.env.AUTH_THROTTLE_TTL ?? '900000', 10),
-                    limit: parseInt(process.env.AUTH_THROTTLE_LIMIT ?? '5', 10),
+                    ttl: parseInt(process.env.AUTH_THROTTLE_TTL ?? '300000', 10),
+                    limit: parseInt(process.env.AUTH_THROTTLE_LIMIT ?? '30', 10),
                 },
             ]),
             prisma_module_1.PrismaModule,
