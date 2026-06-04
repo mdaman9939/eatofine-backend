@@ -7,7 +7,7 @@ export declare class DocumentsController {
     listCategories(role?: TargetRole): Promise<{
         id: number;
         name: string;
-        target_role: "vendor" | "delivery_man" | "restaurant";
+        target_role: "vendor" | "restaurant" | "delivery_man";
         allowed_formats: string;
         max_size_mb: number;
         is_mandatory: boolean;
@@ -40,7 +40,7 @@ export declare class DocumentsController {
         id: number;
         category_id: number;
         category_name: string | null;
-        owner_type: "vendor" | "delivery_man" | "restaurant";
+        owner_type: "vendor" | "restaurant" | "delivery_man";
         owner_id: number;
         owner_name: string | null;
         file_path: string;

@@ -30,6 +30,37 @@ export class MigrationController {
     return this.seed.topUpOrders(body.count ?? 60);
   }
 
+  /** Populate Privacy Policy / Terms / About Us / Refund / Cancellation /
+   *  Shipping into business_settings so the customer app's policy screens
+   *  stop showing "No data available". Also enables COD by default. */
+  @Post('seed-policy-pages')
+  @HttpCode(200)
+  seedPolicyPages() { return this.seed.seedPolicyPages(); }
+
+  /** Seed demo conversations + messages so the customer app's chat list
+   *  isn't empty on first run. Restaurants and delivery_man tabs both
+   *  get populated. */
+  @Post('seed-conversations')
+  @HttpCode(200)
+  seedConversations() { return this.seed.seedConversations(); }
+
+  /** Seed demo subscription-linked orders for the first user so the
+   *  Orders → Subscription tab populates. */
+  @Post('seed-subscription-orders')
+  @HttpCode(200)
+  seedSubscriptionOrders() { return this.seed.seedSubscriptionOrders(); }
+
+  /** One-shot endpoint that runs every "customer-app data fix" seeder
+   *  in sequence. Safer than re-running seedAll on a populated DB. */
+  @Post('seed-customer-app-fixes')
+  @HttpCode(200)
+  async seedCustomerAppFixes() {
+    const policies = await this.seed.seedPolicyPages();
+    const conversations = await this.seed.seedConversations();
+    const subscriptions = await this.seed.seedSubscriptionOrders();
+    return { policies, conversations, subscriptions };
+  }
+
   /** Quick health check — counts on each MongoDB collection. */
   @Get('counts')
   counts() {

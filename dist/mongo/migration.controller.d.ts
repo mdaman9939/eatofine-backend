@@ -13,6 +13,28 @@ export declare class MigrationController {
         orders: number;
         details: number;
     }>;
+    seedPolicyPages(): Promise<{
+        inserted: number;
+    }>;
+    seedConversations(): Promise<{
+        conversations: number;
+        messages: number;
+    }>;
+    seedSubscriptionOrders(): Promise<{
+        orders: number;
+    }>;
+    seedCustomerAppFixes(): Promise<{
+        policies: {
+            inserted: number;
+        };
+        conversations: {
+            conversations: number;
+            messages: number;
+        };
+        subscriptions: {
+            orders: number;
+        };
+    }>;
     counts(): Promise<{
         users: number;
         vendors: number;

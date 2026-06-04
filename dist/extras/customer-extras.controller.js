@@ -37,16 +37,77 @@ let CustomerExtrasController = class CustomerExtrasController {
         const v = (process.env.USE_MONGO_EXTRAS ?? '').toLowerCase();
         return v === '1' || v === 'true' || v === 'yes';
     }
-    wishList() {
-        return { product: [], restaurant: [] };
+    async wishList(req) {
+        const userId = Number(req.actor.id);
+        const rows = await this.mongo.findMany('wishlists', { user_id: userId });
+        const foodIds = rows.map((r) => r.food_id).filter((x) => x != null);
+        const restaurantIds = rows.map((r) => r.restaurant_id).filter((x) => x != null);
+        const [foods, restaurants] = await Promise.all([
+            foodIds.length
+                ? this.mongo.findMany('foods', { mysql_id: { $in: foodIds } })
+                : Promise.resolve([]),
+            restaurantIds.length
+                ? this.mongo.findMany('restaurants', { mysql_id: { $in: restaurantIds } })
+                : Promise.resolve([]),
+        ]);
+        return {
+            product: foods.map((f) => ({
+                ...(f.legacy ?? {}),
+                ...f,
+                id: Number(f.mysql_id),
+                price: toNum(f.price),
+                discount: toNum(f.discount),
+                tax: toNum(f.tax),
+                restaurant_id: f.mysql_restaurant_id != null ? Number(f.mysql_restaurant_id) : null,
+                category_id: f.mysql_category_id != null ? Number(f.mysql_category_id) : null,
+            })),
+            restaurant: restaurants.map((r) => ({
+                id: Number(r.mysql_id),
+                name: r.name ?? null,
+                logo: r.logo ?? null,
+                address: r.address ?? null,
+                avg_rating: r.avg_rating ?? 0,
+            })),
+        };
     }
-    wishAdd() {
+    async wishAdd(req, body) {
+        const userId = Number(req.actor.id);
+        if (!body.food_id && !body.restaurant_id) {
+            return { message: 'food_id or restaurant_id required' };
+        }
+        const filter = { user_id: userId };
+        if (body.food_id)
+            filter.food_id = Number(body.food_id);
+        if (body.restaurant_id)
+            filter.restaurant_id = Number(body.restaurant_id);
+        const existing = await this.mongo.findOne('wishlists', filter);
+        if (existing)
+            return { message: 'already in wishlist' };
+        const id = await this.mongo.nextMysqlId('wishlists');
+        await this.mongo.insertOne('wishlists', {
+            mysql_id: id,
+            user_id: userId,
+            food_id: body.food_id ? Number(body.food_id) : null,
+            restaurant_id: body.restaurant_id ? Number(body.restaurant_id) : null,
+            created_at: new Date(),
+        });
         return { message: 'successfully added!' };
     }
-    wishRemove() {
+    async wishRemove(req, foodId, restaurantId) {
+        const userId = Number(req.actor.id);
+        const filter = { user_id: userId };
+        if (foodId)
+            filter.food_id = Number(foodId);
+        if (restaurantId)
+            filter.restaurant_id = Number(restaurantId);
+        if (!('food_id' in filter) && !('restaurant_id' in filter)) {
+            return { message: 'nothing to remove' };
+        }
+        await this.mongo.deleteMany('wishlists', filter);
         return { message: 'successfully removed!' };
     }
-    wishClear() {
+    async wishClear(req) {
+        await this.mongo.deleteMany('wishlists', { user_id: Number(req.actor.id) });
         return { message: 'cleared' };
     }
     async notifications() {
@@ -118,23 +179,116 @@ let CustomerExtrasController = class CustomerExtrasController {
     pointTransfer() {
         return { message: 'Not available in demo' };
     }
-    messageList() {
-        return { conversations: [], total_size: 0 };
+    async messageList(req, type) {
+        const userId = Number(req.actor.id);
+        const filter = { user_id: userId };
+        if (type === 'restaurant' || type === 'delivery_man')
+            filter.counterpart_type = type;
+        const rows = await this.mongo.findMany('conversations', filter, { sort: { last_message_at: -1 }, limit: 50 });
+        return {
+            conversations: rows.map((c) => ({
+                id: Number(c.mysql_id),
+                type: c.counterpart_type,
+                counterpart_id: Number(c.counterpart_id),
+                name: c.counterpart_name ?? `${c.counterpart_type} #${c.counterpart_id}`,
+                avatar: c.counterpart_avatar ?? null,
+                last_message: c.last_message ?? null,
+                last_message_at: c.last_message_at ?? null,
+                unread: c.unread ?? 0,
+            })),
+            total_size: rows.length,
+        };
     }
-    messageDetails() {
-        return { messages: [] };
+    async messageDetails(req, convId) {
+        if (!convId)
+            return { messages: [] };
+        const rows = await this.mongo.findMany('messages', { conversation_id: Number(convId) }, { sort: { mysql_id: 1 }, limit: 100 });
+        return {
+            messages: rows.map((m) => ({
+                id: Number(m.mysql_id),
+                sender_type: m.sender_type,
+                sender_id: Number(m.sender_id),
+                body: m.body,
+                sent_by_me: m.sender_type === 'user' && Number(m.sender_id) === Number(req.actor.id),
+                created_at: m.created_at ?? null,
+            })),
+        };
     }
-    messageGet() {
-        return { messages: [], total_size: 0 };
+    async messageGet(req, convId) {
+        const d = await this.messageDetails(req, convId);
+        return { messages: d.messages, total_size: d.messages.length };
     }
-    messageSearch() {
-        return { conversations: [] };
+    async messageSearch(req, q) {
+        if (!q || !q.trim())
+            return { conversations: [] };
+        const userId = Number(req.actor.id);
+        const rows = await this.mongo.findMany('conversations', {
+            user_id: userId,
+            counterpart_name: { $regex: q, $options: 'i' },
+        }, { limit: 25 });
+        return { conversations: rows.map((c) => ({ id: Number(c.mysql_id), name: c.counterpart_name, type: c.counterpart_type })) };
     }
-    messageSend() {
-        return { message: 'sent' };
+    async messageSend(req, body) {
+        const userId = Number(req.actor.id);
+        if (!body.body || !body.body.trim()) {
+            return { message: 'message body required' };
+        }
+        let convId = body.conversation_id;
+        if (!convId && body.counterpart_type && body.counterpart_id) {
+            const existing = await this.mongo.findOne('conversations', {
+                user_id: userId,
+                counterpart_type: body.counterpart_type,
+                counterpart_id: Number(body.counterpart_id),
+            });
+            if (existing) {
+                convId = Number(existing.mysql_id);
+            }
+            else {
+                convId = await this.mongo.nextMysqlId('conversations');
+                await this.mongo.insertOne('conversations', {
+                    mysql_id: convId,
+                    user_id: userId,
+                    counterpart_type: body.counterpart_type,
+                    counterpart_id: Number(body.counterpart_id),
+                    counterpart_name: null,
+                    last_message: body.body,
+                    last_message_at: new Date(),
+                    unread: 0,
+                });
+            }
+        }
+        if (!convId)
+            return { message: 'conversation_id or counterpart required' };
+        const msgId = await this.mongo.nextMysqlId('messages');
+        await this.mongo.insertOne('messages', {
+            mysql_id: msgId,
+            conversation_id: convId,
+            sender_type: 'user',
+            sender_id: userId,
+            body: body.body,
+            created_at: new Date(),
+        });
+        await this.mongo.updateOne('conversations', { mysql_id: convId }, {
+            last_message: body.body,
+            last_message_at: new Date(),
+        });
+        return { message: 'sent', conversation_id: convId, id: msgId };
     }
-    subscription() {
-        return { data: [] };
+    async subscription(req) {
+        const userId = Number(req.actor.id);
+        const rows = await this.mongo.findMany('subscriptions', {
+            $or: [{ user_id: userId }, { mysql_user_id: userId }],
+        }, { sort: { mysql_id: -1 }, limit: 50 });
+        return {
+            data: rows.map((s) => ({
+                id: Number(s.mysql_id),
+                restaurant_id: s.restaurant_id ?? s.mysql_restaurant_id ?? null,
+                plan_name: s.plan_name ?? null,
+                frequency: s.frequency ?? null,
+                status: s.status ?? 'active',
+                created_at: s.created_at ?? null,
+            })),
+        };
     }
     updateInterest() {
         return { ok: true };
@@ -190,36 +344,76 @@ let CustomerExtrasController = class CustomerExtrasController {
         });
         return rows.map((r) => ({ ...r, id: Number(r.id), user_id: r.user_id ? Number(r.user_id) : null, restaurant_id: Number(r.restaurant_id), order_amount: Number(r.order_amount) }));
     }
-    orderSubscriptionList() {
-        return { data: [], total_size: 0, limit: 25, offset: 1 };
+    async orderSubscriptionList(req) {
+        const userId = Number(req.actor.id);
+        const orderRows = await this.mongo.findMany('orders', { mysql_user_id: userId, subscription_id: { $ne: null } }, {
+            sort: { mysql_id: -1 }, limit: 25,
+        });
+        return {
+            data: orderRows.map((o) => ({
+                id: Number(o.mysql_id),
+                restaurant_id: o.mysql_restaurant_id ?? null,
+                subscription_id: o.subscription_id ?? null,
+                order_status: o.order_status ?? 'pending',
+                order_amount: toNum(o.order_amount),
+                schedule_at: o.schedule_at ?? null,
+                created_at: o.created_at_legacy ?? null,
+            })),
+            total_size: orderRows.length,
+            limit: 25,
+            offset: 1,
+        };
     }
     async orderDetails(req, orderId) {
-        if (this.useMongo()) {
-            const items = await this.mongo.findMany('order_details', { mysql_order_id: Number(orderId) });
-            return items.map((it) => ({
-                ...(it.legacy ?? {}),
-                ...it,
-                id: Number(it.mysql_id),
-                food_id: it.mysql_food_id !== null && it.mysql_food_id !== undefined ? Number(it.mysql_food_id) : null,
-                order_id: it.mysql_order_id !== null && it.mysql_order_id !== undefined ? Number(it.mysql_order_id) : null,
-                price: toNum(it.price),
-                tax_amount: toNum(it.tax_amount),
-                total_add_on_price: toNum(it.total_add_on_price),
-                item_campaign_id: it.mysql_item_campaign_id !== null && it.mysql_item_campaign_id !== undefined ? Number(it.mysql_item_campaign_id) : null,
-                discount_on_food: it.discount_on_food !== null && it.discount_on_food !== undefined ? toNum(it.discount_on_food) : null,
-            }));
-        }
-        const items = await this.prisma.order_details.findMany({ where: { order_id: BigInt(orderId) } });
+        const order = await this.mongo.findByMysqlId('orders', Number(orderId));
+        const [user, restaurant, deliveryMan, items] = await Promise.all([
+            order?.mysql_user_id != null
+                ? this.mongo.findByMysqlId('users', Number(order.mysql_user_id))
+                : Promise.resolve(null),
+            order?.mysql_restaurant_id != null
+                ? this.mongo.findByMysqlId('restaurants', Number(order.mysql_restaurant_id))
+                : Promise.resolve(null),
+            order?.mysql_delivery_man_id != null
+                ? this.mongo.findByMysqlId('delivery_men', Number(order.mysql_delivery_man_id))
+                : Promise.resolve(null),
+            this.mongo.findMany('order_details', {
+                $or: [{ order_id: Number(orderId) }, { mysql_order_id: Number(orderId) }],
+            }),
+        ]);
+        const customerName = user ? [user.f_name, user.l_name].filter(Boolean).join(' ').trim() || null : null;
+        const restaurantPayload = restaurant ? {
+            id: Number(restaurant.mysql_id),
+            name: restaurant.name ?? null,
+            phone: restaurant.phone ?? null,
+            email: restaurant.email ?? null,
+            address: restaurant.address ?? null,
+            logo: restaurant.logo ?? null,
+            latitude: restaurant.latitude ?? null,
+            longitude: restaurant.longitude ?? null,
+        } : null;
+        const dmPayload = deliveryMan ? {
+            id: Number(deliveryMan.mysql_id),
+            f_name: deliveryMan.f_name ?? null,
+            l_name: deliveryMan.l_name ?? null,
+            phone: deliveryMan.phone ?? null,
+        } : null;
         return items.map((it) => ({
+            ...(it.legacy ?? {}),
             ...it,
-            id: Number(it.id),
-            food_id: it.food_id ? Number(it.food_id) : null,
-            order_id: it.order_id ? Number(it.order_id) : null,
-            price: Number(it.price),
-            tax_amount: Number(it.tax_amount),
-            total_add_on_price: Number(it.total_add_on_price),
-            item_campaign_id: it.item_campaign_id ? Number(it.item_campaign_id) : null,
-            discount_on_food: it.discount_on_food ? Number(it.discount_on_food) : null,
+            id: Number(it.mysql_id),
+            food_id: it.mysql_food_id != null ? Number(it.mysql_food_id) : null,
+            order_id: it.mysql_order_id != null ? Number(it.mysql_order_id) : null,
+            price: toNum(it.price),
+            tax_amount: toNum(it.tax_amount),
+            total_add_on_price: toNum(it.total_add_on_price),
+            item_campaign_id: it.mysql_item_campaign_id != null ? Number(it.mysql_item_campaign_id) : null,
+            discount_on_food: it.discount_on_food != null ? toNum(it.discount_on_food) : null,
+            customer_name: customerName,
+            customer_phone: user?.phone ?? null,
+            customer_email: user?.email ?? null,
+            delivery_address: order?.delivery_address ?? null,
+            restaurant: restaurantPayload,
+            delivery_man: dmPayload,
         }));
     }
     async cancelOrder(req, body) {
@@ -396,30 +590,37 @@ let CustomerExtrasController = class CustomerExtrasController {
 exports.CustomerExtrasController = CustomerExtrasController;
 __decorate([
     (0, common_1.Get)('wish-list'),
+    __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
 ], CustomerExtrasController.prototype, "wishList", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('wish-list/add'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], CustomerExtrasController.prototype, "wishAdd", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Delete)('wish-list/remove'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('food_id')),
+    __param(2, (0, common_1.Query)('restaurant_id')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, String, String]),
+    __metadata("design:returntype", Promise)
 ], CustomerExtrasController.prototype, "wishRemove", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Delete)('wish-list/clear-all'),
+    __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
 ], CustomerExtrasController.prototype, "wishClear", null);
 __decorate([
     (0, common_1.Get)('notifications'),
@@ -490,40 +691,51 @@ __decorate([
 ], CustomerExtrasController.prototype, "pointTransfer", null);
 __decorate([
     (0, common_1.Get)('message/list'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('type')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
 ], CustomerExtrasController.prototype, "messageList", null);
 __decorate([
     (0, common_1.Get)('message/details'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('conversation_id')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
 ], CustomerExtrasController.prototype, "messageDetails", null);
 __decorate([
     (0, common_1.Get)('message/get'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('conversation_id')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
 ], CustomerExtrasController.prototype, "messageGet", null);
 __decorate([
     (0, common_1.Get)('message/search-list'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('search')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
 ], CustomerExtrasController.prototype, "messageSearch", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('message/send'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], CustomerExtrasController.prototype, "messageSend", null);
 __decorate([
     (0, common_1.Get)('subscription'),
+    __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
 ], CustomerExtrasController.prototype, "subscription", null);
 __decorate([
     (0, common_1.HttpCode)(200),
@@ -553,9 +765,10 @@ __decorate([
 ], CustomerExtrasController.prototype, "runningOrders", null);
 __decorate([
     (0, common_1.Get)('order/order-subscription-list'),
+    __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
 ], CustomerExtrasController.prototype, "orderSubscriptionList", null);
 __decorate([
     (0, common_1.Get)('order/details'),

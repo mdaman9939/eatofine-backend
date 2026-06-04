@@ -33,6 +33,15 @@ let MigrationController = class MigrationController {
     topUpOrders(body = {}) {
         return this.seed.topUpOrders(body.count ?? 60);
     }
+    seedPolicyPages() { return this.seed.seedPolicyPages(); }
+    seedConversations() { return this.seed.seedConversations(); }
+    seedSubscriptionOrders() { return this.seed.seedSubscriptionOrders(); }
+    async seedCustomerAppFixes() {
+        const policies = await this.seed.seedPolicyPages();
+        const conversations = await this.seed.seedConversations();
+        const subscriptions = await this.seed.seedSubscriptionOrders();
+        return { policies, conversations, subscriptions };
+    }
     counts() {
         return this.svc.counts();
     }
@@ -101,6 +110,34 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], MigrationController.prototype, "topUpOrders", null);
+__decorate([
+    (0, common_1.Post)('seed-policy-pages'),
+    (0, common_1.HttpCode)(200),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], MigrationController.prototype, "seedPolicyPages", null);
+__decorate([
+    (0, common_1.Post)('seed-conversations'),
+    (0, common_1.HttpCode)(200),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], MigrationController.prototype, "seedConversations", null);
+__decorate([
+    (0, common_1.Post)('seed-subscription-orders'),
+    (0, common_1.HttpCode)(200),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], MigrationController.prototype, "seedSubscriptionOrders", null);
+__decorate([
+    (0, common_1.Post)('seed-customer-app-fixes'),
+    (0, common_1.HttpCode)(200),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", Promise)
+], MigrationController.prototype, "seedCustomerAppFixes", null);
 __decorate([
     (0, common_1.Get)('counts'),
     __metadata("design:type", Function),

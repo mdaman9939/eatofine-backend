@@ -9,6 +9,86 @@ export interface SeedReport {
   collections: Record<string, number>;
 }
 
+// Policy content seeded into business_settings — Flutter customer app
+// fetches these via /api/v1/privacy-policy etc and renders the raw HTML.
+const PRIVACY_POLICY_HTML = `<h2>Privacy Policy</h2>
+<p>At Eatofine, your privacy matters. This policy explains what data we collect, how it is used, and the rights you have over it.</p>
+<h3>1. Information We Collect</h3>
+<ul>
+  <li><strong>Account</strong> — name, phone, email, address.</li>
+  <li><strong>Order data</strong> — items ordered, payment method, delivery location.</li>
+  <li><strong>Device data</strong> — device model, OS version, app version for crash diagnostics.</li>
+</ul>
+<h3>2. How We Use It</h3>
+<p>We use your data to deliver orders, process refunds, contact you about your order, and improve the service. We never sell your personal data to third parties.</p>
+<h3>3. Sharing</h3>
+<p>We share order information only with the assigned restaurant and delivery partner so they can fulfil your order. Payment data flows directly to PCI-DSS compliant payment processors.</p>
+<h3>4. Your Rights</h3>
+<p>You can request data export or account deletion any time by writing to <a href="mailto:privacy@eatofine.com">privacy@eatofine.com</a>. We respond within 7 business days.</p>
+<h3>5. Cookies & Analytics</h3>
+<p>We use first-party cookies and aggregate analytics (no personal identifiers shared) to improve the app experience.</p>
+<p><em>Last updated: 2026-06-04</em></p>`;
+
+const TERMS_HTML = `<h2>Terms &amp; Conditions</h2>
+<p>By using the Eatofine app you agree to the following terms. Please read them carefully.</p>
+<h3>1. Account</h3>
+<p>You must be 18+ to place orders. You are responsible for keeping your account credentials confidential.</p>
+<h3>2. Orders &amp; Payment</h3>
+<p>All orders are subject to acceptance by the restaurant. Prices include applicable taxes. Payment is captured at the time of order placement.</p>
+<h3>3. Delivery</h3>
+<p>Estimated delivery times are indicative. Eatofine is not liable for delays caused by weather, traffic, or restaurant operations beyond our reasonable control.</p>
+<h3>4. Refunds &amp; Cancellations</h3>
+<p>See our <a href="/refund-policy">Refund Policy</a> and <a href="/cancellation-policy">Cancellation Policy</a> for case-specific entitlements.</p>
+<h3>5. Conduct</h3>
+<p>Abusive behaviour towards delivery partners or restaurant staff may result in suspension of your account.</p>
+<h3>6. Jurisdiction</h3>
+<p>All disputes are subject to the exclusive jurisdiction of courts in Haryana, India.</p>
+<p><em>Last updated: 2026-06-04</em></p>`;
+
+const ABOUT_US_HTML = `<h2>About Eatofine</h2>
+<p>Eatofine is a multi-vendor food delivery platform built for the everyday eater. We connect hungry customers with great restaurants and reliable delivery partners across India.</p>
+<h3>Our Mission</h3>
+<p>To make ordering food simple, transparent, and fast — without sacrificing taste or hurting the people who make it happen.</p>
+<h3>What Makes Us Different</h3>
+<ul>
+  <li><strong>Fair partner economics</strong> — transparent commission &amp; settlement.</li>
+  <li><strong>Real-time tracking</strong> — see your order from kitchen to door.</li>
+  <li><strong>Customer-first refunds</strong> — clear, fast resolution if something goes wrong.</li>
+</ul>
+<h3>Contact</h3>
+<p>📧 <a href="mailto:hello@eatofine.com">hello@eatofine.com</a><br/>📞 +91 99999 00010<br/>📍 FF2, Vishnu Palace, Sec 20B, Faridabad NIT, Haryana 121001</p>
+<p><em>© 2026 Eatofine Delivery Service Pvt. Ltd.</em></p>`;
+
+const REFUND_POLICY_HTML = `<h2>Refund Policy</h2>
+<p>Refund entitlement depends on the cancellation stage and the party at fault. See the matrix below.</p>
+<table>
+  <tr><th>Scenario</th><th>Refundable Amount</th></tr>
+  <tr><td>User cancels before restaurant accepts</td><td>Full refund</td></tr>
+  <tr><td>User cancels after restaurant accepts</td><td>Zero refund</td></tr>
+  <tr><td>Wrong / damaged item (restaurant fault)</td><td>Item cost + GST</td></tr>
+  <tr><td>Missing packet (delivery partner fault)</td><td>Item cost + GST</td></tr>
+  <tr><td>Restaurant rejects after accepting</td><td>Full refund</td></tr>
+</table>
+<p>Refunds are issued to the original payment method within 5–7 business days. Wallet refunds are instant.</p>`;
+
+const CANCELLATION_POLICY_HTML = `<h2>Cancellation Policy</h2>
+<p>You can cancel an order without charge until the restaurant accepts it. After that, cancellation incurs charges depending on the order stage.</p>
+<ul>
+  <li><strong>Before restaurant accepts</strong> — free cancellation.</li>
+  <li><strong>After restaurant accepts</strong> — full charge (no refund).</li>
+  <li><strong>After delivery partner pickup</strong> — full charge.</li>
+</ul>
+<p>If you cancel due to a quality issue, please raise a refund request from the order screen and our support team will review within 24 hours.</p>`;
+
+const SHIPPING_POLICY_HTML = `<h2>Shipping &amp; Delivery Policy</h2>
+<p>We deliver to areas within our service zones. Delivery charges depend on distance and surge.</p>
+<ul>
+  <li><strong>Standard delivery</strong> — 30–45 minutes typical.</li>
+  <li><strong>Scheduled delivery</strong> — choose a future slot at checkout.</li>
+  <li><strong>Free delivery</strong> — automatically applied on eligible orders above the configured threshold.</li>
+</ul>
+<p>If your address falls outside our zones, the app will inform you at checkout.</p>`;
+
 /** Generates realistic Indian-context demo data across all admin collections. */
 @Injectable()
 export class SeedService {
@@ -95,6 +175,149 @@ export class SeedService {
    *  for refunded / payment_failed / cooking / picked_up / scheduled. */
   async topUpOrders(count = 60): Promise<{ orders: number; details: number }> {
     return this.seedOrders(count);
+  }
+
+  /** Populate Privacy Policy, Terms, About Us, Refund/Cancellation content
+   *  into business_settings so the policy pages in the customer app stop
+   *  showing "No data available". Idempotent — upserts each key. */
+  async seedPolicyPages(): Promise<{ inserted: number }> {
+    const pages: Record<string, string> = {
+      privacy_policy: PRIVACY_POLICY_HTML,
+      terms_and_conditions: TERMS_HTML,
+      about_us: ABOUT_US_HTML,
+      refund_policy: REFUND_POLICY_HTML,
+      cancellation_policy: CANCELLATION_POLICY_HTML,
+      shipping_policy: SHIPPING_POLICY_HTML,
+    };
+    let inserted = 0;
+    for (const [key, value] of Object.entries(pages)) {
+      const existing = await this.mongo.findOne<{ key: string }>('business_settings', { key });
+      if (existing) {
+        await this.mongo.updateOne('business_settings', { key }, { value, key_value: value, type: 'html' });
+      } else {
+        const id = await this.mongo.nextMysqlId('business_settings');
+        await this.mongo.insertOne('business_settings', {
+          mysql_id: id, key, value, key_value: value, type: 'html', created_at: new Date(),
+        });
+      }
+      inserted++;
+    }
+    // COD enable flag — separate setting key the offline payment screen reads.
+    const codSettings: Record<string, string> = {
+      cash_on_delivery: '1',
+      digital_payment: '1',
+      offline_payment: '1',
+    };
+    for (const [key, value] of Object.entries(codSettings)) {
+      const existing = await this.mongo.findOne<{ key: string }>('business_settings', { key });
+      if (existing) {
+        await this.mongo.updateOne('business_settings', { key }, { value, key_value: value });
+      } else {
+        const id = await this.mongo.nextMysqlId('business_settings');
+        await this.mongo.insertOne('business_settings', {
+          mysql_id: id, key, value, key_value: value, created_at: new Date(),
+        });
+        inserted++;
+      }
+    }
+    return { inserted };
+  }
+
+  /** Seed demo conversations + messages between the first N customers and
+   *  the platform admin / a restaurant / a delivery-man so the customer-app
+   *  conversation list isn't empty on first run. */
+  async seedConversations(): Promise<{ conversations: number; messages: number }> {
+    // Give every user a seeded conversation pair (restaurant + DM) so any
+    // customer who logs in sees content in the chat list.
+    const users = await this.mongo.findMany<{ mysql_id: number; f_name?: string; l_name?: string }>('users', {}, { limit: 100 });
+    const restaurants = await this.mongo.findMany<{ mysql_id: number; name?: string; logo?: string }>('restaurants', {}, { limit: 3 });
+    const dms = await this.mongo.findMany<{ mysql_id: number; f_name?: string; l_name?: string }>('delivery_men', {}, { limit: 3 });
+    if (users.length === 0) return { conversations: 0, messages: 0 };
+
+    let convId = await this.mongo.nextMysqlId('conversations');
+    let msgId = await this.mongo.nextMysqlId('messages');
+    let conversations = 0, messages = 0;
+
+    for (const u of users) {
+      // Idempotent — skip users who already have any conversation seeded.
+      const existing = await this.mongo.findOne<{ mysql_id: number }>('conversations', { user_id: u.mysql_id });
+      if (existing) continue;
+      // user ↔ first restaurant
+      if (restaurants.length > 0) {
+        const r = restaurants[0];
+        await this.mongo.insertOne('conversations', {
+          mysql_id: convId,
+          user_id: u.mysql_id,
+          counterpart_type: 'restaurant',
+          counterpart_id: r.mysql_id,
+          counterpart_name: r.name ?? `Restaurant #${r.mysql_id}`,
+          counterpart_avatar: r.logo ?? null,
+          last_message: 'Thanks for your order!',
+          last_message_at: this.daysAgo(this.randomInt(0, 5)),
+          unread: 0,
+        });
+        await this.mongo.insertOne('messages', { mysql_id: msgId++, conversation_id: convId, sender_type: 'user', sender_id: u.mysql_id, body: 'Hi, please pack extra napkins.', created_at: this.daysAgo(2) });
+        await this.mongo.insertOne('messages', { mysql_id: msgId++, conversation_id: convId, sender_type: 'restaurant', sender_id: r.mysql_id, body: 'Will do! Thanks for your order!', created_at: this.daysAgo(2) });
+        conversations++; messages += 2; convId++;
+      }
+      // user ↔ first delivery-man
+      if (dms.length > 0) {
+        const d = dms[0];
+        const name = [d.f_name, d.l_name].filter(Boolean).join(' ');
+        await this.mongo.insertOne('conversations', {
+          mysql_id: convId,
+          user_id: u.mysql_id,
+          counterpart_type: 'delivery_man',
+          counterpart_id: d.mysql_id,
+          counterpart_name: name || `DM #${d.mysql_id}`,
+          counterpart_avatar: null,
+          last_message: 'I am 2 minutes away.',
+          last_message_at: this.daysAgo(this.randomInt(0, 3)),
+          unread: 1,
+        });
+        await this.mongo.insertOne('messages', { mysql_id: msgId++, conversation_id: convId, sender_type: 'user', sender_id: u.mysql_id, body: 'Please ring at gate 2.', created_at: this.daysAgo(1) });
+        await this.mongo.insertOne('messages', { mysql_id: msgId++, conversation_id: convId, sender_type: 'delivery_man', sender_id: d.mysql_id, body: 'I am 2 minutes away.', created_at: this.daysAgo(1) });
+        conversations++; messages += 2; convId++;
+      }
+    }
+    return { conversations, messages };
+  }
+
+  /** Seed demo subscription-linked orders for the first customer so the
+   *  Orders → Subscription tab in the customer app shows data. */
+  async seedSubscriptionOrders(): Promise<{ orders: number }> {
+    const users = await this.mongo.findMany<{ mysql_id: number }>('users', {}, { limit: 1 });
+    const subs = await this.mongo.findMany<{ mysql_id: number; mysql_user_id?: number; mysql_restaurant_id?: number }>('subscriptions', {}, { limit: 5 });
+    if (users.length === 0 || subs.length === 0) return { orders: 0 };
+    const user = users[0];
+    let next = await this.mongo.nextMysqlId('orders');
+    let inserted = 0;
+    for (const sub of subs) {
+      const daysOld = this.randomInt(0, 14);
+      try {
+        await this.mongo.insertOne('orders', {
+          mysql_id: next++,
+          mysql_user_id: user.mysql_id,
+          mysql_restaurant_id: sub.mysql_restaurant_id ?? null,
+          mysql_zone_id: 1,
+          order_status: this.random(['delivered', 'processing', 'scheduled']),
+          payment_status: 'paid',
+          payment_method: 'digital_payment',
+          order_type: 'delivery',
+          order_amount: this.randomInt(200, 800),
+          total_tax_amount: 25,
+          delivery_charge: 30,
+          coupon_discount_amount: 0,
+          restaurant_discount_amount: 0,
+          subscription_id: sub.mysql_id,
+          schedule_at: new Date(Date.now() + this.randomInt(1, 7) * 86_400_000),
+          delivery_address: 'Sector 18, Noida',
+          created_at_legacy: this.daysAgo(daysOld),
+        });
+        inserted++;
+      } catch { /* skip dup */ }
+    }
+    return { orders: inserted };
   }
 
   async seedAll(): Promise<SeedReport> {

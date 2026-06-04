@@ -99,26 +99,91 @@ export class CustomerExtrasController {
   }
 
   // ── Wish list ─────────────────────────────────────────────────────
+  // Persistent against `wishlists` collection: one doc per (user_id, food_id)
+  // and (user_id, restaurant_id) pair. Add is idempotent — duplicate inserts
+  // are caught and treated as success so re-tapping the heart icon doesn't
+  // surface a spurious error.
   @Get('wish-list')
-  wishList() {
-    return { product: [], restaurant: [] };
+  async wishList(@Req() req: AuthedRequest) {
+    const userId = Number(req.actor!.id);
+    const rows = await this.mongo.findMany<{
+      mysql_id: number; user_id?: number; food_id?: number | null;
+      restaurant_id?: number | null; created_at?: Date;
+    }>('wishlists', { user_id: userId });
+    const foodIds = rows.map((r) => r.food_id).filter((x): x is number => x != null);
+    const restaurantIds = rows.map((r) => r.restaurant_id).filter((x): x is number => x != null);
+    const [foods, restaurants] = await Promise.all([
+      foodIds.length
+        ? this.mongo.findMany<MongoFoodDoc>('foods', { mysql_id: { $in: foodIds } })
+        : Promise.resolve([] as MongoFoodDoc[]),
+      restaurantIds.length
+        ? this.mongo.findMany<{ mysql_id: number; name?: string | null; logo?: string | null; address?: string | null; avg_rating?: number | null }>(
+            'restaurants', { mysql_id: { $in: restaurantIds } },
+          )
+        : Promise.resolve([] as Array<{ mysql_id: number; name?: string | null; logo?: string | null; address?: string | null; avg_rating?: number | null }>),
+    ]);
+    return {
+      product: foods.map((f) => ({
+        ...(f.legacy ?? {}),
+        ...f,
+        id: Number(f.mysql_id),
+        price: toNum(f.price),
+        discount: toNum(f.discount),
+        tax: toNum(f.tax),
+        restaurant_id: f.mysql_restaurant_id != null ? Number(f.mysql_restaurant_id) : null,
+        category_id: f.mysql_category_id != null ? Number(f.mysql_category_id) : null,
+      })),
+      restaurant: restaurants.map((r) => ({
+        id: Number(r.mysql_id),
+        name: r.name ?? null,
+        logo: r.logo ?? null,
+        address: r.address ?? null,
+        avg_rating: r.avg_rating ?? 0,
+      })),
+    };
   }
 
   @HttpCode(200)
   @Post('wish-list/add')
-  wishAdd() {
+  async wishAdd(@Req() req: AuthedRequest, @Body() body: { food_id?: number; restaurant_id?: number }) {
+    const userId = Number(req.actor!.id);
+    if (!body.food_id && !body.restaurant_id) {
+      return { message: 'food_id or restaurant_id required' };
+    }
+    const filter: Record<string, unknown> = { user_id: userId };
+    if (body.food_id) filter.food_id = Number(body.food_id);
+    if (body.restaurant_id) filter.restaurant_id = Number(body.restaurant_id);
+    const existing = await this.mongo.findOne<{ mysql_id: number }>('wishlists', filter);
+    if (existing) return { message: 'already in wishlist' };
+    const id = await this.mongo.nextMysqlId('wishlists');
+    await this.mongo.insertOne('wishlists', {
+      mysql_id: id,
+      user_id: userId,
+      food_id: body.food_id ? Number(body.food_id) : null,
+      restaurant_id: body.restaurant_id ? Number(body.restaurant_id) : null,
+      created_at: new Date(),
+    });
     return { message: 'successfully added!' };
   }
 
   @HttpCode(200)
   @Delete('wish-list/remove')
-  wishRemove() {
+  async wishRemove(@Req() req: AuthedRequest, @Query('food_id') foodId?: string, @Query('restaurant_id') restaurantId?: string) {
+    const userId = Number(req.actor!.id);
+    const filter: Record<string, unknown> = { user_id: userId };
+    if (foodId) filter.food_id = Number(foodId);
+    if (restaurantId) filter.restaurant_id = Number(restaurantId);
+    if (!('food_id' in filter) && !('restaurant_id' in filter)) {
+      return { message: 'nothing to remove' };
+    }
+    await this.mongo.deleteMany('wishlists', filter);
     return { message: 'successfully removed!' };
   }
 
   @HttpCode(200)
   @Delete('wish-list/clear-all')
-  wishClear() {
+  async wishClear(@Req() req: AuthedRequest) {
+    await this.mongo.deleteMany('wishlists', { user_id: Number(req.actor!.id) });
     return { message: 'cleared' };
   }
 
@@ -224,37 +289,147 @@ export class CustomerExtrasController {
     return { message: 'Not available in demo' };
   }
 
-  // ── Messages (empty inbox) ────────────────────────────────────────
+  // ── Messages ──────────────────────────────────────────────────────
+  // Backed by the `conversations` + `messages` Mongo collections.
+  // Each conversation row stores participant identities (user/restaurant/dm)
+  // and a last-message snapshot so the list view doesn't need a second join.
   @Get('message/list')
-  messageList() {
-    return { conversations: [], total_size: 0 };
+  async messageList(@Req() req: AuthedRequest, @Query('type') type?: string) {
+    const userId = Number(req.actor!.id);
+    const filter: Record<string, unknown> = { user_id: userId };
+    if (type === 'restaurant' || type === 'delivery_man') filter.counterpart_type = type;
+    const rows = await this.mongo.findMany<{
+      mysql_id: number; user_id: number; counterpart_type: string;
+      counterpart_id: number; counterpart_name?: string | null;
+      counterpart_avatar?: string | null; last_message?: string | null;
+      last_message_at?: Date | string | null; unread?: number;
+    }>('conversations', filter, { sort: { last_message_at: -1 }, limit: 50 });
+    return {
+      conversations: rows.map((c) => ({
+        id: Number(c.mysql_id),
+        type: c.counterpart_type,
+        counterpart_id: Number(c.counterpart_id),
+        name: c.counterpart_name ?? `${c.counterpart_type} #${c.counterpart_id}`,
+        avatar: c.counterpart_avatar ?? null,
+        last_message: c.last_message ?? null,
+        last_message_at: c.last_message_at ?? null,
+        unread: c.unread ?? 0,
+      })),
+      total_size: rows.length,
+    };
   }
 
   @Get('message/details')
-  messageDetails() {
-    return { messages: [] };
+  async messageDetails(@Req() req: AuthedRequest, @Query('conversation_id') convId?: string) {
+    if (!convId) return { messages: [] };
+    const rows = await this.mongo.findMany<{
+      mysql_id: number; conversation_id: number; sender_type: string;
+      sender_id: number; body: string; created_at?: Date | string | null;
+    }>('messages', { conversation_id: Number(convId) }, { sort: { mysql_id: 1 }, limit: 100 });
+    return {
+      messages: rows.map((m) => ({
+        id: Number(m.mysql_id),
+        sender_type: m.sender_type,
+        sender_id: Number(m.sender_id),
+        body: m.body,
+        sent_by_me: m.sender_type === 'user' && Number(m.sender_id) === Number(req.actor!.id),
+        created_at: m.created_at ?? null,
+      })),
+    };
   }
 
   @Get('message/get')
-  messageGet() {
-    return { messages: [], total_size: 0 };
+  async messageGet(@Req() req: AuthedRequest, @Query('conversation_id') convId?: string) {
+    const d = await this.messageDetails(req, convId);
+    return { messages: d.messages, total_size: d.messages.length };
   }
 
   @Get('message/search-list')
-  messageSearch() {
-    return { conversations: [] };
+  async messageSearch(@Req() req: AuthedRequest, @Query('search') q?: string) {
+    if (!q || !q.trim()) return { conversations: [] };
+    const userId = Number(req.actor!.id);
+    const rows = await this.mongo.findMany<{
+      mysql_id: number; counterpart_type: string; counterpart_id: number;
+      counterpart_name?: string | null;
+    }>('conversations', {
+      user_id: userId,
+      counterpart_name: { $regex: q, $options: 'i' },
+    }, { limit: 25 });
+    return { conversations: rows.map((c) => ({ id: Number(c.mysql_id), name: c.counterpart_name, type: c.counterpart_type })) };
   }
 
   @HttpCode(200)
   @Post('message/send')
-  messageSend() {
-    return { message: 'sent' };
+  async messageSend(@Req() req: AuthedRequest, @Body() body: { conversation_id?: number; counterpart_type?: string; counterpart_id?: number; body?: string }) {
+    const userId = Number(req.actor!.id);
+    if (!body.body || !body.body.trim()) {
+      return { message: 'message body required' };
+    }
+    let convId = body.conversation_id;
+    if (!convId && body.counterpart_type && body.counterpart_id) {
+      // Find-or-create a conversation row for the (user, counterpart) pair.
+      const existing = await this.mongo.findOne<{ mysql_id: number }>('conversations', {
+        user_id: userId,
+        counterpart_type: body.counterpart_type,
+        counterpart_id: Number(body.counterpart_id),
+      });
+      if (existing) {
+        convId = Number(existing.mysql_id);
+      } else {
+        convId = await this.mongo.nextMysqlId('conversations');
+        await this.mongo.insertOne('conversations', {
+          mysql_id: convId,
+          user_id: userId,
+          counterpart_type: body.counterpart_type,
+          counterpart_id: Number(body.counterpart_id),
+          counterpart_name: null,
+          last_message: body.body,
+          last_message_at: new Date(),
+          unread: 0,
+        });
+      }
+    }
+    if (!convId) return { message: 'conversation_id or counterpart required' };
+    const msgId = await this.mongo.nextMysqlId('messages');
+    await this.mongo.insertOne('messages', {
+      mysql_id: msgId,
+      conversation_id: convId,
+      sender_type: 'user',
+      sender_id: userId,
+      body: body.body,
+      created_at: new Date(),
+    });
+    await this.mongo.updateOne('conversations', { mysql_id: convId }, {
+      last_message: body.body,
+      last_message_at: new Date(),
+    });
+    return { message: 'sent', conversation_id: convId, id: msgId };
   }
 
   // ── Subscription / interest ───────────────────────────────────────
+  // Reads from the `subscriptions` collection keyed on user_id. The admin
+  // already shows this data at /dashboard/subscription-orders — same source.
   @Get('subscription')
-  subscription() {
-    return { data: [] };
+  async subscription(@Req() req: AuthedRequest) {
+    const userId = Number(req.actor!.id);
+    const rows = await this.mongo.findMany<{
+      mysql_id: number; user_id?: number; mysql_user_id?: number;
+      restaurant_id?: number | null; mysql_restaurant_id?: number | null;
+      plan_name?: string | null; frequency?: string | null;
+      status?: string | null; created_at?: Date | string | null;
+    }>('subscriptions', {
+      $or: [{ user_id: userId }, { mysql_user_id: userId }],
+    }, { sort: { mysql_id: -1 }, limit: 50 });
+    return {
+      data: rows.map((s) => ({
+        id: Number(s.mysql_id),
+        restaurant_id: s.restaurant_id ?? s.mysql_restaurant_id ?? null,
+        plan_name: s.plan_name ?? null,
+        frequency: s.frequency ?? null,
+        status: s.status ?? 'active',
+        created_at: s.created_at ?? null,
+      })),
+    };
   }
 
   @HttpCode(200)
@@ -331,41 +506,100 @@ export class CustomerExtrasController {
   }
 
   @Get('order/order-subscription-list')
-  orderSubscriptionList() {
-    return { data: [], total_size: 0, limit: 25, offset: 1 };
+  async orderSubscriptionList(@Req() req: AuthedRequest) {
+    const userId = Number(req.actor!.id);
+    // Orders flagged as subscription_id != null OR linked via the
+    // subscriptions collection. Either gives the user a "running plan" view.
+    const orderRows = await this.mongo.findMany<{
+      mysql_id: number; mysql_user_id?: number; mysql_restaurant_id?: number | null;
+      order_status?: string; order_amount?: number; subscription_id?: number | null;
+      schedule_at?: Date | string | null; created_at_legacy?: Date | string | null;
+    }>('orders', { mysql_user_id: userId, subscription_id: { $ne: null } }, {
+      sort: { mysql_id: -1 }, limit: 25,
+    });
+    return {
+      data: orderRows.map((o) => ({
+        id: Number(o.mysql_id),
+        restaurant_id: o.mysql_restaurant_id ?? null,
+        subscription_id: o.subscription_id ?? null,
+        order_status: o.order_status ?? 'pending',
+        order_amount: toNum(o.order_amount),
+        schedule_at: o.schedule_at ?? null,
+        created_at: o.created_at_legacy ?? null,
+      })),
+      total_size: orderRows.length,
+      limit: 25,
+      offset: 1,
+    };
   }
 
   @Get('order/details')
   async orderDetails(@Req() req: AuthedRequest, @Query('order_id', ParseIntPipe) orderId: number) {
-    if (this.useMongo()) {
-      const items = await this.mongo.findMany<MongoOrderDetailDoc>(
-        'order_details',
-        { mysql_order_id: Number(orderId) },
-      );
-      return items.map((it) => ({
-        ...(it.legacy ?? {}),
-        ...it,
-        id: Number(it.mysql_id),
-        food_id: it.mysql_food_id !== null && it.mysql_food_id !== undefined ? Number(it.mysql_food_id) : null,
-        order_id: it.mysql_order_id !== null && it.mysql_order_id !== undefined ? Number(it.mysql_order_id) : null,
-        price: toNum(it.price),
-        tax_amount: toNum(it.tax_amount),
-        total_add_on_price: toNum(it.total_add_on_price),
-        item_campaign_id: it.mysql_item_campaign_id !== null && it.mysql_item_campaign_id !== undefined ? Number(it.mysql_item_campaign_id) : null,
-        discount_on_food: it.discount_on_food !== null && it.discount_on_food !== undefined ? toNum(it.discount_on_food) : null,
-      }));
-    }
-    const items = await this.prisma.order_details.findMany({ where: { order_id: BigInt(orderId) } });
+    // Flutter customer app expects each line item to carry inline restaurant
+    // + delivery_address + customer info so its order detail screen can
+    // render restaurant name, delivery address and customer name without
+    // additional round-trips. Without this, the screen shows "Name: null"
+    // and "No restaurant data found".
+    const order = await this.mongo.findByMysqlId<{
+      mysql_id: number; mysql_user_id?: number | null; mysql_restaurant_id?: number | null;
+      mysql_delivery_man_id?: number | null; delivery_address?: string | null;
+      delivery_address_legacy?: string | Record<string, unknown> | null;
+    }>('orders', Number(orderId));
+    const [user, restaurant, deliveryMan, items] = await Promise.all([
+      order?.mysql_user_id != null
+        ? this.mongo.findByMysqlId<{ mysql_id: number; f_name?: string; l_name?: string; phone?: string; email?: string; image?: string }>('users', Number(order.mysql_user_id))
+        : Promise.resolve(null),
+      order?.mysql_restaurant_id != null
+        ? this.mongo.findByMysqlId<{ mysql_id: number; name?: string; phone?: string; email?: string; address?: string; logo?: string; latitude?: number; longitude?: number }>('restaurants', Number(order.mysql_restaurant_id))
+        : Promise.resolve(null),
+      order?.mysql_delivery_man_id != null
+        ? this.mongo.findByMysqlId<{ mysql_id: number; f_name?: string; l_name?: string; phone?: string }>('delivery_men', Number(order.mysql_delivery_man_id))
+        : Promise.resolve(null),
+      // The seed uses `order_id` but migration data may use `mysql_order_id`.
+      // Accept either field — whichever the collection happens to carry.
+      this.mongo.findMany<MongoOrderDetailDoc>('order_details', {
+        $or: [{ order_id: Number(orderId) }, { mysql_order_id: Number(orderId) }],
+      }),
+    ]);
+
+    const customerName = user ? [user.f_name, user.l_name].filter(Boolean).join(' ').trim() || null : null;
+    const restaurantPayload = restaurant ? {
+      id: Number(restaurant.mysql_id),
+      name: restaurant.name ?? null,
+      phone: restaurant.phone ?? null,
+      email: restaurant.email ?? null,
+      address: restaurant.address ?? null,
+      logo: restaurant.logo ?? null,
+      latitude: restaurant.latitude ?? null,
+      longitude: restaurant.longitude ?? null,
+    } : null;
+    const dmPayload = deliveryMan ? {
+      id: Number(deliveryMan.mysql_id),
+      f_name: deliveryMan.f_name ?? null,
+      l_name: deliveryMan.l_name ?? null,
+      phone: deliveryMan.phone ?? null,
+    } : null;
+
     return items.map((it) => ({
+      ...(it.legacy ?? {}),
       ...it,
-      id: Number(it.id),
-      food_id: it.food_id ? Number(it.food_id) : null,
-      order_id: it.order_id ? Number(it.order_id) : null,
-      price: Number(it.price),
-      tax_amount: Number(it.tax_amount),
-      total_add_on_price: Number(it.total_add_on_price),
-      item_campaign_id: it.item_campaign_id ? Number(it.item_campaign_id) : null,
-      discount_on_food: it.discount_on_food ? Number(it.discount_on_food) : null,
+      id: Number(it.mysql_id),
+      food_id: it.mysql_food_id != null ? Number(it.mysql_food_id) : null,
+      order_id: it.mysql_order_id != null ? Number(it.mysql_order_id) : null,
+      price: toNum(it.price),
+      tax_amount: toNum(it.tax_amount),
+      total_add_on_price: toNum(it.total_add_on_price),
+      item_campaign_id: it.mysql_item_campaign_id != null ? Number(it.mysql_item_campaign_id) : null,
+      discount_on_food: it.discount_on_food != null ? toNum(it.discount_on_food) : null,
+      // Inline join — every line carries the trio of contextual identities
+      // so the Flutter detail screen's various widgets each find what they
+      // need on the first row they look at.
+      customer_name: customerName,
+      customer_phone: user?.phone ?? null,
+      customer_email: user?.email ?? null,
+      delivery_address: order?.delivery_address ?? null,
+      restaurant: restaurantPayload,
+      delivery_man: dmPayload,
     }));
   }
 

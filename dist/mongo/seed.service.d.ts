@@ -22,6 +22,16 @@ export declare class SeedService {
         orders: number;
         details: number;
     }>;
+    seedPolicyPages(): Promise<{
+        inserted: number;
+    }>;
+    seedConversations(): Promise<{
+        conversations: number;
+        messages: number;
+    }>;
+    seedSubscriptionOrders(): Promise<{
+        orders: number;
+    }>;
     seedAll(): Promise<SeedReport>;
     private seedUsers;
     private seedVendors;
