@@ -26,6 +26,11 @@ export class CompletionController {
   @Get('vendor-invoices/stats')
   invoiceStats() { return this.svc.getInvoiceStats(); }
 
+  // STATIC sub-paths declared BEFORE `:id` so NestJS doesn't ParseIntPipe-fail
+  // on /stats or /generate. Same pattern used across the admin module.
+  @Get('vendor-invoices/:id')
+  invoiceDetail(@Param('id', ParseIntPipe) id: number) { return this.svc.getInvoiceById(id); }
+
   @Post('vendor-invoices/generate')
   @HttpCode(200)
   generateInvoices(@Body() body: { period_start?: string; period_end?: string }) {

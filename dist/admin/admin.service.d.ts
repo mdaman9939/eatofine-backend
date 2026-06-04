@@ -47,6 +47,11 @@ export declare class AdminService {
             pending: number;
             delivered: number;
             canceled: number;
+            refunded: number;
+            payment_failed: number;
+            processing: number;
+            picked_up: number;
+            scheduled: number;
         };
         restaurants: {
             total: number;
@@ -845,6 +850,383 @@ export declare class AdminService {
         ok: boolean;
         id: number;
         status: boolean;
+    }>;
+    createZone(body: {
+        name?: string;
+        display_name?: string;
+        minimum_shipping_charge?: number;
+        per_km_shipping_charge?: number;
+        maximum_shipping_charge?: number;
+        minimum_delivery_time?: number;
+        max_cod_order_amount?: number;
+        is_default?: boolean;
+    }): Promise<{
+        ok: boolean;
+        id: number;
+        name: string;
+    }>;
+    createRestaurant(body: {
+        name?: string;
+        email?: string;
+        phone?: string;
+        address?: string;
+        minimum_order?: number;
+        zone_id?: number;
+        vendor_id?: number;
+        delivery?: boolean;
+        take_away?: boolean;
+    }): Promise<{
+        ok: boolean;
+        id: number;
+        name: string;
+    }>;
+    createDeliveryMan(body: {
+        f_name?: string;
+        l_name?: string;
+        email?: string;
+        phone?: string;
+        password?: string;
+        zone_id?: number;
+        vehicle_id?: number;
+    }): Promise<{
+        ok: boolean;
+        id: number;
+        name: string;
+    }>;
+    createFood(body: {
+        name?: string;
+        description?: string;
+        price?: number;
+        restaurant_id?: number;
+        category_id?: number;
+        discount?: number;
+        tax?: number;
+        veg?: boolean;
+    }): Promise<{
+        ok: boolean;
+        id: number;
+        name: string;
+    }>;
+    bulkImportRestaurants(rows: Array<Record<string, unknown>>): Promise<{
+        ok: boolean;
+        inserted: number;
+        failed: number;
+        total: number;
+    }>;
+    bulkExportRestaurants(): Promise<{
+        total: number;
+        rows: {
+            id: number;
+            name: string;
+            email: string;
+            phone: string;
+            address: string;
+            minimum_order: number;
+            zone_id: string | number;
+            status: string;
+        }[];
+    }>;
+    bulkImportFood(rows: Array<Record<string, unknown>>): Promise<{
+        ok: boolean;
+        inserted: number;
+        failed: number;
+        total: number;
+    }>;
+    bulkExportFood(): Promise<{
+        total: number;
+        rows: {
+            id: number;
+            name: string;
+            description: string;
+            price: number;
+            tax: number;
+            discount: number;
+            restaurant_id: string | number;
+            category_id: string | number;
+            status: string;
+        }[];
+    }>;
+    listNewsletterSubscribers(limit: number): Promise<{
+        total: number;
+        items: {
+            id: number;
+            email: string;
+            source: string;
+            status: string;
+            created_at: Date | null;
+        }[];
+    }>;
+    deleteNewsletterSubscriber(id: number): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
+    listPendingRestaurants(): Promise<{
+        total: number;
+        items: {
+            id: number;
+            name: string;
+            email: string | null;
+            phone: string | null;
+            address: string | null;
+            vendor_id: number | null;
+            submitted_at: Date | null;
+            status: string;
+        }[];
+    }>;
+    updateRestaurantApproval(id: number, decision: 'approved' | 'rejected', reason?: string): Promise<{
+        ok: boolean;
+        id: number;
+        decision: "approved" | "rejected";
+    }>;
+    listPendingDeliveryMen(): Promise<{
+        total: number;
+        items: {
+            id: number;
+            name: string;
+            email: string | null;
+            phone: string | null;
+            zone_id: number | null;
+            vehicle_id: number | null;
+            submitted_at: Date | null;
+            status: string;
+        }[];
+    }>;
+    updateDeliveryManApproval(id: number, decision: 'approved' | 'rejected', reason?: string): Promise<{
+        ok: boolean;
+        id: number;
+        decision: "approved" | "rejected";
+    }>;
+    addCustomerWalletFund(body: {
+        user_id?: number;
+        amount?: number;
+        reason?: string;
+    }): Promise<{
+        ok: boolean;
+        transaction_id: number;
+        user_id: number;
+        customer_name: string;
+        amount: number;
+        new_balance: number;
+    }>;
+    listCustomerWalletFundHistory(limit: number): Promise<{
+        total: number;
+        items: {
+            id: number;
+            user_id: number | null;
+            customer_name: string;
+            amount: number;
+            reason: string;
+            created_at: Date | null;
+        }[];
+    }>;
+    getPublicPage(slug: string): Promise<{
+        slug: string;
+        title: null;
+        content: string;
+        updated_at: null;
+    } | {
+        slug: string;
+        title: string;
+        content: string;
+        updated_at: Date | null;
+    }>;
+    upsertPublicPage(slug: string, body: {
+        content?: string;
+        title?: string;
+    }): Promise<{
+        ok: boolean;
+        slug: string;
+    }>;
+    private defaultPageTitle;
+    listPromotionalBanners(): Promise<{
+        total: number;
+        items: {
+            id: number;
+            title: string;
+            subtitle: string | null;
+            image: string | null;
+            type: string;
+            target: string | null;
+            cta_text: string;
+            status: boolean;
+            zone_id: number | null;
+            created_at: Date | null;
+        }[];
+    }>;
+    createPromotionalBanner(body: {
+        title?: string;
+        subtitle?: string;
+        image?: string;
+        type?: string;
+        target?: string;
+        cta_text?: string;
+        zone_id?: number;
+    }): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
+    togglePromotionalBanner(id: number, status: boolean): Promise<{
+        ok: boolean;
+        id: number;
+        status: boolean;
+    }>;
+    deletePromotionalBanner(id: number): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
+    listEmailTemplates(): Promise<{
+        total: number;
+        items: {
+            id: number;
+            event: string;
+            audience: string;
+            subject: string;
+            body: string;
+            status: boolean;
+            updated_at: Date | null;
+        }[];
+    }>;
+    createEmailTemplate(body: {
+        event?: string;
+        audience?: string;
+        subject?: string;
+        body?: string;
+    }): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
+    updateEmailTemplate(id: number, body: {
+        subject?: string;
+        body?: string;
+        status?: boolean;
+    }): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
+    deleteEmailTemplate(id: number): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
+    listDmBonuses(): Promise<{
+        total: number;
+        items: {
+            id: number;
+            name: string;
+            type: string;
+            amount: number;
+            trigger: string;
+            status: boolean;
+            claims_30d: number;
+            created_at: Date | null;
+        }[];
+    }>;
+    createDmBonus(body: {
+        name?: string;
+        type?: string;
+        amount?: number;
+        trigger?: string;
+    }): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
+    toggleDmBonus(id: number, status: boolean): Promise<{
+        ok: boolean;
+        id: number;
+        status: boolean;
+    }>;
+    deleteDmBonus(id: number): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
+    listDmIncentives(status?: string): Promise<{
+        total: number;
+        items: {
+            id: number;
+            dm_id: number | null;
+            dm_name: string;
+            period: string;
+            deliveries: number;
+            claim_amount: number;
+            status: string;
+            reason: string | null;
+            created_at: Date | null;
+        }[];
+    }>;
+    updateDmIncentiveStatus(id: number, status: 'approved' | 'rejected', reason?: string): Promise<{
+        ok: boolean;
+        id: number;
+        status: "approved" | "rejected";
+    }>;
+    listSubscriptionOrders(): Promise<{
+        total: number;
+        items: {
+            id: number;
+            customer: string;
+            restaurant: string;
+            plan: string;
+            frequency: string;
+            status: string;
+            start_date: Date | null;
+        }[];
+    }>;
+    listActivityLog(limit: number): Promise<{
+        total: number;
+        items: {
+            id: number;
+            admin_email: string;
+            action: string;
+            target: string;
+            ip: string | null;
+            created_at: Date | null;
+        }[];
+    }>;
+    listDispatchOrders(type?: string): Promise<{
+        items: never[];
+        total: number;
+        type?: undefined;
+    } | {
+        total: number;
+        type: string;
+        items: {
+            id: number;
+            customer: string;
+            restaurant: string;
+            order_amount: number;
+            address: string;
+            wait_minutes: number;
+            assigned_to: number | null;
+        }[];
+    }>;
+    assignOrderToDeliveryMan(orderId: number, deliveryManId: number): Promise<{
+        ok: boolean;
+        order_id: number;
+        delivery_man_id: number;
+    }>;
+    listGalleryFiles(folder?: string): Promise<{
+        total: number;
+        folders: {
+            name: string;
+            count: number;
+        }[];
+        files: {
+            name: string;
+            folder: string;
+            size_bytes: number;
+            url: string;
+            modified: Date | null;
+        }[];
+    }>;
+    cleanDatabaseCollections(body: {
+        collections?: string[];
+        confirm?: string;
+    }): Promise<{
+        ok: boolean;
+        cleared: Record<string, number>;
+    }>;
+    logActivity(adminEmail: string, action: string, target: string, ip: string, meta?: Record<string, unknown>): Promise<void>;
+    deleteZone(id: number): Promise<{
+        ok: boolean;
+        id: number;
     }>;
     listBusinessSettings(prefix?: string): Promise<{
         settings: {

@@ -90,6 +90,13 @@ export class SeedService {
   }
 
   /** Main seed runner — populates all the major demo collections. */
+  /** Add 60 more orders with the full status mix without touching existing
+   *  data. Useful for topping up demo dashboards that have stale 0-counts
+   *  for refunded / payment_failed / cooking / picked_up / scheduled. */
+  async topUpOrders(count = 60): Promise<{ orders: number; details: number }> {
+    return this.seedOrders(count);
+  }
+
   async seedAll(): Promise<SeedReport> {
     const started = new Date();
     const collections: Record<string, number> = {};
@@ -372,16 +379,34 @@ export class SeedService {
     let ordersInserted = 0;
     let detailsInserted = 0;
 
-    const statuses = ['delivered', 'delivered', 'delivered', 'delivered', 'pending', 'confirmed', 'processing', 'canceled', 'handover'];
-    const paymentMethods = ['cash_on_delivery', 'digital_payment', 'wallet', 'cash_on_delivery'];
+    // Weighted distribution — most orders are delivered, but every other
+    // status appears with enough volume that the filter chips and the
+    // dashboard "Refunded / Payment failed / Cooking / Picked up" stat tiles
+    // render real numbers instead of zeros.
+    const statuses = [
+      'delivered', 'delivered', 'delivered', 'delivered', 'delivered',
+      'pending', 'pending',
+      'confirmed',
+      'processing', 'processing',           // "cooking in kitchen"
+      'handover',
+      'picked_up', 'picked_up',
+      'canceled',
+      'refunded',                           // refund engine output
+      'failed',                             // payment_failed bucket
+      'scheduled',                          // scheduled future orders
+    ];
+    const paymentMethods = ['cash_on_delivery', 'digital_payment', 'wallet', 'cash_on_delivery', 'offline_payment'];
 
     for (let i = 0; i < n; i++) {
       const user = this.random(users);
       const restaurant = this.random(restaurants);
       const status = this.random(statuses);
-      const dm = (status === 'delivered' || status === 'handover') && dms.length > 0 ? this.random(dms) : null;
+      const dmAssignedStatuses = ['delivered', 'handover', 'picked_up', 'refunded'];
+      const dm = dmAssignedStatuses.includes(status) && dms.length > 0 ? this.random(dms) : null;
       const paymentMethod = this.random(paymentMethods);
-      const isPaid = paymentMethod !== 'cash_on_delivery' || status === 'delivered';
+      const isPaid = status === 'failed'
+        ? false
+        : (paymentMethod !== 'cash_on_delivery' || status === 'delivered');
       const daysOld = this.randomInt(0, 60);
 
       // Pick 1-4 food items
@@ -401,6 +426,16 @@ export class SeedService {
       const couponDiscount = Math.random() > 0.7 ? this.randomInt(20, 100) : 0;
       const orderAmount = +(subtotal + totalTax + delivery - couponDiscount).toFixed(2);
 
+      // payment_status flag for the "payment_failed" bucket — the orders page
+      // filter uses order_status='failed', and the dashboard tile we wire
+      // counts that same status.
+      const paymentStatus = status === 'failed'
+        ? 'failed'
+        : (status === 'refunded' ? 'refunded' : (isPaid ? 'paid' : 'unpaid'));
+      // Scheduled orders also get a future schedule_at + scheduled=true flag,
+      // so a separate scheduled-orders view (if added) can pick them up.
+      const scheduleAt = status === 'scheduled' ? new Date(Date.now() + this.randomInt(1, 14) * 86_400_000) : null;
+
       try {
         await this.mongo.insertOne('orders', {
           mysql_id: nextOrder,
@@ -409,7 +444,7 @@ export class SeedService {
           mysql_delivery_man_id: dm?.mysql_id ?? null,
           mysql_zone_id: 1,
           order_status: status,
-          payment_status: isPaid ? 'paid' : 'unpaid',
+          payment_status: paymentStatus,
           payment_method: paymentMethod,
           order_type: 'delivery',
           order_amount: orderAmount,
@@ -418,8 +453,15 @@ export class SeedService {
           coupon_discount_amount: couponDiscount,
           additional_charge: 0,
           restaurant_discount_amount: 0,
+          scheduled: status === 'scheduled',
+          schedule_at: scheduleAt,
           items,
           delivered: status === 'delivered' ? this.daysAgo(daysOld) : null,
+          picked_up: status === 'picked_up' || status === 'delivered' ? this.daysAgo(daysOld) : null,
+          processing: ['processing', 'handover', 'picked_up', 'delivered'].includes(status) ? this.daysAgo(daysOld) : null,
+          refunded: status === 'refunded' ? this.daysAgo(daysOld) : null,
+          failed: status === 'failed' ? this.daysAgo(daysOld) : null,
+          canceled: status === 'canceled' ? this.daysAgo(daysOld) : null,
           created_at_legacy: this.daysAgo(daysOld),
         });
         ordersInserted++;

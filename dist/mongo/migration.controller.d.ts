@@ -7,6 +7,12 @@ export declare class MigrationController {
     private readonly seed;
     constructor(svc: MigrationService, generic: GenericMigrationService, seed: SeedService);
     seedDemo(): Promise<import("./seed.service").SeedReport>;
+    topUpOrders(body?: {
+        count?: number;
+    }): Promise<{
+        orders: number;
+        details: number;
+    }>;
     counts(): Promise<{
         users: number;
         vendors: number;

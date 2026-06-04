@@ -116,6 +116,9 @@ let SeedService = class SeedService {
         d.setDate(d.getDate() - days);
         return d;
     }
+    async topUpOrders(count = 60) {
+        return this.seedOrders(count);
+    }
     async seedAll() {
         const started = new Date();
         const collections = {};
@@ -330,15 +333,29 @@ let SeedService = class SeedService {
         let nextDetail = await this.mongo.nextMysqlId('order_details');
         let ordersInserted = 0;
         let detailsInserted = 0;
-        const statuses = ['delivered', 'delivered', 'delivered', 'delivered', 'pending', 'confirmed', 'processing', 'canceled', 'handover'];
-        const paymentMethods = ['cash_on_delivery', 'digital_payment', 'wallet', 'cash_on_delivery'];
+        const statuses = [
+            'delivered', 'delivered', 'delivered', 'delivered', 'delivered',
+            'pending', 'pending',
+            'confirmed',
+            'processing', 'processing',
+            'handover',
+            'picked_up', 'picked_up',
+            'canceled',
+            'refunded',
+            'failed',
+            'scheduled',
+        ];
+        const paymentMethods = ['cash_on_delivery', 'digital_payment', 'wallet', 'cash_on_delivery', 'offline_payment'];
         for (let i = 0; i < n; i++) {
             const user = this.random(users);
             const restaurant = this.random(restaurants);
             const status = this.random(statuses);
-            const dm = (status === 'delivered' || status === 'handover') && dms.length > 0 ? this.random(dms) : null;
+            const dmAssignedStatuses = ['delivered', 'handover', 'picked_up', 'refunded'];
+            const dm = dmAssignedStatuses.includes(status) && dms.length > 0 ? this.random(dms) : null;
             const paymentMethod = this.random(paymentMethods);
-            const isPaid = paymentMethod !== 'cash_on_delivery' || status === 'delivered';
+            const isPaid = status === 'failed'
+                ? false
+                : (paymentMethod !== 'cash_on_delivery' || status === 'delivered');
             const daysOld = this.randomInt(0, 60);
             const itemCount = this.randomInt(1, 4);
             const items = [];
@@ -355,6 +372,10 @@ let SeedService = class SeedService {
             const delivery = this.randomInt(20, 60);
             const couponDiscount = Math.random() > 0.7 ? this.randomInt(20, 100) : 0;
             const orderAmount = +(subtotal + totalTax + delivery - couponDiscount).toFixed(2);
+            const paymentStatus = status === 'failed'
+                ? 'failed'
+                : (status === 'refunded' ? 'refunded' : (isPaid ? 'paid' : 'unpaid'));
+            const scheduleAt = status === 'scheduled' ? new Date(Date.now() + this.randomInt(1, 14) * 86_400_000) : null;
             try {
                 await this.mongo.insertOne('orders', {
                     mysql_id: nextOrder,
@@ -363,7 +384,7 @@ let SeedService = class SeedService {
                     mysql_delivery_man_id: dm?.mysql_id ?? null,
                     mysql_zone_id: 1,
                     order_status: status,
-                    payment_status: isPaid ? 'paid' : 'unpaid',
+                    payment_status: paymentStatus,
                     payment_method: paymentMethod,
                     order_type: 'delivery',
                     order_amount: orderAmount,
@@ -372,8 +393,15 @@ let SeedService = class SeedService {
                     coupon_discount_amount: couponDiscount,
                     additional_charge: 0,
                     restaurant_discount_amount: 0,
+                    scheduled: status === 'scheduled',
+                    schedule_at: scheduleAt,
                     items,
                     delivered: status === 'delivered' ? this.daysAgo(daysOld) : null,
+                    picked_up: status === 'picked_up' || status === 'delivered' ? this.daysAgo(daysOld) : null,
+                    processing: ['processing', 'handover', 'picked_up', 'delivered'].includes(status) ? this.daysAgo(daysOld) : null,
+                    refunded: status === 'refunded' ? this.daysAgo(daysOld) : null,
+                    failed: status === 'failed' ? this.daysAgo(daysOld) : null,
+                    canceled: status === 'canceled' ? this.daysAgo(daysOld) : null,
                     created_at_legacy: this.daysAgo(daysOld),
                 });
                 ordersInserted++;

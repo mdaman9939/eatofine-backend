@@ -1,10 +1,11 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { MigrationController } from './migration.controller';
 import { MigrationService } from './migration.service';
 import { GenericMigrationService } from './generic-migration.service';
 import { MongoDataService } from './mongo-data.service';
 import { SeedService } from './seed.service';
+import { SettingsService } from '../common/settings.service';
 import { User, UserSchema } from './schemas/user.schema';
 import { Vendor, VendorSchema } from './schemas/vendor.schema';
 import { Restaurant, RestaurantSchema } from './schemas/restaurant.schema';
@@ -15,6 +16,7 @@ import { Category, CategorySchema } from './schemas/category.schema';
 import { Cuisine, CuisineSchema } from './schemas/cuisine.schema';
 import { Banner, BannerSchema } from './schemas/banner.schema';
 
+@Global()
 @Module({
   imports: [
     MongooseModule.forFeature([
@@ -30,7 +32,7 @@ import { Banner, BannerSchema } from './schemas/banner.schema';
     ]),
   ],
   controllers: [MigrationController],
-  providers: [MigrationService, GenericMigrationService, MongoDataService, SeedService],
-  exports: [MongooseModule, MigrationService, GenericMigrationService, MongoDataService, SeedService],
+  providers: [MigrationService, GenericMigrationService, MongoDataService, SeedService, SettingsService],
+  exports: [MongooseModule, MigrationService, GenericMigrationService, MongoDataService, SeedService, SettingsService],
 })
 export class MigrationModule {}

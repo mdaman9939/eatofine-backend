@@ -95,6 +95,24 @@ let AdminController = class AdminController {
     restaurants(limit, offset, q) {
         return this.admin.listRestaurants(toInt(limit, 50), toInt(offset, 0), q || undefined);
     }
+    createRestaurant(body) {
+        return this.admin.createRestaurant(body);
+    }
+    restaurantsPending() {
+        return this.admin.listPendingRestaurants();
+    }
+    bulkExportRestaurants() {
+        return this.admin.bulkExportRestaurants();
+    }
+    bulkImportRestaurants(body) {
+        return this.admin.bulkImportRestaurants(body.rows ?? []);
+    }
+    approveRestaurant(id) {
+        return this.admin.updateRestaurantApproval(id, 'approved');
+    }
+    rejectRestaurant(id, body) {
+        return this.admin.updateRestaurantApproval(id, 'rejected', body.reason);
+    }
     restaurantDetail(id) {
         return this.admin.getRestaurant(id);
     }
@@ -119,6 +137,18 @@ let AdminController = class AdminController {
     deliveryMen(limit, offset, q) {
         return this.admin.listDeliveryMen(toInt(limit, 50), toInt(offset, 0), q || undefined);
     }
+    createDeliveryMan(body) {
+        return this.admin.createDeliveryMan(body);
+    }
+    deliveryMenPending() {
+        return this.admin.listPendingDeliveryMen();
+    }
+    approveDeliveryMan(id) {
+        return this.admin.updateDeliveryManApproval(id, 'approved');
+    }
+    rejectDeliveryMan(id, body) {
+        return this.admin.updateDeliveryManApproval(id, 'rejected', body.reason);
+    }
     updateDMStatus(id, body) {
         return this.admin.updateDeliveryManStatus(id, body.status);
     }
@@ -127,6 +157,15 @@ let AdminController = class AdminController {
     }
     food(limit, offset, q, restaurantId) {
         return this.admin.listFood(toInt(limit, 50), toInt(offset, 0), q || undefined, restaurantId ? parseInt(restaurantId, 10) : undefined);
+    }
+    createFood(body) {
+        return this.admin.createFood(body);
+    }
+    bulkImportFood(body) {
+        return this.admin.bulkImportFood(body.rows ?? []);
+    }
+    bulkExportFood() {
+        return this.admin.bulkExportFood();
     }
     foodDetail(id) {
         return this.admin.getFood(id);
@@ -188,8 +227,95 @@ let AdminController = class AdminController {
     zones() {
         return this.admin.listZones();
     }
+    createZone(body) {
+        return this.admin.createZone(body);
+    }
     updateZoneStatus(id, body) {
         return this.admin.updateZoneStatus(id, body.status);
+    }
+    deleteZone(id) {
+        return this.admin.deleteZone(id);
+    }
+    newsletterList(limit) {
+        return this.admin.listNewsletterSubscribers(toInt(limit, 200));
+    }
+    deleteNewsletterSubscriber(id) {
+        return this.admin.deleteNewsletterSubscriber(id);
+    }
+    addCustomerWalletFund(body) {
+        return this.admin.addCustomerWalletFund(body);
+    }
+    customerWalletFundHistory(limit) {
+        return this.admin.listCustomerWalletFundHistory(toInt(limit, 50));
+    }
+    getPage(slug) {
+        return this.admin.getPublicPage(slug);
+    }
+    updatePage(slug, body) {
+        return this.admin.upsertPublicPage(slug, body);
+    }
+    listPromotionalBanners() {
+        return this.admin.listPromotionalBanners();
+    }
+    createPromotionalBanner(body) {
+        return this.admin.createPromotionalBanner(body);
+    }
+    togglePromotionalBanner(id, body) {
+        return this.admin.togglePromotionalBanner(id, body.status);
+    }
+    deletePromotionalBanner(id) {
+        return this.admin.deletePromotionalBanner(id);
+    }
+    listEmailTemplates() {
+        return this.admin.listEmailTemplates();
+    }
+    createEmailTemplate(body) {
+        return this.admin.createEmailTemplate(body);
+    }
+    updateEmailTemplate(id, body) {
+        return this.admin.updateEmailTemplate(id, body);
+    }
+    deleteEmailTemplate(id) {
+        return this.admin.deleteEmailTemplate(id);
+    }
+    listDmBonuses() {
+        return this.admin.listDmBonuses();
+    }
+    createDmBonus(body) {
+        return this.admin.createDmBonus(body);
+    }
+    toggleDmBonus(id, body) {
+        return this.admin.toggleDmBonus(id, body.status);
+    }
+    deleteDmBonus(id) {
+        return this.admin.deleteDmBonus(id);
+    }
+    listDmIncentives(status) {
+        return this.admin.listDmIncentives(status);
+    }
+    approveDmIncentive(id) {
+        return this.admin.updateDmIncentiveStatus(id, 'approved');
+    }
+    rejectDmIncentive(id, body) {
+        return this.admin.updateDmIncentiveStatus(id, 'rejected', body.reason);
+    }
+    subscriptionOrders() {
+        return this.admin.listSubscriptionOrders();
+    }
+    activityLog(limit) {
+        return this.admin.listActivityLog(toInt(limit, 100));
+    }
+    listDispatchOrders(type) {
+        return this.admin.listDispatchOrders(type);
+    }
+    assignDispatch(orderId, body) {
+        return this.admin.assignOrderToDeliveryMan(orderId, body.delivery_man_id);
+    }
+    listGalleryFiles(folder) {
+        return this.admin.listGalleryFiles(folder);
+    }
+    cleanDatabase(body) {
+        return this.admin.cleanDatabaseCollections(body);
     }
     businessSettings(prefix) {
         return this.admin.listBusinessSettings(prefix || undefined);
@@ -544,6 +670,49 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "restaurants", null);
 __decorate([
+    (0, common_1.Post)('restaurants'),
+    (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "createRestaurant", null);
+__decorate([
+    (0, common_1.Get)('restaurants/pending'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "restaurantsPending", null);
+__decorate([
+    (0, common_1.Get)('restaurants/bulk-export'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "bulkExportRestaurants", null);
+__decorate([
+    (0, common_1.Post)('restaurants/bulk-import'),
+    (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "bulkImportRestaurants", null);
+__decorate([
+    (0, common_1.Patch)('restaurants/:id/approve'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "approveRestaurant", null);
+__decorate([
+    (0, common_1.Patch)('restaurants/:id/reject'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "rejectRestaurant", null);
+__decorate([
     (0, common_1.Get)('restaurants/:id'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __metadata("design:type", Function),
@@ -609,6 +778,35 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "deliveryMen", null);
 __decorate([
+    (0, common_1.Post)('delivery-men'),
+    (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "createDeliveryMan", null);
+__decorate([
+    (0, common_1.Get)('delivery-men/pending'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "deliveryMenPending", null);
+__decorate([
+    (0, common_1.Patch)('delivery-men/:id/approve'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "approveDeliveryMan", null);
+__decorate([
+    (0, common_1.Patch)('delivery-men/:id/reject'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "rejectDeliveryMan", null);
+__decorate([
     (0, common_1.Patch)('delivery-men/:id/status'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __param(1, (0, common_1.Body)()),
@@ -634,6 +832,28 @@ __decorate([
     __metadata("design:paramtypes", [String, String, String, String]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "food", null);
+__decorate([
+    (0, common_1.Post)('food'),
+    (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "createFood", null);
+__decorate([
+    (0, common_1.Post)('food/bulk-import'),
+    (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "bulkImportFood", null);
+__decorate([
+    (0, common_1.Get)('food/bulk-export'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "bulkExportFood", null);
 __decorate([
     (0, common_1.Get)('food/:id'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
@@ -777,6 +997,14 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "zones", null);
 __decorate([
+    (0, common_1.Post)('zones'),
+    (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "createZone", null);
+__decorate([
     (0, common_1.Patch)('zones/:id/status'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __param(1, (0, common_1.Body)()),
@@ -784,6 +1012,209 @@ __decorate([
     __metadata("design:paramtypes", [Number, Object]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "updateZoneStatus", null);
+__decorate([
+    (0, common_1.Delete)('zones/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "deleteZone", null);
+__decorate([
+    (0, common_1.Get)('newsletter'),
+    __param(0, (0, common_1.Query)('limit')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "newsletterList", null);
+__decorate([
+    (0, common_1.Delete)('newsletter/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "deleteNewsletterSubscriber", null);
+__decorate([
+    (0, common_1.Post)('customer-wallet/add-fund'),
+    (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "addCustomerWalletFund", null);
+__decorate([
+    (0, common_1.Get)('customer-wallet/add-fund/history'),
+    __param(0, (0, common_1.Query)('limit')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "customerWalletFundHistory", null);
+__decorate([
+    (0, common_1.Get)('pages/:slug'),
+    __param(0, (0, common_1.Param)('slug')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "getPage", null);
+__decorate([
+    (0, common_1.Patch)('pages/:slug'),
+    __param(0, (0, common_1.Param)('slug')),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updatePage", null);
+__decorate([
+    (0, common_1.Get)('promotional-banners'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "listPromotionalBanners", null);
+__decorate([
+    (0, common_1.Post)('promotional-banners'),
+    (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "createPromotionalBanner", null);
+__decorate([
+    (0, common_1.Patch)('promotional-banners/:id/status'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "togglePromotionalBanner", null);
+__decorate([
+    (0, common_1.Delete)('promotional-banners/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "deletePromotionalBanner", null);
+__decorate([
+    (0, common_1.Get)('email-templates'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "listEmailTemplates", null);
+__decorate([
+    (0, common_1.Post)('email-templates'),
+    (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "createEmailTemplate", null);
+__decorate([
+    (0, common_1.Patch)('email-templates/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateEmailTemplate", null);
+__decorate([
+    (0, common_1.Delete)('email-templates/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "deleteEmailTemplate", null);
+__decorate([
+    (0, common_1.Get)('dm-bonuses'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "listDmBonuses", null);
+__decorate([
+    (0, common_1.Post)('dm-bonuses'),
+    (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "createDmBonus", null);
+__decorate([
+    (0, common_1.Patch)('dm-bonuses/:id/status'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "toggleDmBonus", null);
+__decorate([
+    (0, common_1.Delete)('dm-bonuses/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "deleteDmBonus", null);
+__decorate([
+    (0, common_1.Get)('dm-incentives'),
+    __param(0, (0, common_1.Query)('status')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "listDmIncentives", null);
+__decorate([
+    (0, common_1.Patch)('dm-incentives/:id/approve'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "approveDmIncentive", null);
+__decorate([
+    (0, common_1.Patch)('dm-incentives/:id/reject'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "rejectDmIncentive", null);
+__decorate([
+    (0, common_1.Get)('subscription-orders'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "subscriptionOrders", null);
+__decorate([
+    (0, common_1.Get)('activity-log'),
+    __param(0, (0, common_1.Query)('limit')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "activityLog", null);
+__decorate([
+    (0, common_1.Get)('dispatch'),
+    __param(0, (0, common_1.Query)('type')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "listDispatchOrders", null);
+__decorate([
+    (0, common_1.Patch)('dispatch/:order_id/assign'),
+    __param(0, (0, common_1.Param)('order_id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "assignDispatch", null);
+__decorate([
+    (0, common_1.Get)('gallery'),
+    __param(0, (0, common_1.Query)('folder')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "listGalleryFiles", null);
+__decorate([
+    (0, common_1.Post)('clean-database'),
+    (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "cleanDatabase", null);
 __decorate([
     (0, common_1.Get)('business-settings'),
     __param(0, (0, common_1.Query)('prefix')),

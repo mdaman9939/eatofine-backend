@@ -113,6 +113,15 @@ export class MongoDataService {
     return { deletedCount: res.deletedCount };
   }
 
+  /** Delete many — used by Clean Database (truncate). Empty filter = wipe all. */
+  async deleteMany(
+    collection: string,
+    filter: Record<string, unknown>,
+  ): Promise<number> {
+    const res = await this.coll<Document>(collection).deleteMany(filter as Filter<Document>);
+    return res.deletedCount ?? 0;
+  }
+
   /** Aggregation pipeline — for reports, multi-step grouping. */
   async aggregate<T extends Document = Document>(
     collection: string,

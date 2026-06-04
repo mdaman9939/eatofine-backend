@@ -27,6 +27,7 @@ const extras_module_1 = require("./extras/extras.module");
 const enhancements_module_1 = require("./enhancements/enhancements.module");
 const documents_module_1 = require("./documents/documents.module");
 const completion_module_1 = require("./completion/completion.module");
+const refund_module_1 = require("./refund/refund.module");
 const mongo_module_1 = require("./mongo/mongo.module");
 const migration_module_1 = require("./mongo/migration.module");
 let AppModule = class AppModule {
@@ -62,6 +63,7 @@ exports.AppModule = AppModule = __decorate([
             enhancements_module_1.EnhancementsModule,
             documents_module_1.DocumentsModule,
             completion_module_1.CompletionModule,
+            refund_module_1.RefundModule,
             mongo_module_1.MongoModule,
             migration_module_1.MigrationModule,
         ],

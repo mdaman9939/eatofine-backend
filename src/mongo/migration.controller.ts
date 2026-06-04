@@ -20,6 +20,16 @@ export class MigrationController {
     return this.seed.seedAll();
   }
 
+  /** Append more orders with the full status mix (refunded, payment_failed,
+   *  picked_up, scheduled, cooking) WITHOUT wiping anything. Use this when
+   *  the dashboard's status-specific tiles are showing zeros because the
+   *  initial seed pre-dates those status buckets. */
+  @Post('top-up-orders')
+  @HttpCode(200)
+  topUpOrders(@Body() body: { count?: number } = {}) {
+    return this.seed.topUpOrders(body.count ?? 60);
+  }
+
   /** Quick health check — counts on each MongoDB collection. */
   @Get('counts')
   counts() {

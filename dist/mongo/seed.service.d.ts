@@ -18,6 +18,10 @@ export declare class SeedService {
     private randomInt;
     private indianPhone;
     private daysAgo;
+    topUpOrders(count?: number): Promise<{
+        orders: number;
+        details: number;
+    }>;
     seedAll(): Promise<SeedReport>;
     private seedUsers;
     private seedVendors;

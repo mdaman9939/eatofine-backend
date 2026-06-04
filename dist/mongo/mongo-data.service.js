@@ -66,6 +66,10 @@ let MongoDataService = class MongoDataService {
         const res = await this.coll(collection).deleteOne(filter);
         return { deletedCount: res.deletedCount };
     }
+    async deleteMany(collection, filter) {
+        const res = await this.coll(collection).deleteMany(filter);
+        return res.deletedCount ?? 0;
+    }
     async aggregate(collection, pipeline) {
         return this.coll(collection).aggregate(pipeline).toArray();
     }

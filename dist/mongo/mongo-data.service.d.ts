@@ -27,6 +27,7 @@ export declare class MongoDataService {
     deleteOne(collection: string, filter: Record<string, unknown>): Promise<{
         deletedCount: number;
     }>;
+    deleteMany(collection: string, filter: Record<string, unknown>): Promise<number>;
     aggregate<T extends Document = Document>(collection: string, pipeline: Document[]): Promise<T[]>;
     nextMysqlId(collection: string): Promise<number>;
 }

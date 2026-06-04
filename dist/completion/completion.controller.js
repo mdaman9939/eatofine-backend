@@ -29,6 +29,7 @@ let CompletionController = class CompletionController {
         });
     }
     invoiceStats() { return this.svc.getInvoiceStats(); }
+    invoiceDetail(id) { return this.svc.getInvoiceById(id); }
     generateInvoices(body) {
         return this.svc.generateMonthlyInvoices(body.period_start, body.period_end);
     }
@@ -93,6 +94,13 @@ __decorate([
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", void 0)
 ], CompletionController.prototype, "invoiceStats", null);
+__decorate([
+    (0, common_1.Get)('vendor-invoices/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], CompletionController.prototype, "invoiceDetail", null);
 __decorate([
     (0, common_1.Post)('vendor-invoices/generate'),
     (0, common_1.HttpCode)(200),

@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   Param,
   ParseIntPipe,
   Patch,
@@ -105,6 +106,44 @@ export class AdminController {
     return this.admin.listRestaurants(toInt(limit, 50), toInt(offset, 0), q || undefined);
   }
 
+  @Post('restaurants')
+  @HttpCode(200)
+  createRestaurant(@Body() body: {
+    name?: string; email?: string; phone?: string; address?: string;
+    minimum_order?: number; zone_id?: number; vendor_id?: number;
+    delivery?: boolean; take_away?: boolean;
+  }) {
+    return this.admin.createRestaurant(body);
+  }
+
+  // STATIC sub-paths MUST be declared before `:id` — otherwise Nest matches
+  // them as an id and ParseIntPipe throws 400. Same pattern for delivery-men.
+  @Get('restaurants/pending')
+  restaurantsPending() {
+    return this.admin.listPendingRestaurants();
+  }
+
+  @Get('restaurants/bulk-export')
+  bulkExportRestaurants() {
+    return this.admin.bulkExportRestaurants();
+  }
+
+  @Post('restaurants/bulk-import')
+  @HttpCode(200)
+  bulkImportRestaurants(@Body() body: { rows?: Array<Record<string, unknown>> }) {
+    return this.admin.bulkImportRestaurants(body.rows ?? []);
+  }
+
+  @Patch('restaurants/:id/approve')
+  approveRestaurant(@Param('id', ParseIntPipe) id: number) {
+    return this.admin.updateRestaurantApproval(id, 'approved');
+  }
+
+  @Patch('restaurants/:id/reject')
+  rejectRestaurant(@Param('id', ParseIntPipe) id: number, @Body() body: { reason?: string }) {
+    return this.admin.updateRestaurantApproval(id, 'rejected', body.reason);
+  }
+
   @Get('restaurants/:id')
   restaurantDetail(@Param('id', ParseIntPipe) id: number) {
     return this.admin.getRestaurant(id);
@@ -151,6 +190,32 @@ export class AdminController {
     return this.admin.listDeliveryMen(toInt(limit, 50), toInt(offset, 0), q || undefined);
   }
 
+  @Post('delivery-men')
+  @HttpCode(200)
+  createDeliveryMan(@Body() body: {
+    f_name?: string; l_name?: string; email?: string; phone?: string;
+    password?: string; zone_id?: number; vehicle_id?: number;
+  }) {
+    return this.admin.createDeliveryMan(body);
+  }
+
+  // STATIC sub-paths MUST be declared before `:id` — same reason as the
+  // restaurants block above.
+  @Get('delivery-men/pending')
+  deliveryMenPending() {
+    return this.admin.listPendingDeliveryMen();
+  }
+
+  @Patch('delivery-men/:id/approve')
+  approveDeliveryMan(@Param('id', ParseIntPipe) id: number) {
+    return this.admin.updateDeliveryManApproval(id, 'approved');
+  }
+
+  @Patch('delivery-men/:id/reject')
+  rejectDeliveryMan(@Param('id', ParseIntPipe) id: number, @Body() body: { reason?: string }) {
+    return this.admin.updateDeliveryManApproval(id, 'rejected', body.reason);
+  }
+
   @Patch('delivery-men/:id/status')
   updateDMStatus(@Param('id', ParseIntPipe) id: number, @Body() body: { status: boolean }) {
     return this.admin.updateDeliveryManStatus(id, body.status);
@@ -174,6 +239,27 @@ export class AdminController {
     @Query('restaurant_id') restaurantId?: string,
   ) {
     return this.admin.listFood(toInt(limit, 50), toInt(offset, 0), q || undefined, restaurantId ? parseInt(restaurantId, 10) : undefined);
+  }
+
+  @Post('food')
+  @HttpCode(200)
+  createFood(@Body() body: {
+    name?: string; description?: string; price?: number;
+    restaurant_id?: number; category_id?: number;
+    discount?: number; tax?: number; veg?: boolean;
+  }) {
+    return this.admin.createFood(body);
+  }
+
+  @Post('food/bulk-import')
+  @HttpCode(200)
+  bulkImportFood(@Body() body: { rows?: Array<Record<string, unknown>> }) {
+    return this.admin.bulkImportFood(body.rows ?? []);
+  }
+
+  @Get('food/bulk-export')
+  bulkExportFood() {
+    return this.admin.bulkExportFood();
   }
 
   @Get('food/:id')
@@ -289,9 +375,197 @@ export class AdminController {
     return this.admin.listZones();
   }
 
+  @Post('zones')
+  @HttpCode(200)
+  createZone(@Body() body: {
+    name?: string;
+    display_name?: string;
+    minimum_shipping_charge?: number;
+    per_km_shipping_charge?: number;
+    maximum_shipping_charge?: number;
+    minimum_delivery_time?: number;
+    max_cod_order_amount?: number;
+    is_default?: boolean;
+  }) {
+    return this.admin.createZone(body);
+  }
+
   @Patch('zones/:id/status')
   updateZoneStatus(@Param('id', ParseIntPipe) id: number, @Body() body: { status: boolean }) {
     return this.admin.updateZoneStatus(id, body.status);
+  }
+
+  @Delete('zones/:id')
+  deleteZone(@Param('id', ParseIntPipe) id: number) {
+    return this.admin.deleteZone(id);
+  }
+
+  // ── Newsletter subscribers ────────────────────────────────────────────
+
+  @Get('newsletter')
+  newsletterList(@Query('limit') limit?: string) {
+    return this.admin.listNewsletterSubscribers(toInt(limit, 200));
+  }
+
+  @Delete('newsletter/:id')
+  deleteNewsletterSubscriber(@Param('id', ParseIntPipe) id: number) {
+    return this.admin.deleteNewsletterSubscriber(id);
+  }
+
+  // NOTE: Restaurant /pending and /:id approve/reject routes were moved up
+  // next to the `/restaurants` GET so static paths win over `:id` matching.
+  // See comment near line 110.
+
+  // ── Customer wallet — admin credit ────────────────────────────────────
+
+  @Post('customer-wallet/add-fund')
+  @HttpCode(200)
+  addCustomerWalletFund(@Body() body: { user_id?: number; amount?: number; reason?: string }) {
+    return this.admin.addCustomerWalletFund(body);
+  }
+
+  @Get('customer-wallet/add-fund/history')
+  customerWalletFundHistory(@Query('limit') limit?: string) {
+    return this.admin.listCustomerWalletFundHistory(toInt(limit, 50));
+  }
+
+  // ── Public pages (T&C, Privacy, About, etc.) ──────────────────────────
+
+  @Get('pages/:slug')
+  getPage(@Param('slug') slug: string) {
+    return this.admin.getPublicPage(slug);
+  }
+
+  @Patch('pages/:slug')
+  updatePage(@Param('slug') slug: string, @Body() body: { content?: string; title?: string }) {
+    return this.admin.upsertPublicPage(slug, body);
+  }
+
+  // ── Promotional banners ───────────────────────────────────────────────
+
+  @Get('promotional-banners')
+  listPromotionalBanners() {
+    return this.admin.listPromotionalBanners();
+  }
+
+  @Post('promotional-banners')
+  @HttpCode(200)
+  createPromotionalBanner(@Body() body: { title?: string; subtitle?: string; image?: string; type?: string; target?: string; cta_text?: string; zone_id?: number }) {
+    return this.admin.createPromotionalBanner(body);
+  }
+
+  @Patch('promotional-banners/:id/status')
+  togglePromotionalBanner(@Param('id', ParseIntPipe) id: number, @Body() body: { status: boolean }) {
+    return this.admin.togglePromotionalBanner(id, body.status);
+  }
+
+  @Delete('promotional-banners/:id')
+  deletePromotionalBanner(@Param('id', ParseIntPipe) id: number) {
+    return this.admin.deletePromotionalBanner(id);
+  }
+
+  // ── Email templates ──────────────────────────────────────────────────
+
+  @Get('email-templates')
+  listEmailTemplates() {
+    return this.admin.listEmailTemplates();
+  }
+
+  @Post('email-templates')
+  @HttpCode(200)
+  createEmailTemplate(@Body() body: { event?: string; audience?: string; subject?: string; body?: string }) {
+    return this.admin.createEmailTemplate(body);
+  }
+
+  @Patch('email-templates/:id')
+  updateEmailTemplate(@Param('id', ParseIntPipe) id: number, @Body() body: { subject?: string; body?: string; status?: boolean }) {
+    return this.admin.updateEmailTemplate(id, body);
+  }
+
+  @Delete('email-templates/:id')
+  deleteEmailTemplate(@Param('id', ParseIntPipe) id: number) {
+    return this.admin.deleteEmailTemplate(id);
+  }
+
+  // ── DM bonuses ───────────────────────────────────────────────────────
+
+  @Get('dm-bonuses')
+  listDmBonuses() {
+    return this.admin.listDmBonuses();
+  }
+
+  @Post('dm-bonuses')
+  @HttpCode(200)
+  createDmBonus(@Body() body: { name?: string; type?: string; amount?: number; trigger?: string }) {
+    return this.admin.createDmBonus(body);
+  }
+
+  @Patch('dm-bonuses/:id/status')
+  toggleDmBonus(@Param('id', ParseIntPipe) id: number, @Body() body: { status: boolean }) {
+    return this.admin.toggleDmBonus(id, body.status);
+  }
+
+  @Delete('dm-bonuses/:id')
+  deleteDmBonus(@Param('id', ParseIntPipe) id: number) {
+    return this.admin.deleteDmBonus(id);
+  }
+
+  // ── DM incentives ────────────────────────────────────────────────────
+
+  @Get('dm-incentives')
+  listDmIncentives(@Query('status') status?: string) {
+    return this.admin.listDmIncentives(status);
+  }
+
+  @Patch('dm-incentives/:id/approve')
+  approveDmIncentive(@Param('id', ParseIntPipe) id: number) {
+    return this.admin.updateDmIncentiveStatus(id, 'approved');
+  }
+
+  @Patch('dm-incentives/:id/reject')
+  rejectDmIncentive(@Param('id', ParseIntPipe) id: number, @Body() body: { reason?: string }) {
+    return this.admin.updateDmIncentiveStatus(id, 'rejected', body.reason);
+  }
+
+  // ── Subscription orders (filter from existing orders) ────────────────
+
+  @Get('subscription-orders')
+  subscriptionOrders() {
+    return this.admin.listSubscriptionOrders();
+  }
+
+  // ── Activity log ─────────────────────────────────────────────────────
+
+  @Get('activity-log')
+  activityLog(@Query('limit') limit?: string) {
+    return this.admin.listActivityLog(toInt(limit, 100));
+  }
+
+  // ── Dispatch (pending pickups) ───────────────────────────────────────
+
+  @Get('dispatch')
+  listDispatchOrders(@Query('type') type?: string) {
+    return this.admin.listDispatchOrders(type);
+  }
+
+  @Patch('dispatch/:order_id/assign')
+  assignDispatch(@Param('order_id', ParseIntPipe) orderId: number, @Body() body: { delivery_man_id: number }) {
+    return this.admin.assignOrderToDeliveryMan(orderId, body.delivery_man_id);
+  }
+
+  // ── Gallery / file listing ───────────────────────────────────────────
+
+  @Get('gallery')
+  listGalleryFiles(@Query('folder') folder?: string) {
+    return this.admin.listGalleryFiles(folder);
+  }
+
+  // ── Clean database ───────────────────────────────────────────────────
+
+  @Post('clean-database')
+  @HttpCode(200)
+  cleanDatabase(@Body() body: { collections?: string[]; confirm?: string }) {
+    return this.admin.cleanDatabaseCollections(body);
   }
 
   // ── Business settings ─────────────────────────────────────────────────

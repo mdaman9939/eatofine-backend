@@ -131,6 +131,11 @@ export class AdminService {
         pendingOrders,
         deliveredOrders,
         canceledOrders,
+        refundedOrders,
+        failedOrders,
+        processingOrders,
+        pickedUpOrders,
+        scheduledOrders,
         totalRestaurants,
         activeRestaurants,
         totalUsers,
@@ -143,6 +148,11 @@ export class AdminService {
         this.mongo.count('orders', { order_status: 'pending' }),
         this.mongo.count('orders', { order_status: 'delivered' }),
         this.mongo.count('orders', { order_status: 'canceled' }),
+        this.mongo.count('orders', { order_status: 'refunded' }),
+        this.mongo.count('orders', { order_status: 'failed' }),
+        this.mongo.count('orders', { order_status: 'processing' }),
+        this.mongo.count('orders', { order_status: 'picked_up' }),
+        this.mongo.count('orders', { order_status: 'scheduled' }),
         this.mongo.count('restaurants'),
         this.mongo.count('restaurants', { status: true }),
         this.mongo.count('users'),
@@ -160,6 +170,11 @@ export class AdminService {
           pending: pendingOrders,
           delivered: deliveredOrders,
           canceled: canceledOrders,
+          refunded: refundedOrders,
+          payment_failed: failedOrders,
+          processing: processingOrders,
+          picked_up: pickedUpOrders,
+          scheduled: scheduledOrders,
         },
         restaurants: { total: totalRestaurants, active: activeRestaurants },
         users: { total: totalUsers },
@@ -175,6 +190,11 @@ export class AdminService {
       pendingOrders,
       deliveredOrders,
       canceledOrders,
+      refundedOrders,
+      failedOrders,
+      processingOrders,
+      pickedUpOrders,
+      scheduledOrders,
       totalRestaurants,
       activeRestaurants,
       totalUsers,
@@ -187,6 +207,11 @@ export class AdminService {
       this.prisma.orders.count({ where: { order_status: 'pending' } }),
       this.prisma.orders.count({ where: { order_status: 'delivered' } }),
       this.prisma.orders.count({ where: { order_status: 'canceled' } }),
+      this.prisma.orders.count({ where: { order_status: 'refunded' } }),
+      this.prisma.orders.count({ where: { order_status: 'failed' } }),
+      this.prisma.orders.count({ where: { order_status: 'processing' } }),
+      this.prisma.orders.count({ where: { order_status: 'picked_up' } }),
+      this.prisma.orders.count({ where: { order_status: 'scheduled' } }),
       this.prisma.restaurants.count(),
       this.prisma.restaurants.count({ where: { status: true } }),
       this.prisma.users.count(),
@@ -205,6 +230,11 @@ export class AdminService {
         pending: pendingOrders,
         delivered: deliveredOrders,
         canceled: canceledOrders,
+        refunded: refundedOrders,
+        payment_failed: failedOrders,
+        processing: processingOrders,
+        picked_up: pickedUpOrders,
+        scheduled: scheduledOrders,
       },
       restaurants: { total: totalRestaurants, active: activeRestaurants },
       users: { total: totalUsers },
@@ -1667,6 +1697,1016 @@ export class AdminService {
     if (!z) throw new NotFoundException({ errors: [{ code: 'zone', message: 'Zone not found' }] });
     await this.prisma.zones.update({ where: { id: z.id }, data: { status } });
     return { ok: true, id, status };
+  }
+
+  async createZone(body: {
+    name?: string;
+    display_name?: string;
+    minimum_shipping_charge?: number;
+    per_km_shipping_charge?: number;
+    maximum_shipping_charge?: number;
+    minimum_delivery_time?: number;
+    max_cod_order_amount?: number;
+    is_default?: boolean;
+  }) {
+    if (!body.name || !body.name.trim()) {
+      throw new BadRequestException({ errors: [{ code: 'name', message: 'Zone name is required' }] });
+    }
+    const payload = {
+      name: body.name.trim(),
+      display_name: body.display_name?.trim() || body.name.trim(),
+      // A new zone with no polygon yet — coordinates can be drawn from the
+      // admin map widget later. Storing an empty array keeps the shape
+      // consistent with what the geofence matcher expects.
+      coordinates: [] as Array<{ lat: number; lng: number }>,
+      status: true,
+      is_default: body.is_default ?? false,
+      minimum_shipping_charge: Number(body.minimum_shipping_charge ?? 0),
+      per_km_shipping_charge: Number(body.per_km_shipping_charge ?? 0),
+      maximum_shipping_charge: Number(body.maximum_shipping_charge ?? 0),
+      minimum_delivery_time: Number(body.minimum_delivery_time ?? 0),
+      max_cod_order_amount: Number(body.max_cod_order_amount ?? 0),
+    };
+
+    if (this.useMongo()) {
+      const nextId = await this.mongo.nextMysqlId('zones');
+      const now = new Date();
+      await this.mongo.insertOne('zones', {
+        ...payload,
+        mysql_id: nextId,
+        created_at: now,
+        updated_at: now,
+      });
+      return { ok: true, id: nextId, name: payload.name };
+    }
+    throw new BadRequestException({
+      errors: [{ code: 'config', message: 'Zone creation requires USE_MONGO_ADMIN=1 (MySQL path is read-only).' }],
+    });
+  }
+
+  // ── Create restaurant / food / delivery-man (admin Add forms) ────────
+
+  async createRestaurant(body: {
+    name?: string; email?: string; phone?: string; address?: string;
+    minimum_order?: number; zone_id?: number; vendor_id?: number;
+    delivery?: boolean; take_away?: boolean;
+  }) {
+    if (!body.name) throw new BadRequestException({ errors: [{ code: 'name', message: 'Restaurant name is required' }] });
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    const nextId = await this.mongo.nextMysqlId('restaurants');
+    const now = new Date();
+    await this.mongo.insertOne('restaurants', {
+      mysql_id: nextId,
+      name: body.name,
+      email: body.email ?? null,
+      phone: body.phone ?? null,
+      address: body.address ?? null,
+      minimum_order: Number(body.minimum_order ?? 100),
+      mysql_zone_id: body.zone_id ?? 1,
+      mysql_vendor_id: body.vendor_id ?? null,
+      delivery: body.delivery ?? true,
+      take_away: body.take_away ?? true,
+      status: true,
+      approval_status: 'approved',
+      logo: null,
+      cover_photo: null,
+      created_at: now,
+      updated_at: now,
+    });
+    return { ok: true, id: nextId, name: body.name };
+  }
+
+  async createDeliveryMan(body: {
+    f_name?: string; l_name?: string; email?: string; phone?: string;
+    password?: string; zone_id?: number; vehicle_id?: number;
+  }) {
+    if (!body.f_name || !body.phone) {
+      throw new BadRequestException({ errors: [{ code: 'input', message: 'First name + phone required' }] });
+    }
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    // Hash the password using the same scheme the SeedService uses (Laravel
+    // $2y$ prefix) so the existing login flow can verify it.
+    const bcrypt = await import('bcrypt');
+    const rawPw = body.password ?? '12345678';
+    const hash = (await bcrypt.hash(rawPw, 10)).replace(/^\$2b\$/, '$2y$');
+    const nextId = await this.mongo.nextMysqlId('delivery_men');
+    const now = new Date();
+    await this.mongo.insertOne('delivery_men', {
+      mysql_id: nextId,
+      f_name: body.f_name,
+      l_name: body.l_name ?? '',
+      email: body.email ?? null,
+      phone: body.phone,
+      password: hash,
+      mysql_zone_id: body.zone_id ?? 1,
+      vehicle_id: body.vehicle_id ?? 1,
+      application_status: 'approved',
+      status: true,
+      created_at: now,
+      updated_at: now,
+    });
+    return { ok: true, id: nextId, name: `${body.f_name} ${body.l_name ?? ''}`.trim() };
+  }
+
+  async createFood(body: {
+    name?: string; description?: string; price?: number;
+    restaurant_id?: number; category_id?: number;
+    discount?: number; tax?: number; veg?: boolean;
+  }) {
+    if (!body.name || !body.price || !body.restaurant_id) {
+      throw new BadRequestException({ errors: [{ code: 'input', message: 'name, price, and restaurant_id are required' }] });
+    }
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    const nextId = await this.mongo.nextMysqlId('foods');
+    const now = new Date();
+    await this.mongo.insertOne('foods', {
+      mysql_id: nextId,
+      name: body.name,
+      description: body.description ?? '',
+      price: Number(body.price),
+      tax: Number(body.tax ?? 0),
+      discount: Number(body.discount ?? 0),
+      mysql_restaurant_id: Number(body.restaurant_id),
+      mysql_category_id: Number(body.category_id ?? 1),
+      veg: body.veg ?? true,
+      status: true,
+      image: null,
+      created_at: now,
+      updated_at: now,
+    });
+    return { ok: true, id: nextId, name: body.name };
+  }
+
+  // ── Bulk import / export ─────────────────────────────────────────────
+
+  async bulkImportRestaurants(rows: Array<Record<string, unknown>>) {
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    let inserted = 0; let failed = 0;
+    for (const r of rows) {
+      try {
+        const name = typeof r.name === 'string' ? r.name : null;
+        if (!name) { failed++; continue; }
+        await this.createRestaurant({
+          name,
+          email: typeof r.email === 'string' ? r.email : undefined,
+          phone: typeof r.phone === 'string' ? r.phone : undefined,
+          address: typeof r.address === 'string' ? r.address : undefined,
+          zone_id: typeof r.zone_id === 'number' ? r.zone_id : 1,
+          minimum_order: typeof r.minimum_order === 'number' ? r.minimum_order : 100,
+        });
+        inserted++;
+      } catch { failed++; }
+    }
+    return { ok: true, inserted, failed, total: rows.length };
+  }
+
+  async bulkExportRestaurants() {
+    if (!this.useMongo()) return { rows: [], total: 0 };
+    const rows = await this.mongo.findMany<{
+      mysql_id: number; name?: string; email?: string; phone?: string;
+      address?: string; minimum_order?: number; mysql_zone_id?: number;
+      status?: boolean | number;
+    }>('restaurants', {}, { limit: 5000 });
+    return {
+      total: rows.length,
+      rows: rows.map((r) => ({
+        id: r.mysql_id,
+        name: r.name ?? '',
+        email: r.email ?? '',
+        phone: r.phone ?? '',
+        address: r.address ?? '',
+        minimum_order: r.minimum_order ?? 0,
+        zone_id: r.mysql_zone_id ?? '',
+        status: r.status === true || r.status === 1 ? 'active' : 'inactive',
+      })),
+    };
+  }
+
+  async bulkImportFood(rows: Array<Record<string, unknown>>) {
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    let inserted = 0; let failed = 0;
+    for (const r of rows) {
+      try {
+        const name = typeof r.name === 'string' ? r.name : null;
+        const price = typeof r.price === 'number' ? r.price : parseFloat(String(r.price));
+        const restaurantId = typeof r.restaurant_id === 'number' ? r.restaurant_id : parseInt(String(r.restaurant_id), 10);
+        if (!name || !Number.isFinite(price) || !Number.isFinite(restaurantId)) { failed++; continue; }
+        await this.createFood({
+          name, price, restaurant_id: restaurantId,
+          description: typeof r.description === 'string' ? r.description : undefined,
+          category_id: typeof r.category_id === 'number' ? r.category_id : undefined,
+          discount: typeof r.discount === 'number' ? r.discount : undefined,
+          tax: typeof r.tax === 'number' ? r.tax : undefined,
+          veg: typeof r.veg === 'boolean' ? r.veg : undefined,
+        });
+        inserted++;
+      } catch { failed++; }
+    }
+    return { ok: true, inserted, failed, total: rows.length };
+  }
+
+  async bulkExportFood() {
+    if (!this.useMongo()) return { rows: [], total: 0 };
+    const rows = await this.mongo.findMany<{
+      mysql_id: number; name?: string; description?: string;
+      price?: number; tax?: number; discount?: number;
+      mysql_restaurant_id?: number; mysql_category_id?: number;
+      status?: boolean | number;
+    }>('foods', {}, { limit: 5000 });
+    return {
+      total: rows.length,
+      rows: rows.map((r) => ({
+        id: r.mysql_id,
+        name: r.name ?? '',
+        description: r.description ?? '',
+        price: r.price ?? 0,
+        tax: r.tax ?? 0,
+        discount: r.discount ?? 0,
+        restaurant_id: r.mysql_restaurant_id ?? '',
+        category_id: r.mysql_category_id ?? '',
+        status: r.status === true || r.status === 1 ? 'active' : 'inactive',
+      })),
+    };
+  }
+
+  // ── Newsletter subscribers ────────────────────────────────────────────
+
+  async listNewsletterSubscribers(limit: number) {
+    if (!this.useMongo()) return { total: 0, items: [] };
+    const rows = await this.mongo.findMany<{
+      mysql_id: number; email: string; source?: string | null;
+      status?: string | null; created_at?: Date | null;
+    }>('newsletter_subscribers', {}, { sort: { mysql_id: -1 }, limit });
+    const total = await this.mongo.count('newsletter_subscribers', {});
+    return {
+      total,
+      items: rows.map((r) => ({
+        id: r.mysql_id,
+        email: r.email,
+        source: r.source ?? 'footer',
+        status: r.status ?? 'active',
+        created_at: r.created_at ?? null,
+      })),
+    };
+  }
+
+  async deleteNewsletterSubscriber(id: number) {
+    if (!this.useMongo()) {
+      throw new BadRequestException({ errors: [{ code: 'config', message: 'Newsletter ops require Mongo' }] });
+    }
+    const found = await this.mongo.findByMysqlId<{ mysql_id: number }>('newsletter_subscribers', id);
+    if (!found) throw new NotFoundException({ errors: [{ code: 'subscriber', message: 'Subscriber not found' }] });
+    await this.mongo.deleteOne('newsletter_subscribers', { mysql_id: id });
+    return { ok: true, id };
+  }
+
+  // ── Restaurant joining requests ──────────────────────────────────────
+
+  async listPendingRestaurants() {
+    if (!this.useMongo()) return { items: [], total: 0 };
+    // Pending = restaurants with `status=false` OR no `approved_at` timestamp.
+    // The seed treats status=true as approved/live; new signups should be
+    // inserted with status=false until admin verifies docs.
+    const rows = await this.mongo.findMany<{
+      mysql_id: number; name?: string | null; phone?: string | null;
+      email?: string | null; address?: string | null;
+      logo?: string | null; mysql_vendor_id?: number | null;
+      created_at?: Date | null; approval_status?: string | null;
+    }>('restaurants',
+      { $or: [
+        { approval_status: 'pending' },
+        { status: false, approval_status: { $exists: false } },
+      ] },
+      { sort: { mysql_id: -1 }, limit: 100 },
+    );
+    return {
+      total: rows.length,
+      items: rows.map((r) => ({
+        id: r.mysql_id,
+        name: r.name ?? '—',
+        email: r.email ?? null,
+        phone: r.phone ?? null,
+        address: r.address ?? null,
+        vendor_id: r.mysql_vendor_id ?? null,
+        submitted_at: r.created_at ?? null,
+        status: r.approval_status ?? 'pending',
+      })),
+    };
+  }
+
+  async updateRestaurantApproval(id: number, decision: 'approved' | 'rejected', reason?: string) {
+    if (!this.useMongo()) {
+      throw new BadRequestException({ errors: [{ code: 'config', message: 'Restaurant approval requires Mongo' }] });
+    }
+    const r = await this.mongo.findByMysqlId<{ mysql_id: number }>('restaurants', id);
+    if (!r) throw new NotFoundException({ errors: [{ code: 'restaurant', message: 'Restaurant not found' }] });
+    await this.mongo.updateOne('restaurants', { mysql_id: id }, {
+      approval_status: decision,
+      status: decision === 'approved',
+      rejection_reason: decision === 'rejected' ? (reason ?? null) : null,
+      approved_at: decision === 'approved' ? new Date() : null,
+      updated_at: new Date(),
+    });
+    return { ok: true, id, decision };
+  }
+
+  // ── Delivery man joining requests ────────────────────────────────────
+
+  async listPendingDeliveryMen() {
+    if (!this.useMongo()) return { items: [], total: 0 };
+    const rows = await this.mongo.findMany<{
+      mysql_id: number; f_name?: string | null; l_name?: string | null;
+      phone?: string | null; email?: string | null;
+      application_status?: string | null; vehicle_id?: number | null;
+      mysql_zone_id?: number | null; created_at?: Date | null;
+    }>('delivery_men',
+      { $or: [
+        { application_status: 'pending' },
+        { application_status: { $exists: false } },
+      ] },
+      { sort: { mysql_id: -1 }, limit: 100 },
+    );
+    return {
+      total: rows.length,
+      items: rows.map((r) => ({
+        id: r.mysql_id,
+        name: `${r.f_name ?? ''} ${r.l_name ?? ''}`.trim() || '—',
+        email: r.email ?? null,
+        phone: r.phone ?? null,
+        zone_id: r.mysql_zone_id ?? null,
+        vehicle_id: r.vehicle_id ?? null,
+        submitted_at: r.created_at ?? null,
+        status: r.application_status ?? 'pending',
+      })),
+    };
+  }
+
+  async updateDeliveryManApproval(id: number, decision: 'approved' | 'rejected', reason?: string) {
+    if (!this.useMongo()) {
+      throw new BadRequestException({ errors: [{ code: 'config', message: 'DM approval requires Mongo' }] });
+    }
+    const dm = await this.mongo.findByMysqlId<{ mysql_id: number }>('delivery_men', id);
+    if (!dm) throw new NotFoundException({ errors: [{ code: 'delivery_man', message: 'Delivery man not found' }] });
+    await this.mongo.updateOne('delivery_men', { mysql_id: id }, {
+      application_status: decision,
+      status: decision === 'approved',
+      rejection_reason: decision === 'rejected' ? (reason ?? null) : null,
+      approved_at: decision === 'approved' ? new Date() : null,
+      updated_at: new Date(),
+    });
+    return { ok: true, id, decision };
+  }
+
+  // ── Customer wallet — admin add fund ─────────────────────────────────
+
+  async addCustomerWalletFund(body: { user_id?: number; amount?: number; reason?: string }) {
+    if (!body.user_id || !body.amount) {
+      throw new BadRequestException({
+        errors: [{ code: 'input', message: 'user_id and amount are required' }],
+      });
+    }
+    if (body.amount <= 0) {
+      throw new BadRequestException({
+        errors: [{ code: 'amount', message: 'Amount must be positive' }],
+      });
+    }
+    if (!this.useMongo()) {
+      throw new BadRequestException({ errors: [{ code: 'config', message: 'Customer wallet ops require Mongo' }] });
+    }
+
+    const userId = Number(body.user_id);
+    const user = await this.mongo.findByMysqlId<{ mysql_id: number; f_name?: string | null; l_name?: string | null }>('users', userId);
+    if (!user) throw new NotFoundException({ errors: [{ code: 'user', message: 'Customer not found' }] });
+
+    // Upsert the customer wallet — collection name follows the Laravel
+    // convention (`wallets` or `customer_wallets`). We try the canonical
+    // `wallets` collection here.
+    const existing = await this.mongo.findOne<{ mysql_id: number; balance?: number; total_earning?: number }>(
+      'wallets', { user_id: userId },
+    );
+    const newBalance = Number(existing?.balance ?? 0) + body.amount;
+    if (existing) {
+      await this.mongo.updateOne('wallets', { user_id: userId }, {
+        balance: newBalance,
+        updated_at: new Date(),
+      });
+    } else {
+      const nextId = await this.mongo.nextMysqlId('wallets');
+      await this.mongo.insertOne('wallets', {
+        mysql_id: nextId,
+        user_id: userId,
+        mysql_user_id: userId,
+        balance: body.amount,
+        total_earning: body.amount,
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+    }
+
+    // Record a wallet_transactions row for the audit trail.
+    const txId = await this.mongo.nextMysqlId('wallet_transactions');
+    await this.mongo.insertOne('wallet_transactions', {
+      mysql_id: txId,
+      user_id: userId,
+      mysql_user_id: userId,
+      transaction_id: `ADMIN_FUND_${txId}`,
+      credit: body.amount,
+      debit: 0,
+      balance: newBalance,
+      transaction_type: 'admin_credit',
+      reference: body.reason ?? 'Admin credit',
+      admin_bonus: body.amount,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+
+    return {
+      ok: true,
+      transaction_id: txId,
+      user_id: userId,
+      customer_name: `${user.f_name ?? ''} ${user.l_name ?? ''}`.trim() || `Customer #${userId}`,
+      amount: body.amount,
+      new_balance: newBalance,
+    };
+  }
+
+  async listCustomerWalletFundHistory(limit: number) {
+    if (!this.useMongo()) return { total: 0, items: [] };
+    const rows = await this.mongo.findMany<{
+      mysql_id: number; user_id?: number; credit?: number;
+      reference?: string | null; created_at?: Date | null;
+      transaction_type?: string | null;
+    }>('wallet_transactions',
+      { transaction_type: 'admin_credit' },
+      { sort: { mysql_id: -1 }, limit },
+    );
+    // Attach customer name in one batched lookup
+    const userIds = Array.from(new Set(rows.map((r) => r.user_id).filter((x): x is number => x !== undefined)));
+    const users = userIds.length > 0
+      ? await this.mongo.findMany<{ mysql_id: number; f_name?: string | null; l_name?: string | null }>(
+          'users', { mysql_id: { $in: userIds } },
+        )
+      : [];
+    const nameById = new Map(users.map((u) => [u.mysql_id, `${u.f_name ?? ''} ${u.l_name ?? ''}`.trim()]));
+    return {
+      total: rows.length,
+      items: rows.map((r) => ({
+        id: r.mysql_id,
+        user_id: r.user_id ?? null,
+        customer_name: r.user_id ? (nameById.get(r.user_id) || `Customer #${r.user_id}`) : '—',
+        amount: Number(r.credit ?? 0),
+        reason: r.reference ?? '—',
+        created_at: r.created_at ?? null,
+      })),
+    };
+  }
+
+  // ── Public pages (T&C, Privacy, About, etc.) ─────────────────────────
+
+  /** Pages are stored as documents in `public_pages` keyed by slug.
+   *  This lets the marketing site fetch one with `GET /public/pages/:slug`
+   *  while admin edits with PATCH. Stored as Markdown + optional title. */
+  async getPublicPage(slug: string) {
+    if (!this.useMongo()) return { slug, title: null, content: '', updated_at: null };
+    const row = await this.mongo.findOne<{
+      slug: string; title?: string | null; content?: string | null; updated_at?: Date | null;
+    }>('public_pages', { slug });
+    return {
+      slug,
+      title: row?.title ?? this.defaultPageTitle(slug),
+      content: row?.content ?? '',
+      updated_at: row?.updated_at ?? null,
+    };
+  }
+
+  async upsertPublicPage(slug: string, body: { content?: string; title?: string }) {
+    if (!this.useMongo()) {
+      throw new BadRequestException({ errors: [{ code: 'config', message: 'Page edit requires Mongo' }] });
+    }
+    const existing = await this.mongo.findOne<{ slug: string }>('public_pages', { slug });
+    const now = new Date();
+    if (existing) {
+      await this.mongo.updateOne('public_pages', { slug }, {
+        ...(body.title !== undefined ? { title: body.title } : {}),
+        ...(body.content !== undefined ? { content: body.content } : {}),
+        updated_at: now,
+      });
+    } else {
+      const nextId = await this.mongo.nextMysqlId('public_pages');
+      await this.mongo.insertOne('public_pages', {
+        mysql_id: nextId,
+        slug,
+        title: body.title ?? this.defaultPageTitle(slug),
+        content: body.content ?? '',
+        created_at: now,
+        updated_at: now,
+      });
+    }
+    return { ok: true, slug };
+  }
+
+  private defaultPageTitle(slug: string): string {
+    const map: Record<string, string> = {
+      'terms-and-conditions': 'Terms & Conditions',
+      'privacy-policy': 'Privacy Policy',
+      'about-us': 'About Us',
+      'refund-policy': 'Refund Policy',
+      'shipping-policy': 'Shipping Policy',
+      'cancellation-policy': 'Cancellation Policy',
+    };
+    return map[slug] ?? slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+
+  // ── Promotional banners ──────────────────────────────────────────────
+
+  async listPromotionalBanners() {
+    if (!this.useMongo()) return { items: [], total: 0 };
+    const rows = await this.mongo.findMany<{
+      mysql_id: number; title?: string | null; subtitle?: string | null;
+      image?: string | null; type?: string | null; target?: string | null;
+      cta_text?: string | null; status?: boolean | number;
+      zone_id?: number | null; created_at?: Date | null;
+    }>('promotional_banners', {}, { sort: { mysql_id: -1 }, limit: 100 });
+    return {
+      total: rows.length,
+      items: rows.map((r) => ({
+        id: r.mysql_id,
+        title: r.title ?? '',
+        subtitle: r.subtitle ?? null,
+        image: r.image ?? null,
+        type: r.type ?? 'promo',
+        target: r.target ?? null,
+        cta_text: r.cta_text ?? 'View',
+        status: r.status === true || r.status === 1,
+        zone_id: r.zone_id ?? null,
+        created_at: r.created_at ?? null,
+      })),
+    };
+  }
+
+  async createPromotionalBanner(body: { title?: string; subtitle?: string; image?: string; type?: string; target?: string; cta_text?: string; zone_id?: number }) {
+    if (!body.title) {
+      throw new BadRequestException({ errors: [{ code: 'title', message: 'Title is required' }] });
+    }
+    if (!this.useMongo()) {
+      throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    }
+    const nextId = await this.mongo.nextMysqlId('promotional_banners');
+    await this.mongo.insertOne('promotional_banners', {
+      mysql_id: nextId,
+      title: body.title,
+      subtitle: body.subtitle ?? null,
+      image: body.image ?? null,
+      type: body.type ?? 'promo',
+      target: body.target ?? null,
+      cta_text: body.cta_text ?? 'View',
+      status: true,
+      zone_id: body.zone_id ?? null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+    return { ok: true, id: nextId };
+  }
+
+  async togglePromotionalBanner(id: number, status: boolean) {
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    await this.mongo.updateOne('promotional_banners', { mysql_id: id }, { status, updated_at: new Date() });
+    return { ok: true, id, status };
+  }
+
+  async deletePromotionalBanner(id: number) {
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    await this.mongo.deleteOne('promotional_banners', { mysql_id: id });
+    return { ok: true, id };
+  }
+
+  // ── Email templates ──────────────────────────────────────────────────
+
+  async listEmailTemplates() {
+    if (!this.useMongo()) return { items: [], total: 0 };
+    const rows = await this.mongo.findMany<{
+      mysql_id: number; event?: string; audience?: string;
+      subject?: string; body?: string; status?: boolean | number;
+      updated_at?: Date | null;
+    }>('email_templates', {}, { sort: { mysql_id: -1 }, limit: 200 });
+    return {
+      total: rows.length,
+      items: rows.map((r) => ({
+        id: r.mysql_id,
+        event: r.event ?? '—',
+        audience: r.audience ?? 'customer',
+        subject: r.subject ?? '',
+        body: r.body ?? '',
+        status: r.status === true || r.status === 1,
+        updated_at: r.updated_at ?? null,
+      })),
+    };
+  }
+
+  async createEmailTemplate(body: { event?: string; audience?: string; subject?: string; body?: string }) {
+    if (!body.event || !body.subject) {
+      throw new BadRequestException({ errors: [{ code: 'input', message: 'event and subject are required' }] });
+    }
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    const nextId = await this.mongo.nextMysqlId('email_templates');
+    await this.mongo.insertOne('email_templates', {
+      mysql_id: nextId,
+      event: body.event,
+      audience: body.audience ?? 'customer',
+      subject: body.subject,
+      body: body.body ?? '',
+      status: true,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+    return { ok: true, id: nextId };
+  }
+
+  async updateEmailTemplate(id: number, body: { subject?: string; body?: string; status?: boolean }) {
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    const update: Record<string, unknown> = { updated_at: new Date() };
+    if (body.subject !== undefined) update.subject = body.subject;
+    if (body.body !== undefined) update.body = body.body;
+    if (body.status !== undefined) update.status = body.status;
+    await this.mongo.updateOne('email_templates', { mysql_id: id }, update);
+    return { ok: true, id };
+  }
+
+  async deleteEmailTemplate(id: number) {
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    await this.mongo.deleteOne('email_templates', { mysql_id: id });
+    return { ok: true, id };
+  }
+
+  // ── DM bonuses ───────────────────────────────────────────────────────
+
+  async listDmBonuses() {
+    if (!this.useMongo()) return { items: [], total: 0 };
+    const rows = await this.mongo.findMany<{
+      mysql_id: number; name?: string; type?: string;
+      amount?: number; trigger?: string; status?: boolean | number;
+      claims_30d?: number; created_at?: Date | null;
+    }>('dm_bonuses', {}, { sort: { mysql_id: -1 }, limit: 100 });
+    return {
+      total: rows.length,
+      items: rows.map((r) => ({
+        id: r.mysql_id,
+        name: r.name ?? '—',
+        type: r.type ?? 'rule',
+        amount: Number(r.amount ?? 0),
+        trigger: r.trigger ?? '',
+        status: r.status === true || r.status === 1,
+        claims_30d: Number(r.claims_30d ?? 0),
+        created_at: r.created_at ?? null,
+      })),
+    };
+  }
+
+  async createDmBonus(body: { name?: string; type?: string; amount?: number; trigger?: string }) {
+    if (!body.name || !body.amount) {
+      throw new BadRequestException({ errors: [{ code: 'input', message: 'name and amount are required' }] });
+    }
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    const nextId = await this.mongo.nextMysqlId('dm_bonuses');
+    await this.mongo.insertOne('dm_bonuses', {
+      mysql_id: nextId,
+      name: body.name,
+      type: body.type ?? 'rule',
+      amount: Number(body.amount),
+      trigger: body.trigger ?? '',
+      status: true,
+      claims_30d: 0,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+    return { ok: true, id: nextId };
+  }
+
+  async toggleDmBonus(id: number, status: boolean) {
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    await this.mongo.updateOne('dm_bonuses', { mysql_id: id }, { status, updated_at: new Date() });
+    return { ok: true, id, status };
+  }
+
+  async deleteDmBonus(id: number) {
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    await this.mongo.deleteOne('dm_bonuses', { mysql_id: id });
+    return { ok: true, id };
+  }
+
+  // ── DM incentives ────────────────────────────────────────────────────
+
+  async listDmIncentives(status?: string) {
+    if (!this.useMongo()) return { items: [], total: 0 };
+    const filter: Record<string, unknown> = {};
+    if (status && status !== 'all') filter.status = status;
+    const rows = await this.mongo.findMany<{
+      mysql_id: number; dm_id?: number; period?: string;
+      deliveries?: number; claim_amount?: number;
+      status?: string; reason?: string | null; created_at?: Date | null;
+    }>('dm_incentives', filter, { sort: { mysql_id: -1 }, limit: 100 });
+
+    // Attach DM name in one batched lookup
+    const dmIds = Array.from(new Set(rows.map((r) => r.dm_id).filter((x): x is number => x !== undefined)));
+    const dms = dmIds.length > 0
+      ? await this.mongo.findMany<{ mysql_id: number; f_name?: string; l_name?: string }>(
+          'delivery_men', { mysql_id: { $in: dmIds } },
+        )
+      : [];
+    const nameById = new Map(dms.map((d) => [d.mysql_id, `${d.f_name ?? ''} ${d.l_name ?? ''}`.trim()]));
+
+    return {
+      total: rows.length,
+      items: rows.map((r) => ({
+        id: r.mysql_id,
+        dm_id: r.dm_id ?? null,
+        dm_name: r.dm_id ? (nameById.get(r.dm_id) || `DM #${r.dm_id}`) : '—',
+        period: r.period ?? '—',
+        deliveries: Number(r.deliveries ?? 0),
+        claim_amount: Number(r.claim_amount ?? 0),
+        status: r.status ?? 'pending',
+        reason: r.reason ?? null,
+        created_at: r.created_at ?? null,
+      })),
+    };
+  }
+
+  async updateDmIncentiveStatus(id: number, status: 'approved' | 'rejected', reason?: string) {
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    const inc = await this.mongo.findByMysqlId<{ mysql_id: number; claim_amount?: number; dm_id?: number }>('dm_incentives', id);
+    if (!inc) throw new NotFoundException({ errors: [{ code: 'incentive', message: 'Not found' }] });
+    await this.mongo.updateOne('dm_incentives', { mysql_id: id }, {
+      status,
+      reason: status === 'rejected' ? (reason ?? null) : null,
+      decided_at: new Date(),
+      updated_at: new Date(),
+    });
+    // On approval — credit DM's wallet
+    if (status === 'approved' && inc.dm_id && inc.claim_amount) {
+      const wallet = await this.mongo.findOne<{ mysql_id: number; balance?: number }>(
+        'delivery_man_wallets', { delivery_man_id: inc.dm_id },
+      );
+      const newBalance = Number(wallet?.balance ?? 0) + Number(inc.claim_amount);
+      if (wallet) {
+        await this.mongo.updateOne('delivery_man_wallets', { delivery_man_id: inc.dm_id }, {
+          balance: newBalance,
+          total_earning: Number((wallet as { total_earning?: number }).total_earning ?? 0) + Number(inc.claim_amount),
+          updated_at: new Date(),
+        });
+      }
+    }
+    return { ok: true, id, status };
+  }
+
+  // ── Subscription orders ──────────────────────────────────────────────
+
+  async listSubscriptionOrders() {
+    if (!this.useMongo()) return { items: [], total: 0 };
+    // Subscription orders = orders where subscription_id is set, OR the
+    // dedicated subscriptions collection — we list both views.
+    const subs = await this.mongo.findMany<{
+      mysql_id: number; mysql_user_id?: number; mysql_restaurant_id?: number;
+      plan?: string; frequency?: string; status?: string;
+      start_date?: Date; created_at?: Date | null;
+    }>('subscriptions', {}, { sort: { mysql_id: -1 }, limit: 100 });
+    const userIds = Array.from(new Set(subs.map((s) => s.mysql_user_id).filter((x): x is number => x !== undefined)));
+    const restIds = Array.from(new Set(subs.map((s) => s.mysql_restaurant_id).filter((x): x is number => x !== undefined)));
+    const [users, restaurants] = await Promise.all([
+      userIds.length ? this.mongo.findMany<{ mysql_id: number; f_name?: string; l_name?: string }>('users', { mysql_id: { $in: userIds } }) : Promise.resolve([]),
+      restIds.length ? this.mongo.findMany<{ mysql_id: number; name?: string }>('restaurants', { mysql_id: { $in: restIds } }) : Promise.resolve([]),
+    ]);
+    const userMap = new Map(users.map((u) => [u.mysql_id, `${u.f_name ?? ''} ${u.l_name ?? ''}`.trim()]));
+    const restMap = new Map(restaurants.map((r) => [r.mysql_id, r.name ?? `Restaurant #${r.mysql_id}`]));
+    return {
+      total: subs.length,
+      items: subs.map((s) => ({
+        id: s.mysql_id,
+        customer: s.mysql_user_id ? userMap.get(s.mysql_user_id) || `Customer #${s.mysql_user_id}` : '—',
+        restaurant: s.mysql_restaurant_id ? restMap.get(s.mysql_restaurant_id) || `Restaurant #${s.mysql_restaurant_id}` : '—',
+        plan: s.plan ?? '—',
+        frequency: s.frequency ?? '—',
+        status: s.status ?? 'active',
+        start_date: s.start_date ?? s.created_at ?? null,
+      })),
+    };
+  }
+
+  // ── Activity log ─────────────────────────────────────────────────────
+
+  async listActivityLog(limit: number) {
+    if (!this.useMongo()) return { items: [], total: 0 };
+    const rows = await this.mongo.findMany<{
+      mysql_id: number; admin_email?: string; action?: string;
+      target?: string; ip?: string | null; created_at?: Date | null;
+      meta?: Record<string, unknown>;
+    }>('activity_logs', {}, { sort: { mysql_id: -1 }, limit });
+    return {
+      total: rows.length,
+      items: rows.map((r) => ({
+        id: r.mysql_id,
+        admin_email: r.admin_email ?? '—',
+        action: r.action ?? '—',
+        target: r.target ?? '—',
+        ip: r.ip ?? null,
+        created_at: r.created_at ?? null,
+      })),
+    };
+  }
+
+  // ── Dispatch ─────────────────────────────────────────────────────────
+
+  async listDispatchOrders(type?: string) {
+    if (!this.useMongo()) return { items: [], total: 0 };
+    // type=searching → orders status=handover & no DM assigned
+    // type=ongoing → orders status=picked_up
+    let filter: Record<string, unknown> = {
+      order_status: 'handover',
+      $or: [{ mysql_delivery_man_id: { $in: [null, 0] } }, { mysql_delivery_man_id: { $exists: false } }],
+    };
+    if (type === 'ongoing') filter = { order_status: 'picked_up' };
+
+    const orders = await this.mongo.findMany<{
+      mysql_id: number; order_amount?: number; mysql_user_id?: number;
+      mysql_restaurant_id?: number; created_at?: Date | null;
+      delivery_address?: unknown; mysql_delivery_man_id?: number | null;
+    }>('orders', filter, { sort: { mysql_id: -1 }, limit: 50 });
+
+    const userIds = Array.from(new Set(orders.map((o) => o.mysql_user_id).filter((x): x is number => x !== undefined)));
+    const restIds = Array.from(new Set(orders.map((o) => o.mysql_restaurant_id).filter((x): x is number => x !== undefined)));
+    const [users, restaurants] = await Promise.all([
+      userIds.length ? this.mongo.findMany<{ mysql_id: number; f_name?: string; l_name?: string }>('users', { mysql_id: { $in: userIds } }) : Promise.resolve([]),
+      restIds.length ? this.mongo.findMany<{ mysql_id: number; name?: string }>('restaurants', { mysql_id: { $in: restIds } }) : Promise.resolve([]),
+    ]);
+    const userMap = new Map(users.map((u) => [u.mysql_id, `${u.f_name ?? ''} ${u.l_name ?? ''}`.trim()]));
+    const restMap = new Map(restaurants.map((r) => [r.mysql_id, r.name ?? `Restaurant #${r.mysql_id}`]));
+
+    return {
+      total: orders.length,
+      type: type ?? 'searching',
+      items: orders.map((o) => {
+        const addr = typeof o.delivery_address === 'object' && o.delivery_address !== null
+          ? ((o.delivery_address as { address?: string }).address ?? '—')
+          : (typeof o.delivery_address === 'string' ? o.delivery_address : '—');
+        return {
+          id: o.mysql_id,
+          customer: o.mysql_user_id ? userMap.get(o.mysql_user_id) || `Customer #${o.mysql_user_id}` : '—',
+          restaurant: o.mysql_restaurant_id ? restMap.get(o.mysql_restaurant_id) || '—' : '—',
+          order_amount: Number(o.order_amount ?? 0),
+          address: addr,
+          wait_minutes: o.created_at ? Math.max(0, Math.floor((Date.now() - new Date(o.created_at).getTime()) / 60000)) : 0,
+          assigned_to: o.mysql_delivery_man_id ?? null,
+        };
+      }),
+    };
+  }
+
+  async assignOrderToDeliveryMan(orderId: number, deliveryManId: number) {
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    const order = await this.mongo.findByMysqlId<{ mysql_id: number }>('orders', orderId);
+    if (!order) throw new NotFoundException({ errors: [{ code: 'order', message: 'Order not found' }] });
+    const dm = await this.mongo.findByMysqlId<{ mysql_id: number }>('delivery_men', deliveryManId);
+    if (!dm) throw new NotFoundException({ errors: [{ code: 'delivery_man', message: 'DM not found' }] });
+    await this.mongo.updateOne('orders', { mysql_id: orderId }, {
+      mysql_delivery_man_id: deliveryManId,
+      delivery_man_id: deliveryManId,
+      updated_at: new Date(),
+    });
+    return { ok: true, order_id: orderId, delivery_man_id: deliveryManId };
+  }
+
+  // ── Gallery / file listing ───────────────────────────────────────────
+
+  async listGalleryFiles(folder?: string) {
+    // Read from local storage/app/public — purely metadata, no DB.
+    const fs = await import('fs/promises');
+    const path = await import('path');
+    const storageBase = process.env.STORAGE_ROOT
+      ? process.env.STORAGE_ROOT
+      : path.resolve(__dirname, '../../../../../storage/app/public');
+
+    const FOLDERS = ['restaurant', 'category', 'food', 'banner', 'document', 'cuisine', 'addon', 'profile'];
+    const targetFolder = folder && FOLDERS.includes(folder) ? folder : null;
+
+    type FileEntry = { name: string; folder: string; size: number; modified: Date | null };
+    const allFiles: FileEntry[] = [];
+    const foldersToScan = targetFolder ? [targetFolder] : FOLDERS;
+
+    for (const f of foldersToScan) {
+      const dirPath = path.join(storageBase, f);
+      try {
+        const entries = await fs.readdir(dirPath, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.isFile()) {
+            try {
+              const stat = await fs.stat(path.join(dirPath, entry.name));
+              allFiles.push({
+                name: entry.name,
+                folder: f,
+                size: stat.size,
+                modified: stat.mtime,
+              });
+            } catch { /* skip unreadable */ }
+          }
+        }
+      } catch { /* directory doesn't exist — skip */ }
+    }
+
+    allFiles.sort((a, b) => (b.modified?.getTime() ?? 0) - (a.modified?.getTime() ?? 0));
+    return {
+      total: allFiles.length,
+      folders: FOLDERS.map((name) => ({ name, count: allFiles.filter((f) => f.folder === name).length })),
+      files: allFiles.slice(0, 200).map((f) => ({
+        name: f.name,
+        folder: f.folder,
+        size_bytes: f.size,
+        url: `/storage/${f.folder}/${f.name}`,
+        modified: f.modified,
+      })),
+    };
+  }
+
+  // ── Clean database ───────────────────────────────────────────────────
+
+  async cleanDatabaseCollections(body: { collections?: string[]; confirm?: string }) {
+    if (body.confirm !== 'DELETE') {
+      throw new BadRequestException({
+        errors: [{ code: 'confirm', message: 'Type "DELETE" in the confirm field to proceed.' }],
+      });
+    }
+    if (!body.collections || body.collections.length === 0) {
+      throw new BadRequestException({
+        errors: [{ code: 'collections', message: 'No collections selected for cleanup.' }],
+      });
+    }
+    if (!this.useMongo()) {
+      throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    }
+    // Whitelist of collections that are safe to truncate. Wallets, employees,
+    // admins, business_settings, and zones are NEVER cleaned — they are
+    // operational and would brick the platform.
+    const WHITELIST = [
+      'orders', 'order_details', 'order_transactions',
+      'reviews', 'restaurant_reviews', 'dm_reviews',
+      'notifications', 'conversations', 'messages',
+      'contact_messages', 'newsletter_subscribers',
+      'banners', 'promotional_banners', 'advertisements', 'campaigns',
+      'coupons', 'wishlists', 'customer_addresses',
+      'dm_incentives', 'dm_bonuses',
+      'activity_logs',
+    ];
+
+    const cleared: Record<string, number> = {};
+    for (const c of body.collections) {
+      if (!WHITELIST.includes(c)) {
+        cleared[c] = -1; // rejected
+        continue;
+      }
+      try {
+        await this.logActivity('admin@admin.com', 'clean_database', c, '127.0.0.1');
+        cleared[c] = await this.mongo.deleteMany(c, {});
+      } catch {
+        cleared[c] = -1;
+      }
+    }
+    return { ok: true, cleared };
+  }
+
+  /** Helper: record an admin action in the activity log. */
+  async logActivity(adminEmail: string, action: string, target: string, ip: string, meta?: Record<string, unknown>) {
+    if (!this.useMongo()) return;
+    const nextId = await this.mongo.nextMysqlId('activity_logs');
+    await this.mongo.insertOne('activity_logs', {
+      mysql_id: nextId,
+      admin_email: adminEmail,
+      action,
+      target,
+      ip,
+      meta: meta ?? {},
+      created_at: new Date(),
+    });
+  }
+
+  async deleteZone(id: number) {
+    if (this.useMongo()) {
+      const z = await this.mongo.findByMysqlId<{ mysql_id: number; is_default?: boolean }>('zones', id);
+      if (!z) throw new NotFoundException({ errors: [{ code: 'zone', message: 'Zone not found' }] });
+      if (z.is_default) {
+        throw new BadRequestException({ errors: [{ code: 'zone', message: 'Cannot delete the default zone' }] });
+      }
+      // Block deletion when restaurants still belong to the zone — otherwise
+      // those restaurants get orphaned and disappear silently from search.
+      const restaurantCount = await this.mongo.count('restaurants', { mysql_zone_id: id });
+      if (restaurantCount > 0) {
+        throw new BadRequestException({
+          errors: [{ code: 'zone', message: `Cannot delete — ${restaurantCount} restaurant(s) still in this zone. Move or delete them first.` }],
+        });
+      }
+      await this.mongo.deleteOne('zones', { mysql_id: id });
+      return { ok: true, id };
+    }
+    throw new BadRequestException({
+      errors: [{ code: 'config', message: 'Zone delete requires USE_MONGO_ADMIN=1 (MySQL path is read-only).' }],
+    });
   }
 
   // ── Business settings ─────────────────────────────────────────────────

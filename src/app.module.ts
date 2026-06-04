@@ -18,6 +18,7 @@ import { ExtrasModule } from './extras/extras.module';
 import { EnhancementsModule } from './enhancements/enhancements.module';
 import { DocumentsModule } from './documents/documents.module';
 import { CompletionModule } from './completion/completion.module';
+import { RefundModule } from './refund/refund.module';
 import { MongoModule } from './mongo/mongo.module';
 import { MigrationModule } from './mongo/migration.module';
 
@@ -58,6 +59,7 @@ import { MigrationModule } from './mongo/migration.module';
     EnhancementsModule,
     DocumentsModule,
     CompletionModule,
+    RefundModule,
     MongoModule,
     MigrationModule,
   ],

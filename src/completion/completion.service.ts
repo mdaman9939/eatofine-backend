@@ -307,6 +307,112 @@ export class CompletionService {
     }));
   }
 
+  /** Single vendor invoice with restaurant identity fields denormalised in,
+   *  so the printable detail page can show GSTIN / CIN / FSSAI / address
+   *  without a second round-trip. */
+  async getInvoiceById(id: number) {
+    if (this.useMongo()) {
+      const d = await this.mongo.findByMysqlId<MongoVendorInvoice>('vendor_invoices', id);
+      if (!d) return null;
+      const restaurant = d.restaurant_id != null
+        ? await this.mongo.findByMysqlId<{
+            mysql_id: number; name?: string | null; address?: string | null;
+            phone?: string | null; email?: string | null; logo?: string | null;
+            gstin?: string | null; cin?: string | null; fssai?: string | null;
+            state_code?: string | null; registered_name?: string | null;
+          }>('restaurants', Number(d.restaurant_id))
+        : null;
+      const vendor = d.vendor_id != null
+        ? await this.mongo.findByMysqlId<{ mysql_id: number; f_name?: string | null; l_name?: string | null; email?: string | null; phone?: string | null }>('vendors', Number(d.vendor_id))
+        : null;
+      return {
+        id: Number(d.mysql_id),
+        invoice_number: d.invoice_number,
+        plan_type: d.plan_type,
+        period_start: d.period_start as Date,
+        period_end: d.period_end as Date,
+        gross_sales: Number(d.gross_sales ?? 0),
+        order_count: Number(d.order_count ?? 0),
+        subscription_fee: Number(d.subscription_fee ?? 0),
+        commission_base: Number(d.commission_base ?? 0),
+        ppo_base: Number(d.ppo_base ?? 0),
+        taxable_amount: Number(d.taxable_amount ?? 0),
+        cgst: Number(d.cgst ?? 0),
+        sgst: Number(d.sgst ?? 0),
+        igst: Number(d.igst ?? 0),
+        total_amount: Number(d.total_amount ?? 0),
+        tds_amount: Number(d.tds_amount ?? 0),
+        net_payable: Number(d.net_payable ?? 0),
+        status: d.status,
+        notes: d.notes ?? null,
+        issued_at: d.issued_at ?? null,
+        paid_at: d.paid_at ?? null,
+        created_at: d.created_at ?? null,
+        restaurant: restaurant ? {
+          id: restaurant.mysql_id,
+          name: restaurant.name ?? null,
+          registered_name: restaurant.registered_name ?? null,
+          address: restaurant.address ?? null,
+          phone: restaurant.phone ?? null,
+          email: restaurant.email ?? null,
+          gstin: restaurant.gstin ?? null,
+          cin: restaurant.cin ?? null,
+          fssai: restaurant.fssai ?? null,
+          state_code: restaurant.state_code ?? null,
+        } : null,
+        vendor: vendor ? {
+          id: vendor.mysql_id,
+          name: [vendor.f_name, vendor.l_name].filter(Boolean).join(' '),
+          email: vendor.email ?? null,
+          phone: vendor.phone ?? null,
+        } : null,
+      };
+    }
+    const rows = await this.prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `SELECT vi.*, r.name AS restaurant_name, r.address AS restaurant_address,
+              r.phone AS restaurant_phone, r.email AS restaurant_email
+       FROM vendor_invoices vi
+       LEFT JOIN restaurants r ON r.id = vi.restaurant_id
+       WHERE vi.id = ${id} LIMIT 1`,
+    );
+    if (rows.length === 0) return null;
+    const r = rows[0];
+    return {
+      id: Number(r.id),
+      invoice_number: String(r.invoice_number),
+      plan_type: String(r.plan_type),
+      period_start: r.period_start,
+      period_end: r.period_end,
+      gross_sales: Number(r.gross_sales ?? 0),
+      order_count: Number(r.order_count ?? 0),
+      subscription_fee: Number(r.subscription_fee ?? 0),
+      commission_base: Number(r.commission_base ?? 0),
+      ppo_base: Number(r.ppo_base ?? 0),
+      taxable_amount: Number(r.taxable_amount ?? 0),
+      cgst: Number(r.cgst ?? 0),
+      sgst: Number(r.sgst ?? 0),
+      igst: Number(r.igst ?? 0),
+      total_amount: Number(r.total_amount ?? 0),
+      tds_amount: Number(r.tds_amount ?? 0),
+      net_payable: Number(r.net_payable ?? 0),
+      status: r.status as string,
+      notes: (r.notes as string) ?? null,
+      issued_at: r.issued_at as Date | null,
+      paid_at: r.paid_at as Date | null,
+      created_at: r.created_at as Date | null,
+      restaurant: r.restaurant_id ? {
+        id: Number(r.restaurant_id),
+        name: r.restaurant_name ?? null,
+        registered_name: null,
+        address: r.restaurant_address ?? null,
+        phone: r.restaurant_phone ?? null,
+        email: r.restaurant_email ?? null,
+        gstin: null, cin: null, fssai: null, state_code: null,
+      } : null,
+      vendor: null,
+    };
+  }
+
   async getInvoiceStats() {
     if (this.useMongo()) {
       const rows = await this.mongo.aggregate<{ _id: string; c: number; total: number }>(
