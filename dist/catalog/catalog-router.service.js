@@ -24,7 +24,7 @@ let CatalogRouterService = class CatalogRouterService {
         this.log.log(`Catalog backend: ${flag ? 'MongoDB' : 'MySQL'}`);
     }
     useMongo() {
-        const v = (process.env.USE_MONGO_CATALOG ?? '').toLowerCase();
+        const v = (process.env.USE_MONGO_CATALOG ?? '1').toLowerCase();
         return v === '1' || v === 'true' || v === 'yes';
     }
     listCategories() {

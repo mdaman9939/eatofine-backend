@@ -1,6 +1,12 @@
 import type { AuthedRequest } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+interface MulterFile {
+    buffer: Buffer;
+    originalname: string;
+    mimetype: string;
+    size: number;
+}
 export declare class CustomerExtrasController {
     private readonly prisma;
     private readonly mongo;
@@ -60,13 +66,23 @@ export declare class CustomerExtrasController {
     updateZonePost(): {
         ok: boolean;
     };
-    updateProfile(req: AuthedRequest, body: {
+    updateProfile(req: AuthedRequest, image: MulterFile | undefined, body: {
         f_name?: string;
         l_name?: string;
         email?: string;
+        phone?: string;
         image?: string;
-    }): Promise<{
+    } | undefined): Promise<{
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+        image?: undefined;
+    } | {
         message: string;
+        image: {} | null;
+        errors?: undefined;
     }>;
     walletTx(): {
         data: never[];
@@ -370,6 +386,9 @@ export declare class CustomerExtrasController {
     sendNotification(): {
         ok: boolean;
     };
+    sendNotificationById(): {
+        ok: boolean;
+    };
     checkRestaurantValidation(): {
         message: string;
     };
@@ -453,3 +472,4 @@ export declare class CustomerExtrasController {
         message: string;
     };
 }
+export {};

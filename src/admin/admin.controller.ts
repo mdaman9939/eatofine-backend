@@ -28,9 +28,18 @@ interface MulterFile {
 import { RequireAuth } from '../auth/auth.guard';
 import { AdminService } from './admin.service';
 
-const STORAGE_ROOT =
-  process.env.STORAGE_ROOT ??
-  path.resolve(__dirname, '../../../../storage/app/public');
+// Mirrors main.ts resolution: prefer repo-local storage (deploy-friendly),
+// fall back to monorepo project-root storage (local dev). main.ts already
+// picked the path that exists on disk; we don't re-check here because both
+// admin uploads and customer uploads should land where the static
+// middleware is currently serving from.
+const STORAGE_ROOT = (() => {
+  if (process.env.STORAGE_ROOT) return process.env.STORAGE_ROOT;
+  const fs = require('fs') as typeof import('fs');
+  const repoLocal = path.resolve(__dirname, '../../storage/app/public');
+  const monorepo = path.resolve(__dirname, '../../../../storage/app/public');
+  return fs.existsSync(repoLocal) ? repoLocal : monorepo;
+})();
 
 const ALLOWED_UPLOAD_DIRS = new Set([
   'banner',

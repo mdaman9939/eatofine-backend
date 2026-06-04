@@ -63,12 +63,59 @@ async function bootstrap() {
     next();
   });
 
-  // Serve the project-local storage/app/public/ folder at /storage/*
-  // (previously this lived inside the old Laravel project folder).
-  const storageRoot =
-    process.env.STORAGE_ROOT ??
-    path.resolve(__dirname, '../../../storage/app/public');
+  // Serve uploaded images at /storage/*.
+  //
+  // Resolution order:
+  //   1. STORAGE_ROOT env var (explicit deployment override).
+  //   2. Repo-local `<api>/storage/app/public/` — preferred for cloud
+  //      deploys (Render, Railway) because everything ships in one git
+  //      tree and 166 demo image files just work after `git push`.
+  //   3. Legacy project-root `../../storage/app/public/` for local
+  //      monorepo dev where the Laravel-style storage folder is still
+  //      shared between PHP and Node sides.
+  //
+  // First path that actually exists on disk wins; otherwise we fall back
+  // to (3) so the dev workflow keeps working.
+  const fs = require('fs');
+  const repoLocalStorage = path.resolve(__dirname, '../storage/app/public');
+  const monorepoStorage = path.resolve(__dirname, '../../../storage/app/public');
+  let storageRoot = process.env.STORAGE_ROOT;
+  if (!storageRoot) {
+    storageRoot = fs.existsSync(repoLocalStorage) ? repoLocalStorage : monorepoStorage;
+  }
   app.useStaticAssets(storageRoot, { prefix: '/storage/' });
+
+  // Placeholder fallback for /storage/* — when a real file isn't on disk
+  // (Render's ephemeral disk loses uploads on every restart, and a lot of
+  // legacy DB rows reference filenames that were never migrated), serve
+  // an inline SVG so Flutter's NetworkImage doesn't crash with a 404 and
+  // the UI shows a sensible placeholder instead of a broken-image icon.
+  //
+  // Two flavours:
+  //   • profile/* and conversation/* → generic avatar
+  //   • everything else (restaurant, food, category, banner, etc.) → generic image
+  app.use('/storage', (req: Request, res: Response, next: NextFunction) => {
+    if (res.headersSent) return next();
+    const isAvatar = /^\/(profile|conversation|delivery-man|vendor|users?)\//i.test(req.path);
+    const svg = isAvatar
+      ? `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+           <rect width="200" height="200" fill="#10b981"/>
+           <circle cx="100" cy="78" r="32" fill="#fff"/>
+           <path d="M40 180c0-33 27-60 60-60s60 27 60 60v20H40z" fill="#fff"/>
+         </svg>`
+      : `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300">
+           <rect width="400" height="300" fill="#f3f4f6"/>
+           <path d="M150 110l40 40 30-30 60 60H120z" fill="#9ca3af"/>
+           <circle cx="170" cy="100" r="14" fill="#9ca3af"/>
+           <text x="200" y="240" text-anchor="middle" font-family="system-ui, sans-serif"
+                 font-size="14" fill="#6b7280">No image</text>
+         </svg>`;
+    res
+      .status(200)
+      .set('content-type', 'image/svg+xml')
+      .set('cache-control', 'public, max-age=86400')
+      .send(svg.replace(/\s+/g, ' ').trim());
+  });
 
   const host = process.env.NODE_HOST ?? '0.0.0.0';
   // PORT is auto-injected by Render / Railway / Fly. Fall back to NODE_PORT or 3000.

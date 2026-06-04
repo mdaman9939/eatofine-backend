@@ -22,7 +22,7 @@ export class BusinessSettingsService implements OnModuleInit {
 
   /** Feature flag — when "1", business settings are read from MongoDB. */
   private useMongo(): boolean {
-    const v = (process.env.USE_MONGO_BUSINESS_SETTINGS ?? '').toLowerCase();
+    const v = (process.env.USE_MONGO_BUSINESS_SETTINGS ?? '1').toLowerCase();
     return v === '1' || v === 'true' || v === 'yes';
   }
 

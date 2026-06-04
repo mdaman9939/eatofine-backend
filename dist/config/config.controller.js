@@ -27,7 +27,7 @@ let ConfigController = class ConfigController {
         this.mongo = mongo;
     }
     useMongo() {
-        const v = (process.env.USE_MONGO_CONFIG ?? '').toLowerCase();
+        const v = (process.env.USE_MONGO_CONFIG ?? '1').toLowerCase();
         return v === '1' || v === 'true' || v === 'yes';
     }
     async getConfig(req) {

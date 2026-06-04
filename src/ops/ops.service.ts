@@ -53,7 +53,7 @@ export class OpsService {
 
   /** Feature flag â€” when "1", ops reads/writes route to MongoDB instead of MySQL. */
   private useMongo(): boolean {
-    const v = (process.env.USE_MONGO_OPS ?? '').toLowerCase();
+    const v = (process.env.USE_MONGO_OPS ?? '1').toLowerCase();
     return v === '1' || v === 'true' || v === 'yes';
   }
 

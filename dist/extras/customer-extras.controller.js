@@ -1,10 +1,43 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
 var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
     var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
     if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
     else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
@@ -14,9 +47,20 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CustomerExtrasController = void 0;
 const common_1 = require("@nestjs/common");
+const platform_express_1 = require("@nestjs/platform-express");
+const fs = __importStar(require("fs"));
+const path = __importStar(require("path"));
 const auth_guard_1 = require("../auth/auth.guard");
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
+const STORAGE_ROOT = (() => {
+    if (process.env.STORAGE_ROOT)
+        return process.env.STORAGE_ROOT;
+    const fs = require('fs');
+    const repoLocal = path.resolve(__dirname, '../../storage/app/public');
+    const monorepo = path.resolve(__dirname, '../../../../storage/app/public');
+    return fs.existsSync(repoLocal) ? repoLocal : monorepo;
+})();
 const toNum = (v) => {
     if (v === null || v === undefined)
         return 0;
@@ -34,7 +78,7 @@ let CustomerExtrasController = class CustomerExtrasController {
         this.mongo = mongo;
     }
     useMongo() {
-        const v = (process.env.USE_MONGO_EXTRAS ?? '').toLowerCase();
+        const v = (process.env.USE_MONGO_EXTRAS ?? '1').toLowerCase();
         return v === '1' || v === 'true' || v === 'yes';
     }
     async wishList(req) {
@@ -143,26 +187,49 @@ let CustomerExtrasController = class CustomerExtrasController {
     updateZonePost() {
         return { ok: true };
     }
-    async updateProfile(req, body) {
+    async updateProfile(req, image, body) {
+        const fields = body ?? {};
         const data = {};
-        if (body.f_name !== undefined)
-            data.f_name = body.f_name;
-        if (body.l_name !== undefined)
-            data.l_name = body.l_name;
-        if (body.email !== undefined)
-            data.email = body.email;
-        if (body.image !== undefined)
-            data.image = body.image;
+        if (fields.f_name !== undefined)
+            data.f_name = fields.f_name;
+        if (fields.l_name !== undefined)
+            data.l_name = fields.l_name;
+        if (fields.email !== undefined)
+            data.email = fields.email;
+        if (fields.phone !== undefined)
+            data.phone = fields.phone;
+        if (image && image.buffer && image.buffer.length > 0) {
+            const ext = (path.extname(image.originalname) || '.jpg').toLowerCase();
+            if (!/^\.(png|jpe?g|webp|gif)$/i.test(ext)) {
+                return { errors: [{ code: 'ext', message: 'only png/jpg/jpeg/webp/gif allowed' }] };
+            }
+            const dir = path.join(STORAGE_ROOT, 'profile');
+            try {
+                fs.mkdirSync(dir, { recursive: true });
+                const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+                fs.writeFileSync(path.join(dir, filename), image.buffer);
+                data.image = filename;
+            }
+            catch (e) {
+                const msg = e.message || 'image write failed';
+                if (Object.keys(data).length === 0) {
+                    return { errors: [{ code: 'image', message: msg }] };
+                }
+            }
+        }
+        else if (typeof fields.image === 'string' && fields.image.length > 0) {
+            data.image = fields.image;
+        }
         if (this.useMongo()) {
             if (Object.keys(data).length) {
                 await this.mongo.updateOne('users', { mysql_id: Number(req.actor.id) }, data);
             }
-            return { message: 'Profile updated successfully' };
+            return { message: 'Profile updated successfully', image: data.image ?? null };
         }
         if (Object.keys(data).length) {
             await this.prisma.users.update({ where: { id: req.actor.id }, data });
         }
-        return { message: 'Profile updated successfully' };
+        return { message: 'Profile updated successfully', image: data.image ?? null };
     }
     walletTx() {
         return { data: [], total_size: 0, limit: 25, offset: 1 };
@@ -510,6 +577,9 @@ let CustomerExtrasController = class CustomerExtrasController {
     sendNotification() {
         return { ok: true };
     }
+    sendNotificationById() {
+        return { ok: true };
+    }
     checkRestaurantValidation() {
         return { message: 'valid' };
     }
@@ -651,10 +721,12 @@ __decorate([
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('update-profile'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.FileInterceptor)('image', { limits: { fileSize: 5 * 1024 * 1024 } })),
     __param(0, (0, common_1.Req)()),
-    __param(1, (0, common_1.Body)()),
+    __param(1, (0, common_1.UploadedFile)()),
+    __param(2, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:paramtypes", [Object, Object, Object]),
     __metadata("design:returntype", Promise)
 ], CustomerExtrasController.prototype, "updateProfile", null);
 __decorate([
@@ -823,6 +895,12 @@ __decorate([
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", void 0)
 ], CustomerExtrasController.prototype, "sendNotification", null);
+__decorate([
+    (0, common_1.Get)('order/send-notification/:id'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], CustomerExtrasController.prototype, "sendNotificationById", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('order/check-restaurant-validation'),

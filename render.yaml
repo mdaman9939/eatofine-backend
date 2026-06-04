@@ -35,10 +35,40 @@ services:
       - key: STORAGE_BASE_URL
         sync: false      # e.g. https://eatofine-backend.onrender.com/storage
 
+      # ── Feature flags — all routes go to MongoDB Atlas ───────────────
+      # Code already defaults to "1" if missing, but listing them explicitly
+      # so the Render dashboard shows every flag at a glance.
+      - key: USE_MONGO_CATALOG
+        value: "1"
+      - key: USE_MONGO_AUTH
+        value: "1"
+      - key: USE_MONGO_ADMIN
+        value: "1"
+      - key: USE_MONGO_BROWSE
+        value: "1"
+      - key: USE_MONGO_ORDER
+        value: "1"
+      - key: USE_MONGO_CUSTOMER
+        value: "1"
+      - key: USE_MONGO_OPS
+        value: "1"
+      - key: USE_MONGO_ENHANCEMENTS
+        value: "1"
+      - key: USE_MONGO_DOCUMENTS
+        value: "1"
+      - key: USE_MONGO_COMPLETION
+        value: "1"
+      - key: USE_MONGO_EXTRAS
+        value: "1"
+      - key: USE_MONGO_BUSINESS_SETTINGS
+        value: "1"
+      - key: USE_MONGO_CONFIG
+        value: "1"
+
       # ── Optional ──────────────────────────────────────────────────────
       - key: STRICT_ENV_CHECK
         value: "0"       # set to "1" to escalate env warnings to boot failures
       - key: AUTH_THROTTLE_LIMIT
-        value: "5"
+        value: "30"      # demo-friendly; tighten to 5 for prod
       - key: AUTH_THROTTLE_TTL
-        value: "900000"  # 15 min in ms
+        value: "300000"  # 5 min in ms (demo)

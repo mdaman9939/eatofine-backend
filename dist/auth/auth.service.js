@@ -59,7 +59,7 @@ let AuthService = class AuthService {
         this.mongo = mongo;
     }
     useMongo() {
-        const v = (process.env.USE_MONGO_AUTH ?? '').toLowerCase();
+        const v = (process.env.USE_MONGO_AUTH ?? '1').toLowerCase();
         return v === '1' || v === 'true' || v === 'yes';
     }
     generateToken() {

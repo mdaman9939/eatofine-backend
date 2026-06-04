@@ -20,7 +20,7 @@ export class SettingsService {
   constructor(private readonly mongo: MongoDataService) {}
 
   private useMongo(): boolean {
-    const v = (process.env.USE_MONGO_ADMIN ?? '').toLowerCase();
+    const v = (process.env.USE_MONGO_ADMIN ?? '1').toLowerCase();
     return v === '1' || v === 'true' || v === 'yes';
   }
 

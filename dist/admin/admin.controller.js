@@ -52,8 +52,14 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const auth_guard_1 = require("../auth/auth.guard");
 const admin_service_1 = require("./admin.service");
-const STORAGE_ROOT = process.env.STORAGE_ROOT ??
-    path.resolve(__dirname, '../../../../storage/app/public');
+const STORAGE_ROOT = (() => {
+    if (process.env.STORAGE_ROOT)
+        return process.env.STORAGE_ROOT;
+    const fs = require('fs');
+    const repoLocal = path.resolve(__dirname, '../../storage/app/public');
+    const monorepo = path.resolve(__dirname, '../../../../storage/app/public');
+    return fs.existsSync(repoLocal) ? repoLocal : monorepo;
+})();
 const ALLOWED_UPLOAD_DIRS = new Set([
     'banner',
     'restaurant',

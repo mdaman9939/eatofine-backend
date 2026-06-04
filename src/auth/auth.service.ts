@@ -24,7 +24,7 @@ export class AuthService {
 
   /** Feature flag — when "1", auth lookups read from MongoDB instead of MySQL. */
   private useMongo(): boolean {
-    const v = (process.env.USE_MONGO_AUTH ?? '').toLowerCase();
+    const v = (process.env.USE_MONGO_AUTH ?? '1').toLowerCase();
     return v === '1' || v === 'true' || v === 'yes';
   }
 

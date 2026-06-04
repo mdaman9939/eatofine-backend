@@ -41,7 +41,7 @@ export class AdminService {
 
   /** Feature flag — when "1", admin reads route to MongoDB instead of MySQL. */
   private useMongo(): boolean {
-    const v = (process.env.USE_MONGO_ADMIN ?? '').toLowerCase();
+    const v = (process.env.USE_MONGO_ADMIN ?? '1').toLowerCase();
     return v === '1' || v === 'true' || v === 'yes';
   }
 

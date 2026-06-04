@@ -74,9 +74,37 @@ async function bootstrap() {
         });
         next();
     });
-    const storageRoot = process.env.STORAGE_ROOT ??
-        path.resolve(__dirname, '../../../storage/app/public');
+    const fs = require('fs');
+    const repoLocalStorage = path.resolve(__dirname, '../storage/app/public');
+    const monorepoStorage = path.resolve(__dirname, '../../../storage/app/public');
+    let storageRoot = process.env.STORAGE_ROOT;
+    if (!storageRoot) {
+        storageRoot = fs.existsSync(repoLocalStorage) ? repoLocalStorage : monorepoStorage;
+    }
     app.useStaticAssets(storageRoot, { prefix: '/storage/' });
+    app.use('/storage', (req, res, next) => {
+        if (res.headersSent)
+            return next();
+        const isAvatar = /^\/(profile|conversation|delivery-man|vendor|users?)\//i.test(req.path);
+        const svg = isAvatar
+            ? `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+           <rect width="200" height="200" fill="#10b981"/>
+           <circle cx="100" cy="78" r="32" fill="#fff"/>
+           <path d="M40 180c0-33 27-60 60-60s60 27 60 60v20H40z" fill="#fff"/>
+         </svg>`
+            : `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300">
+           <rect width="400" height="300" fill="#f3f4f6"/>
+           <path d="M150 110l40 40 30-30 60 60H120z" fill="#9ca3af"/>
+           <circle cx="170" cy="100" r="14" fill="#9ca3af"/>
+           <text x="200" y="240" text-anchor="middle" font-family="system-ui, sans-serif"
+                 font-size="14" fill="#6b7280">No image</text>
+         </svg>`;
+        res
+            .status(200)
+            .set('content-type', 'image/svg+xml')
+            .set('cache-control', 'public, max-age=86400')
+            .send(svg.replace(/\s+/g, ' ').trim());
+    });
     const host = process.env.NODE_HOST ?? '0.0.0.0';
     const port = parseInt(process.env.PORT ?? process.env.NODE_PORT ?? '3000', 10);
     await app.listen(port, host);

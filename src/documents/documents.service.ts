@@ -82,7 +82,7 @@ export class DocumentsService {
 
   /** Feature flag — when set, documents reads/writes route to MongoDB. */
   private useMongo(): boolean {
-    const v = (process.env.USE_MONGO_DOCUMENTS ?? '').toLowerCase();
+    const v = (process.env.USE_MONGO_DOCUMENTS ?? '1').toLowerCase();
     return v === '1' || v === 'true' || v === 'yes';
   }
 

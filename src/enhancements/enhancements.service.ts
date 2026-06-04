@@ -120,7 +120,7 @@ export class EnhancementsService {
 
   /** Feature flag — when "1"/"true"/"yes", reads/writes route to MongoDB. */
   private useMongo(): boolean {
-    const v = (process.env.USE_MONGO_ENHANCEMENTS ?? '').toLowerCase();
+    const v = (process.env.USE_MONGO_ENHANCEMENTS ?? '1').toLowerCase();
     return v === '1' || v === 'true' || v === 'yes';
   }
 

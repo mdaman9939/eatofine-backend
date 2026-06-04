@@ -76,7 +76,7 @@ export class CustomerService {
 
   /** Feature flag â€” when "1", customer reads/writes route to MongoDB. */
   private useMongo(): boolean {
-    const v = (process.env.USE_MONGO_CUSTOMER ?? '').toLowerCase();
+    const v = (process.env.USE_MONGO_CUSTOMER ?? '1').toLowerCase();
     return v === '1' || v === 'true' || v === 'yes';
   }
 

@@ -188,7 +188,7 @@ export class CompletionService {
 
   /** Feature flag — when set, completion reads/writes route to MongoDB. */
   private useMongo(): boolean {
-    const v = (process.env.USE_MONGO_COMPLETION ?? '').toLowerCase();
+    const v = (process.env.USE_MONGO_COMPLETION ?? '1').toLowerCase();
     return v === '1' || v === 'true' || v === 'yes';
   }
 

@@ -62,7 +62,7 @@ export class OrderService {
 
   /** Feature flag — when "1", order reads/writes go to MongoDB instead of MySQL. */
   private useMongo(): boolean {
-    const v = (process.env.USE_MONGO_ORDER ?? '').toLowerCase();
+    const v = (process.env.USE_MONGO_ORDER ?? '1').toLowerCase();
     return v === '1' || v === 'true' || v === 'yes';
   }
 

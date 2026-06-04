@@ -78,7 +78,7 @@ export class BrowseService {
 
   /** Feature flag â€” when "1", browse reads route to MongoDB instead of MySQL. */
   private useMongo(): boolean {
-    const v = (process.env.USE_MONGO_BROWSE ?? '').toLowerCase();
+    const v = (process.env.USE_MONGO_BROWSE ?? '1').toLowerCase();
     return v === '1' || v === 'true' || v === 'yes';
   }
 

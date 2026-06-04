@@ -145,7 +145,7 @@ export class VendorExtrasController {
 
   /** Feature flag — when set, extras read/write Mongo first. */
   private useMongo(): boolean {
-    const v = (process.env.USE_MONGO_EXTRAS ?? '').toLowerCase();
+    const v = (process.env.USE_MONGO_EXTRAS ?? '1').toLowerCase();
     return v === '1' || v === 'true' || v === 'yes';
   }
 

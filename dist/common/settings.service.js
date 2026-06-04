@@ -21,7 +21,7 @@ let SettingsService = class SettingsService {
         this.mongo = mongo;
     }
     useMongo() {
-        const v = (process.env.USE_MONGO_ADMIN ?? '').toLowerCase();
+        const v = (process.env.USE_MONGO_ADMIN ?? '1').toLowerCase();
         return v === '1' || v === 'true' || v === 'yes';
     }
     async get(key) {

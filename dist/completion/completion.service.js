@@ -21,7 +21,7 @@ let CompletionService = class CompletionService {
         this.mongo = mongo;
     }
     useMongo() {
-        const v = (process.env.USE_MONGO_COMPLETION ?? '').toLowerCase();
+        const v = (process.env.USE_MONGO_COMPLETION ?? '1').toLowerCase();
         return v === '1' || v === 'true' || v === 'yes';
     }
     async vendorNameMongo(vendorId) {

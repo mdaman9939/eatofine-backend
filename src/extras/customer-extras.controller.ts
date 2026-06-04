@@ -8,11 +8,32 @@ import {
   Post,
   Query,
   Req,
-  UseGuards, HttpCode } from '@nestjs/common';
+  UploadedFile,
+  UseGuards, UseInterceptors, HttpCode } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import * as fs from 'fs';
+import * as path from 'path';
 import { AuthGuard, RequireAuth } from '../auth/auth.guard';
 import type { AuthedRequest } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+
+interface MulterFile {
+  buffer: Buffer;
+  originalname: string;
+  mimetype: string;
+  size: number;
+}
+
+// Where uploaded profile images land on disk. Matches the resolution
+// used by main.ts so static serving + writes target the same folder.
+const STORAGE_ROOT = (() => {
+  if (process.env.STORAGE_ROOT) return process.env.STORAGE_ROOT;
+  const fs = require('fs') as typeof import('fs');
+  const repoLocal = path.resolve(__dirname, '../../storage/app/public');
+  const monorepo = path.resolve(__dirname, '../../../../storage/app/public');
+  return fs.existsSync(repoLocal) ? repoLocal : monorepo;
+})();
 
 // Local Mongo doc shapes for the collections we touch here. Only the
 // fields actually referenced are declared.
@@ -94,7 +115,7 @@ export class CustomerExtrasController {
 
   /** Feature flag — when set, extras read/write Mongo first. */
   private useMongo(): boolean {
-    const v = (process.env.USE_MONGO_EXTRAS ?? '').toLowerCase();
+    const v = (process.env.USE_MONGO_EXTRAS ?? '1').toLowerCase();
     return v === '1' || v === 'true' || v === 'yes';
   }
 
@@ -237,27 +258,70 @@ export class CustomerExtrasController {
     return { ok: true };
   }
 
-  // ── Profile update (echo) ─────────────────────────────────────────
+  // ── Profile update ────────────────────────────────────────────────
+  // Flutter customer app posts this as multipart/form-data (since it can
+  // include a profile picture upload). Without FileInterceptor the body
+  // arrives as `undefined` and any field access throws — that was the
+  // production 500: "Cannot read properties of undefined (reading 'f_name')".
+  //
+  // FileInterceptor parses the multipart body, populates @UploadedFile()
+  // with the optional `image` file part, and exposes the remaining text
+  // fields via @Body(). JSON-encoded requests also work — multer simply
+  // doesn't touch them.
   @HttpCode(200)
   @Post('update-profile')
-  async updateProfile(@Req() req: AuthedRequest, @Body() body: { f_name?: string; l_name?: string; email?: string; image?: string }) {
+  @UseInterceptors(FileInterceptor('image', { limits: { fileSize: 5 * 1024 * 1024 } }))
+  async updateProfile(
+    @Req() req: AuthedRequest,
+    @UploadedFile() image: MulterFile | undefined,
+    @Body() body: { f_name?: string; l_name?: string; email?: string; phone?: string; image?: string } | undefined,
+  ) {
+    // Multipart with no fields and no file → empty body but never undefined
+    // for the JSON path; guard anyway so the call never throws on the
+    // happy path of a no-op submit.
+    const fields = body ?? {};
     const data: Record<string, unknown> = {};
-    if (body.f_name !== undefined) data.f_name = body.f_name;
-    if (body.l_name !== undefined) data.l_name = body.l_name;
-    if (body.email !== undefined) data.email = body.email;
-    if (body.image !== undefined) data.image = body.image;
+    if (fields.f_name !== undefined) data.f_name = fields.f_name;
+    if (fields.l_name !== undefined) data.l_name = fields.l_name;
+    if (fields.email !== undefined) data.email = fields.email;
+    if (fields.phone !== undefined) data.phone = fields.phone;
+
+    if (image && image.buffer && image.buffer.length > 0) {
+      const ext = (path.extname(image.originalname) || '.jpg').toLowerCase();
+      if (!/^\.(png|jpe?g|webp|gif)$/i.test(ext)) {
+        return { errors: [{ code: 'ext', message: 'only png/jpg/jpeg/webp/gif allowed' }] };
+      }
+      const dir = path.join(STORAGE_ROOT, 'profile');
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+        const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+        fs.writeFileSync(path.join(dir, filename), image.buffer);
+        data.image = filename;
+      } catch (e) {
+        // On read-only filesystems (e.g. Render free tier) the write
+        // fails — surface a friendly message instead of a 500. Other
+        // fields still get saved.
+        const msg = (e as Error).message || 'image write failed';
+        if (Object.keys(data).length === 0) {
+          return { errors: [{ code: 'image', message: msg }] };
+        }
+      }
+    } else if (typeof fields.image === 'string' && fields.image.length > 0) {
+      // Caller sent an already-uploaded filename — record it verbatim.
+      data.image = fields.image;
+    }
 
     if (this.useMongo()) {
       if (Object.keys(data).length) {
         await this.mongo.updateOne('users', { mysql_id: Number(req.actor!.id) }, data);
       }
-      return { message: 'Profile updated successfully' };
+      return { message: 'Profile updated successfully', image: data.image ?? null };
     }
 
     if (Object.keys(data).length) {
       await this.prisma.users.update({ where: { id: req.actor!.id }, data });
     }
-    return { message: 'Profile updated successfully' };
+    return { message: 'Profile updated successfully', image: data.image ?? null };
   }
 
   // ── Wallet (empty for demo) ───────────────────────────────────────
@@ -716,6 +780,16 @@ export class CustomerExtrasController {
   @HttpCode(200)
   @Post('order/send-notification')
   sendNotification() {
+    return { ok: true };
+  }
+
+  /** Flutter customer app calls this with GET + the order ID in the path
+   *  (e.g. /order/send-notification/293) right after placing an order to
+   *  fire the FCM push pipeline. Accept it as a no-op ack so the app
+   *  doesn't crash on a 404 — actual push delivery lives in the order
+   *  service hooks. */
+  @Get('order/send-notification/:id')
+  sendNotificationById() {
     return { ok: true };
   }
 
