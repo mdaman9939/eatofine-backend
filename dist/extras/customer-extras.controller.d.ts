@@ -232,6 +232,7 @@ export declare class CustomerExtrasController {
         user_id: number | null;
         restaurant_id: number;
         order_amount: number;
+        details_count: number;
         mysql_id: number;
         mysql_user_id?: number | null;
         mysql_restaurant_id?: number | null;

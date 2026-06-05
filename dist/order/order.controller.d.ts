@@ -37,7 +37,8 @@ export declare class OrderController {
             order_amount: number;
             payment_method: string | undefined;
             restaurant_id: number | null;
-            created_at: Date | null;
+            created_at: string | Date | null;
+            details_count: number;
         }[];
     } | {
         total_size: number;
@@ -61,6 +62,39 @@ export declare class OrderController {
         order_amount: number;
         restaurant_id: number | null;
         delivery_man_id: number | null;
+        restaurant: {
+            id: number;
+            name: string;
+            phone: string | null;
+            email: string | null;
+            address: string | null;
+            logo: string;
+            latitude: string | null;
+            longitude: string | null;
+        } | null;
+        customer: {
+            id: number;
+            f_name: string | null;
+            l_name: string | null;
+            phone: string | null;
+            email: string | null;
+            image: string | null;
+        } | null;
+        delivery_man: {
+            id: number;
+            f_name: string | null;
+            l_name: string | null;
+            phone: string | null;
+            image: string | null;
+        } | null;
+        deliveryMan: {
+            id: number;
+            f_name: string | null;
+            l_name: string | null;
+            phone: string | null;
+            image: string | null;
+        } | null;
+        delivery_address: {} | null;
         pending: Date | null;
         accepted: Date | null;
         confirmed: Date | null;
@@ -85,5 +119,10 @@ export declare class OrderController {
         picked_up: Date | null;
         delivered: Date | null;
         otp: string | null;
+        restaurant?: undefined;
+        customer?: undefined;
+        delivery_man?: undefined;
+        deliveryMan?: undefined;
+        delivery_address?: undefined;
     }>;
 }

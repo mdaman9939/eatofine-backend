@@ -392,14 +392,28 @@ let CustomerExtrasController = class CustomerExtrasController {
                 mysql_user_id: Number(req.actor.id),
                 order_status: { $in: ['pending', 'confirmed', 'accepted', 'processing', 'handover', 'picked_up'] },
             }, { sort: { mysql_id: -1 }, limit: 25 });
-            return rows.map((r) => ({
-                ...(r.legacy ?? {}),
-                ...r,
-                id: Number(r.mysql_id),
-                user_id: r.mysql_user_id !== null && r.mysql_user_id !== undefined ? Number(r.mysql_user_id) : null,
-                restaurant_id: r.mysql_restaurant_id !== null && r.mysql_restaurant_id !== undefined ? Number(r.mysql_restaurant_id) : 0,
-                order_amount: toNum(r.order_amount),
-            }));
+            const orderIds = rows.map((r) => Number(r.mysql_id));
+            const countRows = orderIds.length
+                ? await this.mongo.aggregate('order_details', [
+                    { $match: { order_id: { $in: orderIds } } },
+                    { $group: { _id: '$order_id', count: { $sum: 1 } } },
+                ])
+                : [];
+            const countMap = new Map(countRows.map((c) => [Number(c._id), c.count]));
+            return rows.map((r) => {
+                const itemsField = r.items;
+                const embedded = Array.isArray(itemsField) ? itemsField.length : 0;
+                const detailsCount = embedded || countMap.get(Number(r.mysql_id)) || 1;
+                return {
+                    ...(r.legacy ?? {}),
+                    ...r,
+                    id: Number(r.mysql_id),
+                    user_id: r.mysql_user_id !== null && r.mysql_user_id !== undefined ? Number(r.mysql_user_id) : null,
+                    restaurant_id: r.mysql_restaurant_id !== null && r.mysql_restaurant_id !== undefined ? Number(r.mysql_restaurant_id) : 0,
+                    order_amount: toNum(r.order_amount),
+                    details_count: detailsCount,
+                };
+            });
         }
         const rows = await this.prisma.orders.findMany({
             where: {

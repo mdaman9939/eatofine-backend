@@ -225,6 +225,42 @@ let OrderService = class OrderService {
             const o = await this.mongo.findByMysqlId('orders', orderId);
             if (!o)
                 throw new common_1.NotFoundException({ errors: [{ code: 'order_id', message: 'not_found' }] });
+            const [restaurant, customer, deliveryMan] = await Promise.all([
+                o.mysql_restaurant_id != null
+                    ? this.mongo.findByMysqlId('restaurants', Number(o.mysql_restaurant_id))
+                    : Promise.resolve(null),
+                o.mysql_user_id != null
+                    ? this.mongo.findByMysqlId('users', Number(o.mysql_user_id))
+                    : Promise.resolve(null),
+                o.mysql_delivery_man_id != null
+                    ? this.mongo.findByMysqlId('delivery_men', Number(o.mysql_delivery_man_id))
+                    : Promise.resolve(null),
+            ]);
+            const restaurantPayload = restaurant ? {
+                id: Number(restaurant.mysql_id),
+                name: restaurant.name ?? 'Restaurant',
+                phone: restaurant.phone ?? null,
+                email: restaurant.email ?? null,
+                address: restaurant.address ?? null,
+                logo: restaurant.logo ?? 'default.png',
+                latitude: restaurant.latitude != null ? String(restaurant.latitude) : null,
+                longitude: restaurant.longitude != null ? String(restaurant.longitude) : null,
+            } : null;
+            const customerPayload = customer ? {
+                id: Number(customer.mysql_id),
+                f_name: customer.f_name ?? null,
+                l_name: customer.l_name ?? null,
+                phone: customer.phone ?? null,
+                email: customer.email ?? null,
+                image: customer.image ?? null,
+            } : null;
+            const dmPayload = deliveryMan ? {
+                id: Number(deliveryMan.mysql_id),
+                f_name: deliveryMan.f_name ?? null,
+                l_name: deliveryMan.l_name ?? null,
+                phone: deliveryMan.phone ?? null,
+                image: deliveryMan.image ?? null,
+            } : null;
             return {
                 id: o.mysql_id,
                 order_status: o.order_status,
@@ -233,6 +269,11 @@ let OrderService = class OrderService {
                 order_amount: Number(o.order_amount ?? 0),
                 restaurant_id: o.mysql_restaurant_id ?? null,
                 delivery_man_id: o.mysql_delivery_man_id ?? null,
+                restaurant: restaurantPayload,
+                customer: customerPayload,
+                delivery_man: dmPayload,
+                deliveryMan: dmPayload,
+                delivery_address: o.delivery_address ?? null,
                 pending: o.pending ?? null,
                 accepted: o.accepted ?? null,
                 confirmed: o.confirmed ?? null,
@@ -267,19 +308,32 @@ let OrderService = class OrderService {
     async customerOrderList(userId) {
         if (this.useMongo()) {
             const orders = await this.mongo.findMany('orders', { mysql_user_id: Number(userId) }, { sort: { mysql_id: -1 } });
+            const orderIds = orders.map((o) => Number(o.mysql_id));
+            const countRows = orderIds.length
+                ? await this.mongo.aggregate('order_details', [
+                    { $match: { order_id: { $in: orderIds } } },
+                    { $group: { _id: '$order_id', count: { $sum: 1 } } },
+                ])
+                : [];
+            const countMap = new Map(countRows.map((r) => [Number(r._id), r.count]));
             return {
                 total_size: orders.length,
                 limit: 10,
                 offset: 1,
-                orders: orders.map((o) => ({
-                    id: o.mysql_id,
-                    order_status: o.order_status,
-                    payment_status: o.payment_status,
-                    order_amount: Number(o.order_amount ?? 0),
-                    payment_method: o.payment_method,
-                    restaurant_id: o.mysql_restaurant_id ?? null,
-                    created_at: o.created_at_legacy ?? null,
-                })),
+                orders: orders.map((o) => {
+                    const embedded = Array.isArray(o.items) ? o.items.length : 0;
+                    const count = embedded || countMap.get(Number(o.mysql_id)) || 1;
+                    return {
+                        id: o.mysql_id,
+                        order_status: o.order_status,
+                        payment_status: o.payment_status,
+                        order_amount: Number(o.order_amount ?? 0),
+                        payment_method: o.payment_method,
+                        restaurant_id: o.mysql_restaurant_id ?? null,
+                        created_at: o.created_at ?? o.created_at_legacy ?? null,
+                        details_count: count,
+                    };
+                }),
             };
         }
         const orders = await this.prisma.orders.findMany({

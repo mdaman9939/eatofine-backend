@@ -308,6 +308,50 @@ export class OrderService {
     if (this.useMongo()) {
       const o = await this.mongo.findByMysqlId<MongoOrder>('orders', orderId);
       if (!o) throw new NotFoundException({ errors: [{ code: 'order_id', message: 'not_found' }] });
+
+      // Flutter customer app's track screen reads track.restaurant.name,
+      // track.customer.f_name, track.deliveryMan.f_name as nested objects —
+      // not just the IDs. Eagerly fetch the linked rows so the detail card
+      // renders "Curry Express" + customer + rider instead of "No
+      // restaurant data found" / "Name : (null)".
+      const [restaurant, customer, deliveryMan] = await Promise.all([
+        o.mysql_restaurant_id != null
+          ? this.mongo.findByMysqlId<{ mysql_id: number; name?: string; phone?: string; email?: string; address?: string; logo?: string; latitude?: number; longitude?: number }>('restaurants', Number(o.mysql_restaurant_id))
+          : Promise.resolve(null),
+        o.mysql_user_id != null
+          ? this.mongo.findByMysqlId<{ mysql_id: number; f_name?: string; l_name?: string; phone?: string; email?: string; image?: string }>('users', Number(o.mysql_user_id))
+          : Promise.resolve(null),
+        o.mysql_delivery_man_id != null
+          ? this.mongo.findByMysqlId<{ mysql_id: number; f_name?: string; l_name?: string; phone?: string; image?: string }>('delivery_men', Number(o.mysql_delivery_man_id))
+          : Promise.resolve(null),
+      ]);
+
+      const restaurantPayload = restaurant ? {
+        id: Number(restaurant.mysql_id),
+        name: restaurant.name ?? 'Restaurant',
+        phone: restaurant.phone ?? null,
+        email: restaurant.email ?? null,
+        address: restaurant.address ?? null,
+        logo: restaurant.logo ?? 'default.png',
+        latitude: restaurant.latitude != null ? String(restaurant.latitude) : null,
+        longitude: restaurant.longitude != null ? String(restaurant.longitude) : null,
+      } : null;
+      const customerPayload = customer ? {
+        id: Number(customer.mysql_id),
+        f_name: customer.f_name ?? null,
+        l_name: customer.l_name ?? null,
+        phone: customer.phone ?? null,
+        email: customer.email ?? null,
+        image: customer.image ?? null,
+      } : null;
+      const dmPayload = deliveryMan ? {
+        id: Number(deliveryMan.mysql_id),
+        f_name: deliveryMan.f_name ?? null,
+        l_name: deliveryMan.l_name ?? null,
+        phone: deliveryMan.phone ?? null,
+        image: deliveryMan.image ?? null,
+      } : null;
+
       return {
         id: o.mysql_id,
         order_status: o.order_status,
@@ -316,6 +360,12 @@ export class OrderService {
         order_amount: Number(o.order_amount ?? 0),
         restaurant_id: o.mysql_restaurant_id ?? null,
         delivery_man_id: o.mysql_delivery_man_id ?? null,
+        // Nested objects — what the Flutter Tracking screen actually reads
+        restaurant: restaurantPayload,
+        customer: customerPayload,
+        delivery_man: dmPayload,
+        deliveryMan: dmPayload, // alias — some Flutter parsers use camelCase
+        delivery_address: (o as { delivery_address?: unknown }).delivery_address ?? null,
         pending: o.pending ?? null,
         accepted: o.accepted ?? null,
         confirmed: o.confirmed ?? null,
@@ -354,19 +404,38 @@ export class OrderService {
         { mysql_user_id: Number(userId) },
         { sort: { mysql_id: -1 } },
       );
+      // Bulk-count items per order in one aggregation so the Flutter list
+      // can show "3 items" instead of "0 Item". Default to embedded
+      // `items` length, then to the aggregated count, then to 1.
+      const orderIds = orders.map((o) => Number(o.mysql_id));
+      const countRows = orderIds.length
+        ? await this.mongo.aggregate<{ _id: number; count: number }>(
+            'order_details',
+            [
+              { $match: { order_id: { $in: orderIds } } },
+              { $group: { _id: '$order_id', count: { $sum: 1 } } },
+            ],
+          )
+        : [];
+      const countMap = new Map(countRows.map((r) => [Number(r._id), r.count]));
       return {
         total_size: orders.length,
         limit: 10,
         offset: 1,
-        orders: orders.map((o) => ({
-          id: o.mysql_id,
-          order_status: o.order_status,
-          payment_status: o.payment_status,
-          order_amount: Number(o.order_amount ?? 0),
-          payment_method: o.payment_method,
-          restaurant_id: o.mysql_restaurant_id ?? null,
-          created_at: o.created_at_legacy ?? null,
-        })),
+        orders: orders.map((o) => {
+          const embedded = Array.isArray((o as { items?: unknown[] }).items) ? (o as { items: unknown[] }).items.length : 0;
+          const count = embedded || countMap.get(Number(o.mysql_id)) || 1;
+          return {
+            id: o.mysql_id,
+            order_status: o.order_status,
+            payment_status: o.payment_status,
+            order_amount: Number(o.order_amount ?? 0),
+            payment_method: o.payment_method,
+            restaurant_id: o.mysql_restaurant_id ?? null,
+            created_at: (o as { created_at?: Date | string | null }).created_at ?? o.created_at_legacy ?? null,
+            details_count: count,
+          };
+        }),
       };
     }
     const orders = await this.prisma.orders.findMany({
