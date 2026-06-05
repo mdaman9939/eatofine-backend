@@ -1,5 +1,7 @@
-import { Body, Controller, Delete, Get, Post, Query, Req, UseGuards, HttpCode, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Post, Query, Req, UseGuards, HttpCode, UseInterceptors, UploadedFiles } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
+import * as fs from 'fs';
+import * as path from 'path';
 import { AuthGuard, RequireAuth } from '../auth/auth.guard';
 import type { AuthedRequest } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
@@ -343,6 +345,27 @@ export class VendorExtrasController {
   @Post('update-bank-info')
   bankInfo() { return { message: 'bank info updated' }; }
 
+  /** Resolve the on-disk storage folder so uploaded images survive across
+   *  worker processes the same way main.ts serves them. */
+  private storageDir(folder: string): string {
+    const root = process.env.STORAGE_ROOT
+      ?? path.resolve(__dirname, '../../storage/app/public');
+    const dir = path.join(root, folder);
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  /** Save one uploaded file from Multer to /storage/<folder>/, returning
+   *  the filename (sans path) for the DB. Renames with a timestamp so
+   *  collisions can't overwrite an existing image. */
+  private saveUploaded(file: Express.Multer.File | undefined, folder: string): string | null {
+    if (!file || !file.buffer || file.buffer.length === 0) return null;
+    const ext = path.extname(file.originalname || '').toLowerCase() || '.png';
+    const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+    fs.writeFileSync(path.join(this.storageDir(folder), filename), file.buffer);
+    return filename;
+  }
+
   /** Persist the Edit Restaurant form's "Basic Info" tab. Flutter sends
    *  this as multipart/form-data (logo + cover + meta_image files alongside
    *  text fields), so the FileFieldsInterceptor is required to populate
@@ -355,20 +378,58 @@ export class VendorExtrasController {
     { name: 'cover_photo', maxCount: 1 },
     { name: 'meta_image', maxCount: 1 },
   ], { limits: { fileSize: 5 * 1024 * 1024 } }))
-  async basicInfo(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
+  async basicInfo(
+    @Req() req: AuthedRequest,
+    @Body() body: Record<string, unknown> = {},
+    @UploadedFiles() files: { logo?: Express.Multer.File[]; cover_photo?: Express.Multer.File[]; meta_image?: Express.Multer.File[] } = {},
+  ) {
     const b = body ?? {};
     const data: Record<string, unknown> = {};
+
+    // Flutter sends the restaurant *name* and *address* as a JSON-encoded
+    // `translations` array, NOT as top-level fields. Shape:
+    //   [{ locale: "en", key: "name", value: "Amaan" },
+    //    { locale: "en", key: "address", value: "..." },
+    //    ...per language...]
+    // Parse it, persist the array verbatim for future i18n, and lift the
+    // English copy onto the canonical `name` / `address` columns so the
+    // dashboard + customer app see the new values.
+    if (b.translations !== undefined) {
+      let translations: Array<{ locale?: string; key?: string; value?: string }> = [];
+      if (typeof b.translations === 'string') {
+        try { translations = JSON.parse(b.translations) ?? []; } catch { translations = []; }
+      } else if (Array.isArray(b.translations)) {
+        translations = b.translations as typeof translations;
+      }
+      data.translations = translations;
+      const pick = (lang: string, key: string) =>
+        translations.find((t) => t?.locale === lang && t?.key === key)?.value;
+      const enName = pick('en', 'name') ?? pick('default', 'name') ?? translations.find((t) => t?.key === 'name')?.value;
+      const enAddress = pick('en', 'address') ?? pick('default', 'address') ?? translations.find((t) => t?.key === 'address')?.value;
+      if (enName) data.name = enName;
+      if (enAddress) data.address = enAddress;
+    }
+
+    // Top-level overrides — Flutter sends some of these too.
     if (b.name !== undefined) data.name = String(b.name);
-    if (b.translations !== undefined) data.translations = b.translations;
+    if (b.address !== undefined) data.address = String(b.address);
     if (b.contact_number !== undefined) data.phone = String(b.contact_number);
     if (b.phone !== undefined) data.phone = String(b.phone);
-    if (b.address !== undefined) data.address = String(b.address);
     if (b.gst !== undefined) data.gst = String(b.gst);
     if (b.gst_status !== undefined) data.gst_status = !!Number(b.gst_status);
     if (b.minimum_order !== undefined) data.minimum_order = Number(b.minimum_order);
     if (b.meta_title !== undefined) data.meta_title = String(b.meta_title);
     if (b.meta_description !== undefined) data.meta_description = String(b.meta_description);
     if (b.meta_keywords !== undefined) data.meta_keywords = String(b.meta_keywords);
+
+    // Persist uploaded files to disk + record new filenames in the DB.
+    const logoName = this.saveUploaded(files?.logo?.[0], 'restaurant');
+    const coverName = this.saveUploaded(files?.cover_photo?.[0], 'restaurant/cover');
+    const metaName = this.saveUploaded(files?.meta_image?.[0], 'restaurant');
+    if (logoName) data.logo = logoName;
+    if (coverName) data.cover_photo = coverName;
+    if (metaName) data.meta_image = metaName;
+
     if (Object.keys(data).length === 0) return { message: 'nothing to update' };
     data.updated_at = new Date();
 
