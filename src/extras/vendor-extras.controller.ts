@@ -260,10 +260,18 @@ export class VendorExtrasController {
         // denies access to every screen ("You have no permission…").
         roles: [],
         employee_info: null,
+        // Flutter ProfileModel reads `image_full_url`, `restaurants[].logo_full_url`,
+        // and `restaurants[].cover_photo_full_url` — absolute URLs to the images.
+        // Without these the avatar + restaurant card stay grey placeholders even
+        // when the filename is saved. Build them from STORAGE_BASE_URL.
+        image_full_url: this.buildStorageUrl('profile', v.image),
         restaurants: restaurants.map((r) => ({
           id: Number(r.mysql_id),
           name: r.name ?? null,
           logo: r.logo ?? null,
+          logo_full_url: this.buildStorageUrl('restaurant', r.logo),
+          cover_photo: (r as { cover_photo?: string }).cover_photo ?? null,
+          cover_photo_full_url: this.buildStorageUrl('restaurant/cover', (r as { cover_photo?: string }).cover_photo),
           status: r.status ?? null,
           address: r.address ?? null,
           phone: r.phone ?? null,
@@ -293,22 +301,36 @@ export class VendorExtrasController {
     };
   }
 
+  /** Update the logged-in vendor's profile (name, email, phone, avatar).
+   *  Flutter sends multipart/form-data with an `image` file alongside text
+   *  fields — without FileFieldsInterceptor `body` is undefined and we
+   *  500'd with "Cannot convert undefined or null to object" inside
+   *  Object.entries(body). */
   @HttpCode(200)
   @Post('update-profile')
-  async updateProfile(@Req() req: AuthedRequest, @Body() body: { f_name?: string; l_name?: string; email?: string; phone?: string }) {
+  @UseInterceptors(FileFieldsInterceptor([
+    { name: 'image', maxCount: 1 },
+  ], { limits: { fileSize: 5 * 1024 * 1024 } }))
+  async updateProfile(
+    @Req() req: AuthedRequest,
+    @Body() body: Record<string, unknown> = {},
+    @UploadedFiles() files: { image?: Express.Multer.File[] } = {},
+  ) {
+    const b = body ?? {};
     const data: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(body)) if (v !== undefined) data[k] = v;
+    for (const k of ['f_name', 'l_name', 'email', 'phone', 'password'] as const) {
+      if (b[k] !== undefined) data[k] = String(b[k]);
+    }
+    const avatarName = this.saveUploaded(files?.image?.[0], 'profile');
+    if (avatarName) data.image = avatarName;
+    if (Object.keys(data).length === 0) return { message: 'nothing to update' };
+    data.updated_at = new Date();
 
     if (this.useMongo()) {
-      if (Object.keys(data).length) {
-        await this.mongo.updateOne('vendors', { mysql_id: Number(req.actor!.id) }, data);
-      }
+      await this.mongo.updateOne('vendors', { mysql_id: Number(req.actor!.id) }, data);
       return { message: 'Profile updated' };
     }
-
-    if (Object.keys(data).length) {
-      await this.prisma.vendors.update({ where: { id: req.actor!.id }, data });
-    }
+    await this.prisma.vendors.update({ where: { id: req.actor!.id }, data: data as never });
     return { message: 'Profile updated' };
   }
 
@@ -344,6 +366,15 @@ export class VendorExtrasController {
   @HttpCode(200)
   @Post('update-bank-info')
   bankInfo() { return { message: 'bank info updated' }; }
+
+  /** Build an absolute /storage/* URL for a saved filename. Falls back to
+   *  the SVG placeholder middleware when the filename is missing so the
+   *  Flutter NetworkImage never sees an empty string. */
+  private buildStorageUrl(folder: string, filename?: string | null): string {
+    const base = (process.env.STORAGE_BASE_URL ?? 'http://127.0.0.1:3000/storage').replace(/\/$/, '');
+    const safeName = filename && String(filename).trim() ? String(filename) : 'default.png';
+    return `${base}/${folder}/${safeName}`;
+  }
 
   /** Resolve the on-disk storage folder so uploaded images survive across
    *  worker processes the same way main.ts serves them. */
@@ -681,13 +712,150 @@ export class VendorExtrasController {
   @Post('product/update-stock')
   updateStock() { return { message: 'stock updated' }; }
 
+  /** Create a new food item. Flutter's Add Food screen sends this as
+   *  multipart/form-data with `image` + `meta_image` files alongside text
+   *  fields (`name`, `price`, `description`, `category_id`, `veg`, etc.).
+   *  Previously a stub that just returned a success message — the UI showed
+   *  "added" but nothing landed in `foods`. Now actually persists. */
   @HttpCode(200)
   @Post('product/store')
-  productStore() { return { message: 'product created' }; }
+  @UseInterceptors(FileFieldsInterceptor([
+    { name: 'image', maxCount: 1 },
+    { name: 'meta_image', maxCount: 1 },
+  ], { limits: { fileSize: 5 * 1024 * 1024 } }))
+  async productStore(
+    @Req() req: AuthedRequest,
+    @Body() body: Record<string, unknown> = {},
+    @UploadedFiles() files: { image?: Express.Multer.File[]; meta_image?: Express.Multer.File[] } = {},
+  ) {
+    if (!this.useMongo()) return { message: 'product created' };
+    const b = body ?? {};
+    const restaurant = await this.mongo.findOne<MongoRestaurantDoc>(
+      'restaurants', { mysql_vendor_id: Number(req.actor!.id) },
+    );
+    if (!restaurant) return { errors: [{ code: 'restaurant', message: 'restaurant not found' }] };
+
+    // Flutter packs name + description inside translations JSON (same pattern
+    // as Edit Restaurant). Parse to lift the English copy to top-level fields.
+    const { name: trName, description: trDesc, translations } =
+      this.parseProductTranslations(b.translations);
+
+    const nextId = await this.mongo.nextMysqlId('foods');
+    const imageName = this.saveUploaded(files?.image?.[0], 'product') ?? 'default.png';
+    const metaImage = this.saveUploaded(files?.meta_image?.[0], 'product');
+
+    const now = new Date();
+    const food: Record<string, unknown> = {
+      mysql_id: nextId,
+      mysql_restaurant_id: Number(restaurant.mysql_id),
+      restaurant_id: Number(restaurant.mysql_id),
+      mysql_category_id: b.category_id !== undefined && b.category_id !== '' ? Number(b.category_id) : null,
+      category_id: b.category_id !== undefined && b.category_id !== '' ? Number(b.category_id) : null,
+      name: trName ?? String(b.name ?? 'Untitled food'),
+      description: trDesc ?? String(b.description ?? ''),
+      translations,
+      price: Number(b.price ?? 0),
+      tax: Number(b.tax ?? 0),
+      tax_type: String(b.tax_type ?? 'percent'),
+      discount: Number(b.discount ?? 0),
+      discount_type: String(b.discount_type ?? 'percent'),
+      veg: !!Number(b.veg ?? 0),
+      status: true,
+      image: imageName,
+      meta_image: metaImage,
+      meta_title: b.meta_title ? String(b.meta_title) : null,
+      meta_description: b.meta_description ? String(b.meta_description) : null,
+      available_time_starts: b.available_time_starts ? String(b.available_time_starts) : '00:00',
+      available_time_ends: b.available_time_ends ? String(b.available_time_ends) : '23:59',
+      stock_type: String(b.stock_type ?? 'unlimited'),
+      item_stock: Number(b.item_stock ?? 0),
+      sell_count: 0,
+      avg_rating: 0,
+      rating_count: 0,
+      addon_ids: b.addon_ids ?? [],
+      variations: b.variations ?? [],
+      created_at: now,
+      updated_at: now,
+    };
+    await this.mongo.insertOne('foods', food);
+    return { message: 'Product added successfully', id: nextId };
+  }
 
   @HttpCode(200)
   @Post('product/update')
-  productUpdate() { return { message: 'product updated' }; }
+  @UseInterceptors(FileFieldsInterceptor([
+    { name: 'image', maxCount: 1 },
+    { name: 'meta_image', maxCount: 1 },
+  ], { limits: { fileSize: 5 * 1024 * 1024 } }))
+  async productUpdate(
+    @Body() body: Record<string, unknown> = {},
+    @UploadedFiles() files: { image?: Express.Multer.File[]; meta_image?: Express.Multer.File[] } = {},
+  ) {
+    if (!this.useMongo()) return { message: 'product updated' };
+    const b = body ?? {};
+    const foodId = b.id !== undefined && b.id !== '' ? Number(b.id) : null;
+    if (!foodId) return { errors: [{ code: 'id', message: 'product id required' }] };
+
+    const data: Record<string, unknown> = {};
+
+    // Name + description live inside translations JSON, not at the top level.
+    // Lift the English copy onto the canonical name/description fields so
+    // My Foods + product details screens reflect the change.
+    if (b.translations !== undefined) {
+      const { name: trName, description: trDesc, translations } =
+        this.parseProductTranslations(b.translations);
+      data.translations = translations;
+      if (trName) data.name = trName;
+      if (trDesc) data.description = trDesc;
+    }
+    if (b.name !== undefined) data.name = String(b.name);
+    if (b.description !== undefined) data.description = String(b.description);
+    if (b.price !== undefined && b.price !== '') data.price = Number(b.price);
+    if (b.tax !== undefined && b.tax !== '') data.tax = Number(b.tax);
+    if (b.discount !== undefined && b.discount !== '') data.discount = Number(b.discount);
+    if (b.discount_type !== undefined) data.discount_type = String(b.discount_type);
+    if (b.veg !== undefined) data.veg = !!Number(b.veg);
+    if (b.category_id !== undefined && b.category_id !== '') {
+      data.category_id = Number(b.category_id);
+      data.mysql_category_id = Number(b.category_id);
+    }
+    if (b.stock_type !== undefined) data.stock_type = String(b.stock_type);
+    if (b.item_stock !== undefined && b.item_stock !== '') data.item_stock = Number(b.item_stock);
+    if (b.available_time_starts !== undefined) data.available_time_starts = String(b.available_time_starts);
+    if (b.available_time_ends !== undefined) data.available_time_ends = String(b.available_time_ends);
+    if (b.maximum_cart_quantity !== undefined && b.maximum_cart_quantity !== '') {
+      data.maximum_cart_quantity = Number(b.maximum_cart_quantity);
+    }
+    if (b.is_halal !== undefined) data.is_halal = !!Number(b.is_halal);
+    const imageName = this.saveUploaded(files?.image?.[0], 'product');
+    const metaImage = this.saveUploaded(files?.meta_image?.[0], 'product');
+    if (imageName) data.image = imageName;
+    if (metaImage) data.meta_image = metaImage;
+    if (Object.keys(data).length === 0) return { message: 'nothing to update' };
+    data.updated_at = new Date();
+    const result = await this.mongo.updateOne('foods', { mysql_id: foodId }, data);
+    return { message: 'Product updated successfully', matched: result?.matchedCount ?? 0, modified: result?.modifiedCount ?? 0 };
+  }
+
+  /** Parse the translations array (sent as a JSON string by Flutter) and
+   *  pull the English `name` + `description` values for top-level fields. */
+  private parseProductTranslations(raw: unknown): {
+    name: string | null;
+    description: string | null;
+    translations: Array<{ locale?: string; key?: string; value?: string }>;
+  } {
+    let translations: Array<{ locale?: string; key?: string; value?: string }> = [];
+    if (typeof raw === 'string') {
+      try { translations = JSON.parse(raw) ?? []; } catch { translations = []; }
+    } else if (Array.isArray(raw)) {
+      translations = raw as typeof translations;
+    }
+    const pick = (key: string) =>
+      translations.find((t) => t?.locale === 'en' && t?.key === key)?.value
+      ?? translations.find((t) => t?.key === key)?.value
+      ?? null;
+    return { name: pick('name'), description: pick('description'), translations };
+  }
 
   @HttpCode(200)
   @Delete('product/delete')

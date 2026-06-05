@@ -42,6 +42,7 @@ export declare class VendorExtrasController {
         subscription_transactions?: undefined;
         roles?: undefined;
         employee_info?: undefined;
+        image_full_url?: undefined;
         restaurants?: undefined;
     } | {
         id: number;
@@ -79,10 +80,14 @@ export declare class VendorExtrasController {
         subscription_transactions: boolean;
         roles: never[];
         employee_info: null;
+        image_full_url: string;
         restaurants: {
             id: number;
             name: string | null;
             logo: string | null;
+            logo_full_url: string;
+            cover_photo: string | null;
+            cover_photo_full_url: string;
             status: boolean | null;
             address: string | null;
             phone: string | null;
@@ -141,12 +146,10 @@ export declare class VendorExtrasController {
         subscription_transactions?: undefined;
         roles?: undefined;
         employee_info?: undefined;
+        image_full_url?: undefined;
     }>;
-    updateProfile(req: AuthedRequest, body: {
-        f_name?: string;
-        l_name?: string;
-        email?: string;
-        phone?: string;
+    updateProfile(req: AuthedRequest, body?: Record<string, unknown>, files?: {
+        image?: Express.Multer.File[];
     }): Promise<{
         message: string;
     }>;
@@ -167,7 +170,14 @@ export declare class VendorExtrasController {
     bankInfo(): {
         message: string;
     };
-    basicInfo(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
+    private buildStorageUrl;
+    private storageDir;
+    private saveUploaded;
+    basicInfo(req: AuthedRequest, body?: Record<string, unknown>, files?: {
+        logo?: Express.Multer.File[];
+        cover_photo?: Express.Multer.File[];
+        meta_image?: Express.Multer.File[];
+    }): Promise<{
         message: string;
     }>;
     businessSetup(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
@@ -585,12 +595,48 @@ export declare class VendorExtrasController {
     updateStock(): {
         message: string;
     };
-    productStore(): {
+    productStore(req: AuthedRequest, body?: Record<string, unknown>, files?: {
+        image?: Express.Multer.File[];
+        meta_image?: Express.Multer.File[];
+    }): Promise<{
         message: string;
-    };
-    productUpdate(): {
+        errors?: undefined;
+        id?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+        id?: undefined;
+    } | {
         message: string;
-    };
+        id: number;
+        errors?: undefined;
+    }>;
+    productUpdate(body?: Record<string, unknown>, files?: {
+        image?: Express.Multer.File[];
+        meta_image?: Express.Multer.File[];
+    }): Promise<{
+        message: string;
+        errors?: undefined;
+        matched?: undefined;
+        modified?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+        matched?: undefined;
+        modified?: undefined;
+    } | {
+        message: string;
+        matched: number;
+        modified: number;
+        errors?: undefined;
+    }>;
+    private parseProductTranslations;
     productDelete(): {
         message: string;
     };

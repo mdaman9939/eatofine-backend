@@ -1,10 +1,43 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
 var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
     var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
     if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
     else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
@@ -15,6 +48,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.VendorExtrasController = void 0;
 const common_1 = require("@nestjs/common");
 const platform_express_1 = require("@nestjs/platform-express");
+const fs = __importStar(require("fs"));
+const path = __importStar(require("path"));
 const auth_guard_1 = require("../auth/auth.guard");
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
@@ -126,10 +161,14 @@ let VendorExtrasController = class VendorExtrasController {
                 subscription_transactions: false,
                 roles: [],
                 employee_info: null,
+                image_full_url: this.buildStorageUrl('profile', v.image),
                 restaurants: restaurants.map((r) => ({
                     id: Number(r.mysql_id),
                     name: r.name ?? null,
                     logo: r.logo ?? null,
+                    logo_full_url: this.buildStorageUrl('restaurant', r.logo),
+                    cover_photo: r.cover_photo ?? null,
+                    cover_photo_full_url: this.buildStorageUrl('restaurant/cover', r.cover_photo),
                     status: r.status ?? null,
                     address: r.address ?? null,
                     phone: r.phone ?? null,
@@ -159,20 +198,24 @@ let VendorExtrasController = class VendorExtrasController {
             restaurants: restaurants.map((r) => ({ ...r, id: Number(r.id), comission: r.comission !== null ? Number(r.comission) : null, minimum_order: Number(r.minimum_order) })),
         };
     }
-    async updateProfile(req, body) {
+    async updateProfile(req, body = {}, files = {}) {
+        const b = body ?? {};
         const data = {};
-        for (const [k, v] of Object.entries(body))
-            if (v !== undefined)
-                data[k] = v;
+        for (const k of ['f_name', 'l_name', 'email', 'phone', 'password']) {
+            if (b[k] !== undefined)
+                data[k] = String(b[k]);
+        }
+        const avatarName = this.saveUploaded(files?.image?.[0], 'profile');
+        if (avatarName)
+            data.image = avatarName;
+        if (Object.keys(data).length === 0)
+            return { message: 'nothing to update' };
+        data.updated_at = new Date();
         if (this.useMongo()) {
-            if (Object.keys(data).length) {
-                await this.mongo.updateOne('vendors', { mysql_id: Number(req.actor.id) }, data);
-            }
+            await this.mongo.updateOne('vendors', { mysql_id: Number(req.actor.id) }, data);
             return { message: 'Profile updated' };
         }
-        if (Object.keys(data).length) {
-            await this.prisma.vendors.update({ where: { id: req.actor.id }, data });
-        }
+        await this.prisma.vendors.update({ where: { id: req.actor.id }, data: data });
         return { message: 'Profile updated' };
     }
     fcmToken() { return { message: 'token-updated' }; }
@@ -193,19 +236,59 @@ let VendorExtrasController = class VendorExtrasController {
     toggleOpen() { return { message: 'updated' }; }
     announce() { return { message: 'announcement updated' }; }
     bankInfo() { return { message: 'bank info updated' }; }
-    async basicInfo(req, body = {}) {
+    buildStorageUrl(folder, filename) {
+        const base = (process.env.STORAGE_BASE_URL ?? 'http://127.0.0.1:3000/storage').replace(/\/$/, '');
+        const safeName = filename && String(filename).trim() ? String(filename) : 'default.png';
+        return `${base}/${folder}/${safeName}`;
+    }
+    storageDir(folder) {
+        const root = process.env.STORAGE_ROOT
+            ?? path.resolve(__dirname, '../../storage/app/public');
+        const dir = path.join(root, folder);
+        fs.mkdirSync(dir, { recursive: true });
+        return dir;
+    }
+    saveUploaded(file, folder) {
+        if (!file || !file.buffer || file.buffer.length === 0)
+            return null;
+        const ext = path.extname(file.originalname || '').toLowerCase() || '.png';
+        const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+        fs.writeFileSync(path.join(this.storageDir(folder), filename), file.buffer);
+        return filename;
+    }
+    async basicInfo(req, body = {}, files = {}) {
         const b = body ?? {};
         const data = {};
+        if (b.translations !== undefined) {
+            let translations = [];
+            if (typeof b.translations === 'string') {
+                try {
+                    translations = JSON.parse(b.translations) ?? [];
+                }
+                catch {
+                    translations = [];
+                }
+            }
+            else if (Array.isArray(b.translations)) {
+                translations = b.translations;
+            }
+            data.translations = translations;
+            const pick = (lang, key) => translations.find((t) => t?.locale === lang && t?.key === key)?.value;
+            const enName = pick('en', 'name') ?? pick('default', 'name') ?? translations.find((t) => t?.key === 'name')?.value;
+            const enAddress = pick('en', 'address') ?? pick('default', 'address') ?? translations.find((t) => t?.key === 'address')?.value;
+            if (enName)
+                data.name = enName;
+            if (enAddress)
+                data.address = enAddress;
+        }
         if (b.name !== undefined)
             data.name = String(b.name);
-        if (b.translations !== undefined)
-            data.translations = b.translations;
+        if (b.address !== undefined)
+            data.address = String(b.address);
         if (b.contact_number !== undefined)
             data.phone = String(b.contact_number);
         if (b.phone !== undefined)
             data.phone = String(b.phone);
-        if (b.address !== undefined)
-            data.address = String(b.address);
         if (b.gst !== undefined)
             data.gst = String(b.gst);
         if (b.gst_status !== undefined)
@@ -218,6 +301,15 @@ let VendorExtrasController = class VendorExtrasController {
             data.meta_description = String(b.meta_description);
         if (b.meta_keywords !== undefined)
             data.meta_keywords = String(b.meta_keywords);
+        const logoName = this.saveUploaded(files?.logo?.[0], 'restaurant');
+        const coverName = this.saveUploaded(files?.cover_photo?.[0], 'restaurant/cover');
+        const metaName = this.saveUploaded(files?.meta_image?.[0], 'restaurant');
+        if (logoName)
+            data.logo = logoName;
+        if (coverName)
+            data.cover_photo = coverName;
+        if (metaName)
+            data.meta_image = metaName;
         if (Object.keys(data).length === 0)
             return { message: 'nothing to update' };
         data.updated_at = new Date();
@@ -408,8 +500,130 @@ let VendorExtrasController = class VendorExtrasController {
     productStatus() { return { message: 'updated' }; }
     productRecommended() { return { message: 'updated' }; }
     updateStock() { return { message: 'stock updated' }; }
-    productStore() { return { message: 'product created' }; }
-    productUpdate() { return { message: 'product updated' }; }
+    async productStore(req, body = {}, files = {}) {
+        if (!this.useMongo())
+            return { message: 'product created' };
+        const b = body ?? {};
+        const restaurant = await this.mongo.findOne('restaurants', { mysql_vendor_id: Number(req.actor.id) });
+        if (!restaurant)
+            return { errors: [{ code: 'restaurant', message: 'restaurant not found' }] };
+        const { name: trName, description: trDesc, translations } = this.parseProductTranslations(b.translations);
+        const nextId = await this.mongo.nextMysqlId('foods');
+        const imageName = this.saveUploaded(files?.image?.[0], 'product') ?? 'default.png';
+        const metaImage = this.saveUploaded(files?.meta_image?.[0], 'product');
+        const now = new Date();
+        const food = {
+            mysql_id: nextId,
+            mysql_restaurant_id: Number(restaurant.mysql_id),
+            restaurant_id: Number(restaurant.mysql_id),
+            mysql_category_id: b.category_id !== undefined && b.category_id !== '' ? Number(b.category_id) : null,
+            category_id: b.category_id !== undefined && b.category_id !== '' ? Number(b.category_id) : null,
+            name: trName ?? String(b.name ?? 'Untitled food'),
+            description: trDesc ?? String(b.description ?? ''),
+            translations,
+            price: Number(b.price ?? 0),
+            tax: Number(b.tax ?? 0),
+            tax_type: String(b.tax_type ?? 'percent'),
+            discount: Number(b.discount ?? 0),
+            discount_type: String(b.discount_type ?? 'percent'),
+            veg: !!Number(b.veg ?? 0),
+            status: true,
+            image: imageName,
+            meta_image: metaImage,
+            meta_title: b.meta_title ? String(b.meta_title) : null,
+            meta_description: b.meta_description ? String(b.meta_description) : null,
+            available_time_starts: b.available_time_starts ? String(b.available_time_starts) : '00:00',
+            available_time_ends: b.available_time_ends ? String(b.available_time_ends) : '23:59',
+            stock_type: String(b.stock_type ?? 'unlimited'),
+            item_stock: Number(b.item_stock ?? 0),
+            sell_count: 0,
+            avg_rating: 0,
+            rating_count: 0,
+            addon_ids: b.addon_ids ?? [],
+            variations: b.variations ?? [],
+            created_at: now,
+            updated_at: now,
+        };
+        await this.mongo.insertOne('foods', food);
+        return { message: 'Product added successfully', id: nextId };
+    }
+    async productUpdate(body = {}, files = {}) {
+        if (!this.useMongo())
+            return { message: 'product updated' };
+        const b = body ?? {};
+        const foodId = b.id !== undefined && b.id !== '' ? Number(b.id) : null;
+        if (!foodId)
+            return { errors: [{ code: 'id', message: 'product id required' }] };
+        const data = {};
+        if (b.translations !== undefined) {
+            const { name: trName, description: trDesc, translations } = this.parseProductTranslations(b.translations);
+            data.translations = translations;
+            if (trName)
+                data.name = trName;
+            if (trDesc)
+                data.description = trDesc;
+        }
+        if (b.name !== undefined)
+            data.name = String(b.name);
+        if (b.description !== undefined)
+            data.description = String(b.description);
+        if (b.price !== undefined && b.price !== '')
+            data.price = Number(b.price);
+        if (b.tax !== undefined && b.tax !== '')
+            data.tax = Number(b.tax);
+        if (b.discount !== undefined && b.discount !== '')
+            data.discount = Number(b.discount);
+        if (b.discount_type !== undefined)
+            data.discount_type = String(b.discount_type);
+        if (b.veg !== undefined)
+            data.veg = !!Number(b.veg);
+        if (b.category_id !== undefined && b.category_id !== '') {
+            data.category_id = Number(b.category_id);
+            data.mysql_category_id = Number(b.category_id);
+        }
+        if (b.stock_type !== undefined)
+            data.stock_type = String(b.stock_type);
+        if (b.item_stock !== undefined && b.item_stock !== '')
+            data.item_stock = Number(b.item_stock);
+        if (b.available_time_starts !== undefined)
+            data.available_time_starts = String(b.available_time_starts);
+        if (b.available_time_ends !== undefined)
+            data.available_time_ends = String(b.available_time_ends);
+        if (b.maximum_cart_quantity !== undefined && b.maximum_cart_quantity !== '') {
+            data.maximum_cart_quantity = Number(b.maximum_cart_quantity);
+        }
+        if (b.is_halal !== undefined)
+            data.is_halal = !!Number(b.is_halal);
+        const imageName = this.saveUploaded(files?.image?.[0], 'product');
+        const metaImage = this.saveUploaded(files?.meta_image?.[0], 'product');
+        if (imageName)
+            data.image = imageName;
+        if (metaImage)
+            data.meta_image = metaImage;
+        if (Object.keys(data).length === 0)
+            return { message: 'nothing to update' };
+        data.updated_at = new Date();
+        const result = await this.mongo.updateOne('foods', { mysql_id: foodId }, data);
+        return { message: 'Product updated successfully', matched: result?.matchedCount ?? 0, modified: result?.modifiedCount ?? 0 };
+    }
+    parseProductTranslations(raw) {
+        let translations = [];
+        if (typeof raw === 'string') {
+            try {
+                translations = JSON.parse(raw) ?? [];
+            }
+            catch {
+                translations = [];
+            }
+        }
+        else if (Array.isArray(raw)) {
+            translations = raw;
+        }
+        const pick = (key) => translations.find((t) => t?.locale === 'en' && t?.key === key)?.value
+            ?? translations.find((t) => t?.key === key)?.value
+            ?? null;
+        return { name: pick('name'), description: pick('description'), translations };
+    }
     productDelete() { return { message: 'product deleted' }; }
     async productReviews(idStr) {
         const id = parseInt(idStr ?? '', 10);
@@ -772,10 +986,14 @@ __decorate([
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('update-profile'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.FileFieldsInterceptor)([
+        { name: 'image', maxCount: 1 },
+    ], { limits: { fileSize: 5 * 1024 * 1024 } })),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
+    __param(2, (0, common_1.UploadedFiles)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:paramtypes", [Object, Object, Object]),
     __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "updateProfile", null);
 __decorate([
@@ -825,8 +1043,9 @@ __decorate([
     ], { limits: { fileSize: 5 * 1024 * 1024 } })),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
+    __param(2, (0, common_1.UploadedFiles)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:paramtypes", [Object, Object, Object]),
     __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "basicInfo", null);
 __decorate([
@@ -944,16 +1163,29 @@ __decorate([
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('product/store'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.FileFieldsInterceptor)([
+        { name: 'image', maxCount: 1 },
+        { name: 'meta_image', maxCount: 1 },
+    ], { limits: { fileSize: 5 * 1024 * 1024 } })),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __param(2, (0, common_1.UploadedFiles)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object, Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "productStore", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('product/update'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.FileFieldsInterceptor)([
+        { name: 'image', maxCount: 1 },
+        { name: 'meta_image', maxCount: 1 },
+    ], { limits: { fileSize: 5 * 1024 * 1024 } })),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.UploadedFiles)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "productUpdate", null);
 __decorate([
     (0, common_1.HttpCode)(200),
