@@ -94,7 +94,7 @@ export declare class OrderController {
             phone: string | null;
             image: string | null;
         } | null;
-        delivery_address: {} | null;
+        delivery_address: Record<string, unknown>;
         pending: Date | null;
         accepted: Date | null;
         confirmed: Date | null;

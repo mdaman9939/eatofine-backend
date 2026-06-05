@@ -159,6 +159,63 @@ export class OrderService {
         });
       }
 
+      // Resolve delivery_address from request body OR the customer's saved
+      // default address — otherwise the Flutter detail screen renders
+      // "Name : (null)" because order.deliveryAddress is missing.
+      let deliveryAddress: Record<string, unknown> | null = null;
+      if (body.contact_person_name || body.address || body.latitude) {
+        deliveryAddress = {
+          contact_person_name: body.contact_person_name ?? null,
+          contact_person_number: body.contact_person_number ?? null,
+          address_type: body.address_type ?? 'home',
+          address: body.address ?? null,
+          road: body.road ?? null,
+          house: body.house ?? null,
+          floor: body.floor ?? null,
+          latitude: body.latitude ?? null,
+          longitude: body.longitude ?? null,
+        };
+      } else if (body.delivery_address_id != null) {
+        const addr = await this.mongo.findByMysqlId<Record<string, unknown>>(
+          'customer_addresses', Number(body.delivery_address_id),
+        );
+        if (addr) {
+          deliveryAddress = {
+            contact_person_name: addr.contact_person_name ?? null,
+            contact_person_number: addr.contact_person_number ?? null,
+            address_type: addr.address_type ?? 'home',
+            address: addr.address ?? null,
+            road: addr.road ?? null,
+            house: addr.house ?? null,
+            floor: addr.floor ?? null,
+            latitude: addr.latitude ?? null,
+            longitude: addr.longitude ?? null,
+          };
+        }
+      }
+      // Final fallback: pull the customer's default saved address.
+      if (!deliveryAddress) {
+        const matches = await this.mongo.findMany<Record<string, unknown>>(
+          'customer_addresses',
+          { $or: [{ user_id: Number(userId) }, { mysql_user_id: Number(userId) }] },
+          { sort: { is_default: -1, mysql_id: -1 }, limit: 1 },
+        );
+        const defaultAddr = matches[0] ?? null;
+        if (defaultAddr) {
+          deliveryAddress = {
+            contact_person_name: defaultAddr.contact_person_name ?? null,
+            contact_person_number: defaultAddr.contact_person_number ?? null,
+            address_type: defaultAddr.address_type ?? 'home',
+            address: defaultAddr.address ?? null,
+            road: defaultAddr.road ?? null,
+            house: defaultAddr.house ?? null,
+            floor: defaultAddr.floor ?? null,
+            latitude: defaultAddr.latitude ?? null,
+            longitude: defaultAddr.longitude ?? null,
+          };
+        }
+      }
+
       await this.mongo.insertOne<MongoOrder>('orders', {
         mysql_id: orderMysqlId,
         mysql_user_id: Number(userId),
@@ -177,8 +234,11 @@ export class OrderService {
         otp,
         pending: now,
         items,
+        delivery_address: deliveryAddress,
+        created_at: now,
+        updated_at: now,
         created_at_legacy: now,
-      });
+      } as MongoOrder);
 
       // Mirror to order_details collection for joins from other services
       for (const it of items) {
@@ -304,17 +364,54 @@ export class OrderService {
     };
   }
 
+  /** Build the delivery_address payload Flutter's order screen expects.
+   *  Resolution order: order.delivery_address blob → customer's default
+   *  saved address → synthesised stub from the customer's name/phone.
+   *  Result always has contact_person_name + contact_person_number so the
+   *  detail screen never renders "(null)". */
+  private buildDeliveryAddress(
+    order: { delivery_address?: unknown },
+    defaultAddr: Record<string, unknown> | null,
+    customer: { f_name?: string; l_name?: string; phone?: string } | null,
+  ): Record<string, unknown> {
+    const fromOrder = order.delivery_address as Record<string, unknown> | string | null | undefined;
+    const fromOrderObj = fromOrder && typeof fromOrder === 'object' ? fromOrder : {};
+    const fromOrderStr = typeof fromOrder === 'string' ? fromOrder : null;
+    const customerFullName = customer
+      ? `${customer.f_name ?? ''} ${customer.l_name ?? ''}`.trim() || null
+      : null;
+    return {
+      contact_person_name:
+        fromOrderObj.contact_person_name
+        ?? defaultAddr?.contact_person_name
+        ?? customerFullName
+        ?? 'Customer',
+      contact_person_number:
+        fromOrderObj.contact_person_number
+        ?? defaultAddr?.contact_person_number
+        ?? customer?.phone
+        ?? null,
+      address_type: fromOrderObj.address_type ?? defaultAddr?.address_type ?? 'home',
+      address: fromOrderObj.address ?? defaultAddr?.address ?? fromOrderStr ?? null,
+      road: fromOrderObj.road ?? defaultAddr?.road ?? null,
+      house: fromOrderObj.house ?? defaultAddr?.house ?? null,
+      floor: fromOrderObj.floor ?? defaultAddr?.floor ?? null,
+      latitude: fromOrderObj.latitude ?? defaultAddr?.latitude ?? null,
+      longitude: fromOrderObj.longitude ?? defaultAddr?.longitude ?? null,
+    };
+  }
+
   async trackOrder(orderId: number) {
     if (this.useMongo()) {
       const o = await this.mongo.findByMysqlId<MongoOrder>('orders', orderId);
       if (!o) throw new NotFoundException({ errors: [{ code: 'order_id', message: 'not_found' }] });
 
       // Flutter customer app's track screen reads track.restaurant.name,
-      // track.customer.f_name, track.deliveryMan.f_name as nested objects —
-      // not just the IDs. Eagerly fetch the linked rows so the detail card
-      // renders "Curry Express" + customer + rider instead of "No
-      // restaurant data found" / "Name : (null)".
-      const [restaurant, customer, deliveryMan] = await Promise.all([
+      // track.customer.f_name, track.deliveryMan.f_name, and
+      // track.deliveryAddress.contactPersonName as nested objects — not
+      // just the IDs. Eagerly fetch each so the detail card renders
+      // properly instead of "No restaurant data found" / "Name : (null)".
+      const [restaurant, customer, deliveryMan, defaultAddr] = await Promise.all([
         o.mysql_restaurant_id != null
           ? this.mongo.findByMysqlId<{ mysql_id: number; name?: string; phone?: string; email?: string; address?: string; logo?: string; latitude?: number; longitude?: number }>('restaurants', Number(o.mysql_restaurant_id))
           : Promise.resolve(null),
@@ -323,6 +420,17 @@ export class OrderService {
           : Promise.resolve(null),
         o.mysql_delivery_man_id != null
           ? this.mongo.findByMysqlId<{ mysql_id: number; f_name?: string; l_name?: string; phone?: string; image?: string }>('delivery_men', Number(o.mysql_delivery_man_id))
+          : Promise.resolve(null),
+        // Backfill chain — if the order itself doesn't carry a
+        // delivery_address blob, fall back to the customer's default saved
+        // address so the detail screen still shows a name + phone instead
+        // of "(null)".
+        o.mysql_user_id != null
+          ? this.mongo.findMany<Record<string, unknown>>(
+              'customer_addresses',
+              { $or: [{ user_id: Number(o.mysql_user_id) }, { mysql_user_id: Number(o.mysql_user_id) }] },
+              { sort: { is_default: -1, mysql_id: -1 }, limit: 1 },
+            ).then((rows) => rows[0] ?? null)
           : Promise.resolve(null),
       ]);
 
@@ -365,7 +473,7 @@ export class OrderService {
         customer: customerPayload,
         delivery_man: dmPayload,
         deliveryMan: dmPayload, // alias — some Flutter parsers use camelCase
-        delivery_address: (o as { delivery_address?: unknown }).delivery_address ?? null,
+        delivery_address: this.buildDeliveryAddress(o as unknown as { delivery_address?: unknown }, defaultAddr, customer),
         pending: o.pending ?? null,
         accepted: o.accepted ?? null,
         confirmed: o.confirmed ?? null,

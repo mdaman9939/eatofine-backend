@@ -37,6 +37,7 @@ export declare class OrderService {
         order_id: number;
         total_ammount: number;
     }>;
+    private buildDeliveryAddress;
     trackOrder(orderId: number): Promise<{
         id: number;
         order_status: string | undefined;
@@ -77,7 +78,7 @@ export declare class OrderService {
             phone: string | null;
             image: string | null;
         } | null;
-        delivery_address: {} | null;
+        delivery_address: Record<string, unknown>;
         pending: Date | null;
         accepted: Date | null;
         confirmed: Date | null;

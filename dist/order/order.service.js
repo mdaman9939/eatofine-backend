@@ -88,6 +88,53 @@ let OrderService = class OrderService {
                     category_id: f.mysql_category_id ?? null,
                 });
             }
+            let deliveryAddress = null;
+            if (body.contact_person_name || body.address || body.latitude) {
+                deliveryAddress = {
+                    contact_person_name: body.contact_person_name ?? null,
+                    contact_person_number: body.contact_person_number ?? null,
+                    address_type: body.address_type ?? 'home',
+                    address: body.address ?? null,
+                    road: body.road ?? null,
+                    house: body.house ?? null,
+                    floor: body.floor ?? null,
+                    latitude: body.latitude ?? null,
+                    longitude: body.longitude ?? null,
+                };
+            }
+            else if (body.delivery_address_id != null) {
+                const addr = await this.mongo.findByMysqlId('customer_addresses', Number(body.delivery_address_id));
+                if (addr) {
+                    deliveryAddress = {
+                        contact_person_name: addr.contact_person_name ?? null,
+                        contact_person_number: addr.contact_person_number ?? null,
+                        address_type: addr.address_type ?? 'home',
+                        address: addr.address ?? null,
+                        road: addr.road ?? null,
+                        house: addr.house ?? null,
+                        floor: addr.floor ?? null,
+                        latitude: addr.latitude ?? null,
+                        longitude: addr.longitude ?? null,
+                    };
+                }
+            }
+            if (!deliveryAddress) {
+                const matches = await this.mongo.findMany('customer_addresses', { $or: [{ user_id: Number(userId) }, { mysql_user_id: Number(userId) }] }, { sort: { is_default: -1, mysql_id: -1 }, limit: 1 });
+                const defaultAddr = matches[0] ?? null;
+                if (defaultAddr) {
+                    deliveryAddress = {
+                        contact_person_name: defaultAddr.contact_person_name ?? null,
+                        contact_person_number: defaultAddr.contact_person_number ?? null,
+                        address_type: defaultAddr.address_type ?? 'home',
+                        address: defaultAddr.address ?? null,
+                        road: defaultAddr.road ?? null,
+                        house: defaultAddr.house ?? null,
+                        floor: defaultAddr.floor ?? null,
+                        latitude: defaultAddr.latitude ?? null,
+                        longitude: defaultAddr.longitude ?? null,
+                    };
+                }
+            }
             await this.mongo.insertOne('orders', {
                 mysql_id: orderMysqlId,
                 mysql_user_id: Number(userId),
@@ -106,6 +153,9 @@ let OrderService = class OrderService {
                 otp,
                 pending: now,
                 items,
+                delivery_address: deliveryAddress,
+                created_at: now,
+                updated_at: now,
                 created_at_legacy: now,
             });
             for (const it of items) {
@@ -220,12 +270,37 @@ let OrderService = class OrderService {
             total_ammount: finalAmount,
         };
     }
+    buildDeliveryAddress(order, defaultAddr, customer) {
+        const fromOrder = order.delivery_address;
+        const fromOrderObj = fromOrder && typeof fromOrder === 'object' ? fromOrder : {};
+        const fromOrderStr = typeof fromOrder === 'string' ? fromOrder : null;
+        const customerFullName = customer
+            ? `${customer.f_name ?? ''} ${customer.l_name ?? ''}`.trim() || null
+            : null;
+        return {
+            contact_person_name: fromOrderObj.contact_person_name
+                ?? defaultAddr?.contact_person_name
+                ?? customerFullName
+                ?? 'Customer',
+            contact_person_number: fromOrderObj.contact_person_number
+                ?? defaultAddr?.contact_person_number
+                ?? customer?.phone
+                ?? null,
+            address_type: fromOrderObj.address_type ?? defaultAddr?.address_type ?? 'home',
+            address: fromOrderObj.address ?? defaultAddr?.address ?? fromOrderStr ?? null,
+            road: fromOrderObj.road ?? defaultAddr?.road ?? null,
+            house: fromOrderObj.house ?? defaultAddr?.house ?? null,
+            floor: fromOrderObj.floor ?? defaultAddr?.floor ?? null,
+            latitude: fromOrderObj.latitude ?? defaultAddr?.latitude ?? null,
+            longitude: fromOrderObj.longitude ?? defaultAddr?.longitude ?? null,
+        };
+    }
     async trackOrder(orderId) {
         if (this.useMongo()) {
             const o = await this.mongo.findByMysqlId('orders', orderId);
             if (!o)
                 throw new common_1.NotFoundException({ errors: [{ code: 'order_id', message: 'not_found' }] });
-            const [restaurant, customer, deliveryMan] = await Promise.all([
+            const [restaurant, customer, deliveryMan, defaultAddr] = await Promise.all([
                 o.mysql_restaurant_id != null
                     ? this.mongo.findByMysqlId('restaurants', Number(o.mysql_restaurant_id))
                     : Promise.resolve(null),
@@ -234,6 +309,9 @@ let OrderService = class OrderService {
                     : Promise.resolve(null),
                 o.mysql_delivery_man_id != null
                     ? this.mongo.findByMysqlId('delivery_men', Number(o.mysql_delivery_man_id))
+                    : Promise.resolve(null),
+                o.mysql_user_id != null
+                    ? this.mongo.findMany('customer_addresses', { $or: [{ user_id: Number(o.mysql_user_id) }, { mysql_user_id: Number(o.mysql_user_id) }] }, { sort: { is_default: -1, mysql_id: -1 }, limit: 1 }).then((rows) => rows[0] ?? null)
                     : Promise.resolve(null),
             ]);
             const restaurantPayload = restaurant ? {
@@ -273,7 +351,7 @@ let OrderService = class OrderService {
                 customer: customerPayload,
                 delivery_man: dmPayload,
                 deliveryMan: dmPayload,
-                delivery_address: o.delivery_address ?? null,
+                delivery_address: this.buildDeliveryAddress(o, defaultAddr, customer),
                 pending: o.pending ?? null,
                 accepted: o.accepted ?? null,
                 confirmed: o.confirmed ?? null,
