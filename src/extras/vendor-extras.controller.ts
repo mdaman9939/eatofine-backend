@@ -647,16 +647,32 @@ export class VendorExtrasController {
         this.mongo.count('foods', filter),
       ]);
       return {
-        products: rows.map((r) => ({
-          ...(r.legacy ?? {}),
-          ...r,
-          id: Number(r.mysql_id),
-          price: toNum(r.price),
-          tax: toNum(r.tax),
-          discount: toNum(r.discount),
-          restaurant_id: r.mysql_restaurant_id !== null && r.mysql_restaurant_id !== undefined ? Number(r.mysql_restaurant_id) : 0,
-          category_id: r.mysql_category_id !== null && r.mysql_category_id !== undefined ? Number(r.mysql_category_id) : null,
-        })),
+        products: rows.map((r) => {
+          const food = r as MongoFoodDoc & Record<string, unknown>;
+          // Defaults so the Flutter "(null)" rating label and broken image
+          // placeholder both go away — UI reads rating_count, avg_rating,
+          // and image_full_url without null-safety on the reads.
+          return {
+            ...(food.legacy ?? {}),
+            ...food,
+            id: Number(food.mysql_id),
+            price: toNum(food.price) ?? 0,
+            tax: toNum(food.tax) ?? 0,
+            discount: toNum(food.discount) ?? 0,
+            restaurant_id: food.mysql_restaurant_id !== null && food.mysql_restaurant_id !== undefined ? Number(food.mysql_restaurant_id) : 0,
+            category_id: food.mysql_category_id !== null && food.mysql_category_id !== undefined ? Number(food.mysql_category_id) : null,
+            rating_count: Number(food.rating_count ?? 0),
+            avg_rating: Number(food.avg_rating ?? 0),
+            rating: food.rating ?? [],
+            image: food.image ?? 'default.png',
+            image_full_url: this.buildStorageUrl('product', (food.image as string | null | undefined) ?? null),
+            meta_image_full_url: this.buildStorageUrl('product', (food.meta_image as string | null | undefined) ?? null),
+            stock_type: food.stock_type ?? 'unlimited',
+            item_stock: Number(food.item_stock ?? 0),
+            sell_count: Number(food.sell_count ?? 0),
+            status: food.status ?? true,
+          };
+        }),
         total_size: total,
         limit,
         offset,
@@ -679,18 +695,26 @@ export class VendorExtrasController {
 
     if (this.useMongo()) {
       const f = await this.mongo.findByMysqlId<MongoFoodDoc>('foods', id);
-      return f
-        ? {
-            ...(f.legacy ?? {}),
-            ...f,
-            id: Number(f.mysql_id),
-            price: toNum(f.price),
-            tax: toNum(f.tax),
-            discount: toNum(f.discount),
-            restaurant_id: f.mysql_restaurant_id !== null && f.mysql_restaurant_id !== undefined ? Number(f.mysql_restaurant_id) : 0,
-            category_id: f.mysql_category_id !== null && f.mysql_category_id !== undefined ? Number(f.mysql_category_id) : null,
-          }
-        : null;
+      if (!f) return null;
+      const food = f as MongoFoodDoc & Record<string, unknown>;
+      return {
+        ...(food.legacy ?? {}),
+        ...food,
+        id: Number(food.mysql_id),
+        price: toNum(food.price) ?? 0,
+        tax: toNum(food.tax) ?? 0,
+        discount: toNum(food.discount) ?? 0,
+        restaurant_id: food.mysql_restaurant_id !== null && food.mysql_restaurant_id !== undefined ? Number(food.mysql_restaurant_id) : 0,
+        category_id: food.mysql_category_id !== null && food.mysql_category_id !== undefined ? Number(food.mysql_category_id) : null,
+        rating_count: Number(food.rating_count ?? 0),
+        avg_rating: Number(food.avg_rating ?? 0),
+        rating: food.rating ?? [],
+        image: food.image ?? 'default.png',
+        image_full_url: this.buildStorageUrl('product', (food.image as string | null | undefined) ?? null),
+        meta_image_full_url: this.buildStorageUrl('product', (food.meta_image as string | null | undefined) ?? null),
+        stock_type: food.stock_type ?? 'unlimited',
+        item_stock: Number(food.item_stock ?? 0),
+      };
     }
 
     const f = await this.prisma.food.findUnique({ where: { id: BigInt(id) } });
