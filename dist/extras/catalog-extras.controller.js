@@ -373,6 +373,9 @@ let CatalogExtrasController = class CatalogExtrasController {
             })),
         };
     }
+    async productReviewsByPath(idStr) {
+        return this.productReviews(idStr);
+    }
     async productReviews(idStr) {
         const id = parseInt(idStr ?? '', 10);
         if (!Number.isFinite(id))
@@ -633,6 +636,13 @@ __decorate([
     __metadata("design:paramtypes", [String, String, String]),
     __metadata("design:returntype", Promise)
 ], CatalogExtrasController.prototype, "restaurantsSearch", null);
+__decorate([
+    (0, common_1.Get)('products/reviews/:id'),
+    __param(0, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
+], CatalogExtrasController.prototype, "productReviewsByPath", null);
 __decorate([
     (0, common_1.Get)('products/reviews'),
     __param(0, (0, common_1.Query)('product_id')),

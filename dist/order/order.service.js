@@ -153,6 +153,8 @@ let OrderService = class OrderService {
                 otp,
                 pending: now,
                 items,
+                cutlery: !!Number(body.cutlery ?? 0) || body.cutlery === true,
+                order_note: body.order_note ?? null,
                 delivery_address: deliveryAddress,
                 created_at: now,
                 updated_at: now,
@@ -352,6 +354,8 @@ let OrderService = class OrderService {
                 delivery_man: dmPayload,
                 deliveryMan: dmPayload,
                 delivery_address: this.buildDeliveryAddress(o, defaultAddr, customer),
+                cutlery: !!o.cutlery,
+                order_note: o.order_note ?? null,
                 pending: o.pending ?? null,
                 accepted: o.accepted ?? null,
                 confirmed: o.confirmed ?? null,
@@ -410,6 +414,7 @@ let OrderService = class OrderService {
                         restaurant_id: o.mysql_restaurant_id ?? null,
                         created_at: o.created_at ?? o.created_at_legacy ?? null,
                         details_count: count,
+                        cutlery: !!o.cutlery,
                     };
                 }),
             };

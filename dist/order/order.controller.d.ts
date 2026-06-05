@@ -39,6 +39,7 @@ export declare class OrderController {
             restaurant_id: number | null;
             created_at: string | Date | null;
             details_count: number;
+            cutlery: boolean;
         }[];
     } | {
         total_size: number;
@@ -95,6 +96,8 @@ export declare class OrderController {
             image: string | null;
         } | null;
         delivery_address: Record<string, unknown>;
+        cutlery: boolean;
+        order_note: string | null;
         pending: Date | null;
         accepted: Date | null;
         confirmed: Date | null;
@@ -124,5 +127,7 @@ export declare class OrderController {
         delivery_man?: undefined;
         deliveryMan?: undefined;
         delivery_address?: undefined;
+        cutlery?: undefined;
+        order_note?: undefined;
     }>;
 }

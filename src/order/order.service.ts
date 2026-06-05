@@ -88,6 +88,7 @@ export class OrderService {
       coupon_code?: string;
       order_note?: string;
       schedule_at?: string;
+      cutlery?: number | string | boolean;
     },
   ) {
     if (!body.cart || body.cart.length === 0) {
@@ -234,6 +235,10 @@ export class OrderService {
         otp,
         pending: now,
         items,
+        // Customer app sends cutlery as 1 / 0 / "1" / true — normalise to
+        // boolean so the order details screen renders Yes/No deterministically.
+        cutlery: !!Number(body.cutlery ?? 0) || body.cutlery === true,
+        order_note: body.order_note ?? null,
         delivery_address: deliveryAddress,
         created_at: now,
         updated_at: now,
@@ -474,6 +479,8 @@ export class OrderService {
         delivery_man: dmPayload,
         deliveryMan: dmPayload, // alias — some Flutter parsers use camelCase
         delivery_address: this.buildDeliveryAddress(o as unknown as { delivery_address?: unknown }, defaultAddr, customer),
+        cutlery: !!(o as unknown as { cutlery?: unknown }).cutlery,
+        order_note: (o as unknown as { order_note?: string | null }).order_note ?? null,
         pending: o.pending ?? null,
         accepted: o.accepted ?? null,
         confirmed: o.confirmed ?? null,
@@ -542,6 +549,7 @@ export class OrderService {
             restaurant_id: o.mysql_restaurant_id ?? null,
             created_at: (o as { created_at?: Date | string | null }).created_at ?? o.created_at_legacy ?? null,
             details_count: count,
+            cutlery: !!(o as unknown as { cutlery?: unknown }).cutlery,
           };
         }),
       };

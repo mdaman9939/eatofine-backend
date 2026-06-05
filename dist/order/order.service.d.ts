@@ -32,6 +32,7 @@ export declare class OrderService {
         coupon_code?: string;
         order_note?: string;
         schedule_at?: string;
+        cutlery?: number | string | boolean;
     }): Promise<{
         message: string;
         order_id: number;
@@ -79,6 +80,8 @@ export declare class OrderService {
             image: string | null;
         } | null;
         delivery_address: Record<string, unknown>;
+        cutlery: boolean;
+        order_note: string | null;
         pending: Date | null;
         accepted: Date | null;
         confirmed: Date | null;
@@ -108,6 +111,8 @@ export declare class OrderService {
         delivery_man?: undefined;
         deliveryMan?: undefined;
         delivery_address?: undefined;
+        cutlery?: undefined;
+        order_note?: undefined;
     }>;
     customerOrderList(userId: bigint): Promise<{
         total_size: number;
@@ -122,6 +127,7 @@ export declare class OrderService {
             restaurant_id: number | null;
             created_at: string | Date | null;
             details_count: number;
+            cutlery: boolean;
         }[];
     } | {
         total_size: number;

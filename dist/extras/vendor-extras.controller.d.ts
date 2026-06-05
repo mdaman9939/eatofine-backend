@@ -167,12 +167,32 @@ export declare class VendorExtrasController {
     bankInfo(): {
         message: string;
     };
-    basicInfo(): {
+    basicInfo(req: AuthedRequest, body: {
+        name?: string;
+        translations?: unknown[];
+        contact_number?: string;
+        phone?: string;
+        address?: string;
+        gst?: string;
+        gst_status?: number | boolean;
+        minimum_order?: number | string;
+    }): Promise<{
         message: string;
-    };
-    businessSetup(): {
+    }>;
+    businessSetup(req: AuthedRequest, body: {
+        minimum_order?: number | string;
+        minimum_shipping_charge?: number | string;
+        delivery?: number | boolean;
+        take_away?: number | boolean;
+        free_delivery?: number | boolean;
+        veg?: number | boolean;
+        non_veg?: number | boolean;
+        restaurant_model?: string;
+        delivery_time?: string;
+        self_delivery_system?: number | boolean;
+    }): Promise<{
         message: string;
-    };
+    }>;
     addDineInTable(): {
         message: string;
     };
@@ -235,11 +255,11 @@ export declare class VendorExtrasController {
         cancellation_note: string | null;
         tax_type: string | null;
         is_guest: boolean;
+        order_note: string | null;
         coupon_discount_title: string | null;
         transaction_reference: string | null;
         delivery_address_id: bigint | null;
         coupon_code: string | null;
-        order_note: string | null;
         checked: boolean;
         delivery_type: string | null;
         delivery_type_charge: import("@prisma/client/runtime/library").Decimal;
@@ -328,11 +348,11 @@ export declare class VendorExtrasController {
             cancellation_note: string | null;
             tax_type: string | null;
             is_guest: boolean;
+            order_note: string | null;
             coupon_discount_title: string | null;
             transaction_reference: string | null;
             delivery_address_id: bigint | null;
             coupon_code: string | null;
-            order_note: string | null;
             checked: boolean;
             delivery_type: string | null;
             delivery_type_charge: import("@prisma/client/runtime/library").Decimal;
@@ -419,11 +439,11 @@ export declare class VendorExtrasController {
         cancellation_note: string | null;
         tax_type: string | null;
         is_guest: boolean;
+        order_note: string | null;
         coupon_discount_title: string | null;
         transaction_reference: string | null;
         delivery_address_id: bigint | null;
         coupon_code: string | null;
-        order_note: string | null;
         checked: boolean;
         delivery_type: string | null;
         delivery_type_charge: import("@prisma/client/runtime/library").Decimal;
@@ -755,39 +775,74 @@ export declare class VendorExtrasController {
     requestWithdraw(): {
         message: string;
     };
-    earningReport(): {
+    private vendorOrdersForReports;
+    earningReport(req: AuthedRequest): Promise<{
         total: number;
         today: number;
         this_week: number;
         this_month: number;
-    };
-    orderReport(): {
+    }>;
+    orderReport(req: AuthedRequest): Promise<{
         delivered: number;
         canceled: number;
         returned: number;
-    };
-    foodReport(): {
-        data: never[];
-    };
+        total_orders: number;
+        total_amount: number;
+        data: {
+            day: string;
+            count: number;
+        }[];
+    }>;
+    foodReport(req: AuthedRequest): Promise<{
+        data: {
+            food_id: number;
+            total_sold_quantity: number;
+            total_amount: number;
+        }[];
+        total_data: {
+            food_id: number;
+            total_sold_quantity: number;
+            total_amount: number;
+        }[];
+    }>;
     campaignReport(): {
         data: never[];
+        total_amount: number;
+        total_orders: number;
     };
-    taxReport(): {
-        data: never[];
+    taxReport(req: AuthedRequest): Promise<{
+        data: {
+            order_id: number;
+            order_amount: number;
+            tax_amount: number;
+            created_at: {} | null;
+        }[];
         total: number;
-    };
+    }>;
     disbursementReport(): {
         data: never[];
         total: number;
     };
-    expenseReport(): {
-        data: never[];
+    expenseReport(req: AuthedRequest): Promise<{
+        data: {
+            order_id: number;
+            order_amount: number;
+            commission_amount: number;
+            created_at: {} | null;
+        }[];
         total: number;
-    };
-    transactionReport(): {
-        data: never[];
+    }>;
+    transactionReport(req: AuthedRequest): Promise<{
+        data: {
+            order_id: number;
+            order_amount: number;
+            payment_method: {} | null;
+            payment_status: {} | null;
+            order_status: {} | null;
+            created_at: {} | null;
+        }[];
         total: number;
-    };
+    }>;
     generateStatement(): {
         message: string;
     };
@@ -867,13 +922,31 @@ export declare class VendorExtrasController {
     adDelete(): {
         message: string;
     };
-    businessPlan(): {
+    businessPlan(req: AuthedRequest): Promise<{
         commission: number;
         subscription: number;
-    };
+        commission_rate: string | number;
+        restaurant_id: number | null;
+        restaurant_name: string | null;
+    }>;
     packageView(): {
-        package: null;
+        package: {
+            id: number;
+            package_name: string;
+            commission_status: number;
+            commission: number;
+            package_type: string;
+            validity: number;
+            price: number;
+            plan_type: string;
+        };
         transactions: never[];
+    };
+    subscriptionTransactionsList(): {
+        transactions: never[];
+        total_size: number;
+        limit: number;
+        offset: number;
     };
     subscriptionTransaction(): {
         message: string;

@@ -275,11 +275,11 @@ export declare class CustomerExtrasController {
         cancellation_note: string | null;
         tax_type: string | null;
         is_guest: boolean;
+        order_note: string | null;
         coupon_discount_title: string | null;
         transaction_reference: string | null;
         delivery_address_id: bigint | null;
         coupon_code: string | null;
-        order_note: string | null;
         checked: boolean;
         delivery_type: string | null;
         delivery_type_charge: import("@prisma/client/runtime/library").Decimal;

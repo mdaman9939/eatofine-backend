@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Query, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Query, Param, HttpCode } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 
@@ -424,6 +424,13 @@ export class CatalogExtrasController {
         comission: r.comission !== undefined && r.comission !== null ? this.num(r.comission) : null,
       })),
     };
+  }
+
+  /** Flutter Food Details screen calls /products/reviews/:id (path param)
+   *  instead of /products/reviews?product_id= — alias so both shapes work. */
+  @Get('products/reviews/:id')
+  async productReviewsByPath(@Param('id') idStr: string) {
+    return this.productReviews(idStr);
   }
 
   @Get('products/reviews')

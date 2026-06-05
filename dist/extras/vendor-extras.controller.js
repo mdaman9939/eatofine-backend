@@ -192,8 +192,61 @@ let VendorExtrasController = class VendorExtrasController {
     toggleOpen() { return { message: 'updated' }; }
     announce() { return { message: 'announcement updated' }; }
     bankInfo() { return { message: 'bank info updated' }; }
-    basicInfo() { return { message: 'basic info updated' }; }
-    businessSetup() { return { message: 'business setup updated' }; }
+    async basicInfo(req, body) {
+        const data = {};
+        if (body.name !== undefined)
+            data.name = body.name;
+        if (body.translations !== undefined)
+            data.translations = body.translations;
+        if (body.contact_number !== undefined)
+            data.phone = body.contact_number;
+        if (body.phone !== undefined)
+            data.phone = body.phone;
+        if (body.address !== undefined)
+            data.address = body.address;
+        if (body.gst !== undefined)
+            data.gst = body.gst;
+        if (body.gst_status !== undefined)
+            data.gst_status = !!Number(body.gst_status);
+        if (body.minimum_order !== undefined)
+            data.minimum_order = Number(body.minimum_order);
+        if (Object.keys(data).length === 0)
+            return { message: 'nothing to update' };
+        data.updated_at = new Date();
+        if (this.useMongo()) {
+            await this.mongo.updateOne('restaurants', { mysql_vendor_id: Number(req.actor.id) }, data);
+            return { message: 'basic info updated' };
+        }
+        const r = await this.prisma.restaurants.findFirst({ where: { vendor_id: req.actor.id }, select: { id: true } });
+        if (r)
+            await this.prisma.restaurants.update({
+                where: { id: r.id },
+                data: data,
+            });
+        return { message: 'basic info updated' };
+    }
+    async businessSetup(req, body) {
+        const data = {};
+        for (const k of ['minimum_order', 'minimum_shipping_charge']) {
+            if (body[k] !== undefined)
+                data[k] = Number(body[k]);
+        }
+        for (const k of ['delivery', 'take_away', 'free_delivery', 'veg', 'non_veg', 'self_delivery_system']) {
+            if (body[k] !== undefined)
+                data[k] = !!Number(body[k]);
+        }
+        if (body.restaurant_model !== undefined)
+            data.restaurant_model = body.restaurant_model;
+        if (body.delivery_time !== undefined)
+            data.delivery_time = body.delivery_time;
+        if (Object.keys(data).length === 0)
+            return { message: 'nothing to update' };
+        data.updated_at = new Date();
+        if (this.useMongo()) {
+            await this.mongo.updateOne('restaurants', { mysql_vendor_id: Number(req.actor.id) }, data);
+        }
+        return { message: 'business setup updated' };
+    }
     addDineInTable() { return { message: 'added' }; }
     remove() { return { message: 'Not available in demo' }; }
     shapeOrder(rIn, detailsCount) {
@@ -476,14 +529,132 @@ let VendorExtrasController = class VendorExtrasController {
     getWithdrawMethods() { return this.withdrawMethods(); }
     getWithdrawList() { return { data: [], total_size: 0 }; }
     requestWithdraw() { return { message: 'withdraw requested' }; }
-    earningReport() { return { total: 0, today: 0, this_week: 0, this_month: 0 }; }
-    orderReport() { return { delivered: 0, canceled: 0, returned: 0 }; }
-    foodReport() { return { data: [] }; }
-    campaignReport() { return { data: [] }; }
-    taxReport() { return { data: [], total: 0 }; }
+    async vendorOrdersForReports(req) {
+        if (!this.useMongo())
+            return [];
+        const r = await this.mongo.findOne('restaurants', { mysql_vendor_id: Number(req.actor.id) });
+        if (!r)
+            return [];
+        return this.mongo.findMany('orders', { mysql_restaurant_id: Number(r.mysql_id) });
+    }
+    async earningReport(req) {
+        const orders = await this.vendorOrdersForReports(req);
+        const now = Date.now(), dayMs = 86_400_000;
+        let total = 0, today = 0, week = 0, month = 0;
+        for (const o of orders) {
+            if (o.order_status !== 'delivered')
+                continue;
+            const earn = Number(o.order_amount ?? 0) - Number(o.delivery_charge ?? 0);
+            total += earn;
+            const ts = o.created_at ? new Date(o.created_at).getTime() : 0;
+            if (!Number.isFinite(ts) || ts === 0)
+                continue;
+            const age = now - ts;
+            if (age <= dayMs)
+                today += earn;
+            if (age <= 7 * dayMs)
+                week += earn;
+            if (age <= 30 * dayMs)
+                month += earn;
+        }
+        return { total, today, this_week: week, this_month: month };
+    }
+    async orderReport(req) {
+        const orders = await this.vendorOrdersForReports(req);
+        let delivered = 0, canceled = 0, returned = 0, totalAmount = 0;
+        const byDay = {};
+        for (const o of orders) {
+            if (o.order_status === 'delivered') {
+                delivered++;
+                totalAmount += Number(o.order_amount ?? 0);
+            }
+            if (o.order_status === 'canceled')
+                canceled++;
+            if (o.order_status === 'refunded')
+                returned++;
+            const dt = o.created_at ? new Date(o.created_at).toISOString().slice(0, 10) : null;
+            if (dt)
+                byDay[dt] = (byDay[dt] || 0) + 1;
+        }
+        return {
+            delivered, canceled, returned, total_orders: orders.length, total_amount: totalAmount,
+            data: Object.entries(byDay).sort().map(([day, count]) => ({ day, count })),
+        };
+    }
+    async foodReport(req) {
+        const orders = await this.vendorOrdersForReports(req);
+        const orderIds = orders.map((o) => Number(o.mysql_id));
+        if (!this.useMongo() || orderIds.length === 0)
+            return { data: [], total_data: [] };
+        const items = await this.mongo.findMany('order_details', { order_id: { $in: orderIds } });
+        const byFood = {};
+        for (const it of items) {
+            const fid = Number(it.food_id ?? 0);
+            if (!fid)
+                continue;
+            const qty = Number(it.quantity ?? 1);
+            const price = Number(it.price ?? 0);
+            if (!byFood[fid])
+                byFood[fid] = { food_id: fid, total_sold_quantity: 0, total_amount: 0 };
+            byFood[fid].total_sold_quantity += qty;
+            byFood[fid].total_amount += qty * price;
+        }
+        const sorted = Object.values(byFood).sort((a, b) => b.total_sold_quantity - a.total_sold_quantity);
+        return { data: sorted, total_data: sorted };
+    }
+    campaignReport() { return { data: [], total_amount: 0, total_orders: 0 }; }
+    async taxReport(req) {
+        const orders = await this.vendorOrdersForReports(req);
+        let total = 0;
+        const data = orders
+            .filter((o) => o.order_status === 'delivered')
+            .map((o) => {
+            const tax = Number(o.total_tax_amount ?? 0);
+            total += tax;
+            return {
+                order_id: Number(o.mysql_id),
+                order_amount: Number(o.order_amount ?? 0),
+                tax_amount: tax,
+                created_at: o.created_at ?? null,
+            };
+        });
+        return { data, total };
+    }
     disbursementReport() { return { data: [], total: 0 }; }
-    expenseReport() { return { data: [], total: 0 }; }
-    transactionReport() { return { data: [], total: 0 }; }
+    async expenseReport(req) {
+        const orders = await this.vendorOrdersForReports(req);
+        let total = 0;
+        const data = orders
+            .filter((o) => o.order_status === 'delivered')
+            .map((o) => {
+            const commission = Number(o.order_amount ?? 0) * 0.10;
+            total += commission;
+            return {
+                order_id: Number(o.mysql_id),
+                order_amount: Number(o.order_amount ?? 0),
+                commission_amount: +commission.toFixed(2),
+                created_at: o.created_at ?? null,
+            };
+        });
+        return { data, total: +total.toFixed(2) };
+    }
+    async transactionReport(req) {
+        const orders = await this.vendorOrdersForReports(req);
+        let total = 0;
+        const data = orders.map((o) => {
+            const amt = Number(o.order_amount ?? 0);
+            total += amt;
+            return {
+                order_id: Number(o.mysql_id),
+                order_amount: amt,
+                payment_method: o.payment_method ?? null,
+                payment_status: o.payment_status ?? null,
+                order_status: o.order_status ?? null,
+                created_at: o.created_at ?? null,
+            };
+        });
+        return { data, total };
+    }
     generateStatement() { return { message: 'not available in demo' }; }
     searchedFood() { return { products: [] }; }
     async vendorNotifications() {
@@ -527,9 +698,33 @@ let VendorExtrasController = class VendorExtrasController {
     adStatus() { return { message: 'status updated' }; }
     adCopy() { return { message: 'copied' }; }
     adDelete() { return { message: 'deleted' }; }
-    businessPlan() { return { commission: 1, subscription: 0 }; }
-    packageView() { return { package: null, transactions: [] }; }
-    subscriptionTransaction() { return { message: 'not available' }; }
+    async businessPlan(req) {
+        const r = this.useMongo()
+            ? await this.mongo.findOne('restaurants', { mysql_vendor_id: Number(req.actor.id) })
+            : null;
+        return {
+            commission: 1,
+            subscription: 0,
+            commission_rate: r?.comission ?? 0,
+            restaurant_id: r ? Number(r.mysql_id) : null,
+            restaurant_name: r?.name ?? null,
+        };
+    }
+    packageView() {
+        return {
+            package: {
+                id: 1, package_name: 'Commission-base Plan',
+                commission_status: 1, commission: 0,
+                package_type: 'commission', validity: 0,
+                price: 0, plan_type: 'free',
+            },
+            transactions: [],
+        };
+    }
+    subscriptionTransactionsList() {
+        return { transactions: [], total_size: 0, limit: 10, offset: 1 };
+    }
+    subscriptionTransaction() { return { message: 'recorded' }; }
     subscriptionPayment() { return { redirect_url: null }; }
     cancelSubscription() { return { message: 'canceled' }; }
     async schedule(req) {
@@ -614,16 +809,20 @@ __decorate([
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('update-basic-info'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "basicInfo", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('update-business-setup'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "businessSetup", null);
 __decorate([
     (0, common_1.HttpCode)(200),
@@ -981,21 +1180,24 @@ __decorate([
 ], VendorExtrasController.prototype, "requestWithdraw", null);
 __decorate([
     (0, common_1.Get)('earning-report'),
+    __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "earningReport", null);
 __decorate([
     (0, common_1.Get)('get-order-report'),
+    __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "orderReport", null);
 __decorate([
     (0, common_1.Get)('get-food-wise-report'),
+    __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "foodReport", null);
 __decorate([
     (0, common_1.Get)('get-campaign-order-report'),
@@ -1005,9 +1207,10 @@ __decorate([
 ], VendorExtrasController.prototype, "campaignReport", null);
 __decorate([
     (0, common_1.Get)('get-tax-report'),
+    __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "taxReport", null);
 __decorate([
     (0, common_1.Get)('get-disbursement-report'),
@@ -1017,15 +1220,17 @@ __decorate([
 ], VendorExtrasController.prototype, "disbursementReport", null);
 __decorate([
     (0, common_1.Get)('get-expense'),
+    __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "expenseReport", null);
 __decorate([
     (0, common_1.Get)('get-transaction-report'),
+    __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "transactionReport", null);
 __decorate([
     (0, common_1.HttpCode)(200),
@@ -1141,9 +1346,10 @@ __decorate([
 ], VendorExtrasController.prototype, "adDelete", null);
 __decorate([
     (0, common_1.Get)('business_plan'),
+    __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "businessPlan", null);
 __decorate([
     (0, common_1.Get)('package-view'),
@@ -1151,6 +1357,12 @@ __decorate([
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", void 0)
 ], VendorExtrasController.prototype, "packageView", null);
+__decorate([
+    (0, common_1.Get)('subscription-transaction'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], VendorExtrasController.prototype, "subscriptionTransactionsList", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('subscription-transaction'),

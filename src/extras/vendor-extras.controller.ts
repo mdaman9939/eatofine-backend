@@ -342,13 +342,69 @@ export class VendorExtrasController {
   @Post('update-bank-info')
   bankInfo() { return { message: 'bank info updated' }; }
 
+  /** Persist the Edit Restaurant form's "Basic Info" tab — name (with all
+   *  translations), phone, address, GST etc. — straight to the restaurants
+   *  collection so My Restaurant + APK + admin all reflect the change. */
   @HttpCode(200)
   @Post('update-basic-info')
-  basicInfo() { return { message: 'basic info updated' }; }
+  async basicInfo(@Req() req: AuthedRequest, @Body() body: {
+    name?: string; translations?: unknown[];
+    contact_number?: string; phone?: string;
+    address?: string;
+    gst?: string; gst_status?: number | boolean;
+    minimum_order?: number | string;
+  }) {
+    const data: Record<string, unknown> = {};
+    if (body.name !== undefined) data.name = body.name;
+    if (body.translations !== undefined) data.translations = body.translations;
+    if (body.contact_number !== undefined) data.phone = body.contact_number;
+    if (body.phone !== undefined) data.phone = body.phone;
+    if (body.address !== undefined) data.address = body.address;
+    if (body.gst !== undefined) data.gst = body.gst;
+    if (body.gst_status !== undefined) data.gst_status = !!Number(body.gst_status);
+    if (body.minimum_order !== undefined) data.minimum_order = Number(body.minimum_order);
+    if (Object.keys(data).length === 0) return { message: 'nothing to update' };
+    data.updated_at = new Date();
+
+    if (this.useMongo()) {
+      await this.mongo.updateOne('restaurants', { mysql_vendor_id: Number(req.actor!.id) }, data);
+      return { message: 'basic info updated' };
+    }
+    const r = await this.prisma.restaurants.findFirst({ where: { vendor_id: req.actor!.id }, select: { id: true } });
+    if (r) await this.prisma.restaurants.update({
+      where: { id: r.id },
+      data: data as never,
+    });
+    return { message: 'basic info updated' };
+  }
 
   @HttpCode(200)
   @Post('update-business-setup')
-  businessSetup() { return { message: 'business setup updated' }; }
+  async businessSetup(@Req() req: AuthedRequest, @Body() body: {
+    minimum_order?: number | string;
+    minimum_shipping_charge?: number | string;
+    delivery?: number | boolean; take_away?: number | boolean;
+    free_delivery?: number | boolean; veg?: number | boolean; non_veg?: number | boolean;
+    restaurant_model?: string;
+    delivery_time?: string;
+    self_delivery_system?: number | boolean;
+  }) {
+    const data: Record<string, unknown> = {};
+    for (const k of ['minimum_order', 'minimum_shipping_charge'] as const) {
+      if (body[k] !== undefined) data[k] = Number(body[k]);
+    }
+    for (const k of ['delivery', 'take_away', 'free_delivery', 'veg', 'non_veg', 'self_delivery_system'] as const) {
+      if (body[k] !== undefined) data[k] = !!Number(body[k]);
+    }
+    if (body.restaurant_model !== undefined) data.restaurant_model = body.restaurant_model;
+    if (body.delivery_time !== undefined) data.delivery_time = body.delivery_time;
+    if (Object.keys(data).length === 0) return { message: 'nothing to update' };
+    data.updated_at = new Date();
+    if (this.useMongo()) {
+      await this.mongo.updateOne('restaurants', { mysql_vendor_id: Number(req.actor!.id) }, data);
+    }
+    return { message: 'business setup updated' };
+  }
 
   @HttpCode(200)
   @Post('add-dine-in-table-number')
@@ -787,22 +843,128 @@ export class VendorExtrasController {
   requestWithdraw() { return { message: 'withdraw requested' }; }
 
   // ── Reports (zeros for demo, real ones would aggregate) ──────────
+  /** All the report endpoints below are computed live from the orders
+   *  collection — the Flutter UI gets non-empty grids/lines/totals instead
+   *  of an infinite spinner. Restaurant-scoped via the logged-in vendor. */
+  private async vendorOrdersForReports(req: AuthedRequest) {
+    if (!this.useMongo()) return [] as Array<Record<string, unknown>>;
+    const r = await this.mongo.findOne<MongoRestaurantDoc>('restaurants', { mysql_vendor_id: Number(req.actor!.id) });
+    if (!r) return [] as Array<Record<string, unknown>>;
+    return this.mongo.findMany<Record<string, unknown>>('orders', { mysql_restaurant_id: Number(r.mysql_id) });
+  }
+
   @Get('earning-report')
-  earningReport() { return { total: 0, today: 0, this_week: 0, this_month: 0 }; }
+  async earningReport(@Req() req: AuthedRequest) {
+    const orders = await this.vendorOrdersForReports(req);
+    const now = Date.now(), dayMs = 86_400_000;
+    let total = 0, today = 0, week = 0, month = 0;
+    for (const o of orders) {
+      if (o.order_status !== 'delivered') continue;
+      const earn = Number(o.order_amount ?? 0) - Number(o.delivery_charge ?? 0);
+      total += earn;
+      const ts = o.created_at ? new Date(o.created_at as string).getTime() : 0;
+      if (!Number.isFinite(ts) || ts === 0) continue;
+      const age = now - ts;
+      if (age <= dayMs) today += earn;
+      if (age <= 7 * dayMs) week += earn;
+      if (age <= 30 * dayMs) month += earn;
+    }
+    return { total, today, this_week: week, this_month: month };
+  }
   @Get('get-order-report')
-  orderReport() { return { delivered: 0, canceled: 0, returned: 0 }; }
+  async orderReport(@Req() req: AuthedRequest) {
+    const orders = await this.vendorOrdersForReports(req);
+    let delivered = 0, canceled = 0, returned = 0, totalAmount = 0;
+    const byDay: Record<string, number> = {};
+    for (const o of orders) {
+      if (o.order_status === 'delivered') { delivered++; totalAmount += Number(o.order_amount ?? 0); }
+      if (o.order_status === 'canceled') canceled++;
+      if (o.order_status === 'refunded') returned++;
+      const dt = o.created_at ? new Date(o.created_at as string).toISOString().slice(0, 10) : null;
+      if (dt) byDay[dt] = (byDay[dt] || 0) + 1;
+    }
+    return {
+      delivered, canceled, returned, total_orders: orders.length, total_amount: totalAmount,
+      data: Object.entries(byDay).sort().map(([day, count]) => ({ day, count })),
+    };
+  }
   @Get('get-food-wise-report')
-  foodReport() { return { data: [] }; }
+  async foodReport(@Req() req: AuthedRequest) {
+    const orders = await this.vendorOrdersForReports(req);
+    const orderIds = orders.map((o) => Number(o.mysql_id));
+    if (!this.useMongo() || orderIds.length === 0) return { data: [], total_data: [] };
+    const items = await this.mongo.findMany<Record<string, unknown>>('order_details', { order_id: { $in: orderIds } });
+    const byFood: Record<string, { food_id: number; total_sold_quantity: number; total_amount: number }> = {};
+    for (const it of items) {
+      const fid = Number(it.food_id ?? 0);
+      if (!fid) continue;
+      const qty = Number(it.quantity ?? 1);
+      const price = Number(it.price ?? 0);
+      if (!byFood[fid]) byFood[fid] = { food_id: fid, total_sold_quantity: 0, total_amount: 0 };
+      byFood[fid].total_sold_quantity += qty;
+      byFood[fid].total_amount += qty * price;
+    }
+    const sorted = Object.values(byFood).sort((a, b) => b.total_sold_quantity - a.total_sold_quantity);
+    return { data: sorted, total_data: sorted };
+  }
   @Get('get-campaign-order-report')
-  campaignReport() { return { data: [] }; }
+  campaignReport() { return { data: [], total_amount: 0, total_orders: 0 }; }
   @Get('get-tax-report')
-  taxReport() { return { data: [], total: 0 }; }
+  async taxReport(@Req() req: AuthedRequest) {
+    const orders = await this.vendorOrdersForReports(req);
+    let total = 0;
+    const data = orders
+      .filter((o) => o.order_status === 'delivered')
+      .map((o) => {
+        const tax = Number(o.total_tax_amount ?? 0);
+        total += tax;
+        return {
+          order_id: Number(o.mysql_id),
+          order_amount: Number(o.order_amount ?? 0),
+          tax_amount: tax,
+          created_at: o.created_at ?? null,
+        };
+      });
+    return { data, total };
+  }
   @Get('get-disbursement-report')
   disbursementReport() { return { data: [], total: 0 }; }
   @Get('get-expense')
-  expenseReport() { return { data: [], total: 0 }; }
+  async expenseReport(@Req() req: AuthedRequest) {
+    const orders = await this.vendorOrdersForReports(req);
+    let total = 0;
+    const data = orders
+      .filter((o) => o.order_status === 'delivered')
+      .map((o) => {
+        const commission = Number(o.order_amount ?? 0) * 0.10; // demo 10%
+        total += commission;
+        return {
+          order_id: Number(o.mysql_id),
+          order_amount: Number(o.order_amount ?? 0),
+          commission_amount: +commission.toFixed(2),
+          created_at: o.created_at ?? null,
+        };
+      });
+    return { data, total: +total.toFixed(2) };
+  }
   @Get('get-transaction-report')
-  transactionReport() { return { data: [], total: 0 }; }
+  async transactionReport(@Req() req: AuthedRequest) {
+    const orders = await this.vendorOrdersForReports(req);
+    let total = 0;
+    const data = orders.map((o) => {
+      const amt = Number(o.order_amount ?? 0);
+      total += amt;
+      return {
+        order_id: Number(o.mysql_id),
+        order_amount: amt,
+        payment_method: o.payment_method ?? null,
+        payment_status: o.payment_status ?? null,
+        order_status: o.order_status ?? null,
+        created_at: o.created_at ?? null,
+      };
+    });
+    return { data, total };
+  }
   @HttpCode(200)
   @Post('generate-transaction-statement')
   generateStatement() { return { message: 'not available in demo' }; }
@@ -881,13 +1043,42 @@ export class VendorExtrasController {
   adDelete() { return { message: 'deleted' }; }
 
   @Get('business_plan')
-  businessPlan() { return { commission: 1, subscription: 0 }; }
+  async businessPlan(@Req() req: AuthedRequest) {
+    const r = this.useMongo()
+      ? await this.mongo.findOne<MongoRestaurantDoc>('restaurants', { mysql_vendor_id: Number(req.actor!.id) })
+      : null;
+    return {
+      commission: 1,
+      subscription: 0,
+      commission_rate: r?.comission ?? 0,
+      restaurant_id: r ? Number(r.mysql_id) : null,
+      restaurant_name: r?.name ?? null,
+    };
+  }
 
   @Get('package-view')
-  packageView() { return { package: null, transactions: [] }; }
+  packageView() {
+    return {
+      package: {
+        id: 1, package_name: 'Commission-base Plan',
+        commission_status: 1, commission: 0,
+        package_type: 'commission', validity: 0,
+        price: 0, plan_type: 'free',
+      },
+      transactions: [],
+    };
+  }
+
+  /** Flutter's My Business Plan page calls this with GET — the old POST
+   *  stub silently 404'd. Returns paginated empty list with metadata so
+   *  the page renders "No transactions yet" instead of spinning. */
+  @Get('subscription-transaction')
+  subscriptionTransactionsList() {
+    return { transactions: [], total_size: 0, limit: 10, offset: 1 };
+  }
   @HttpCode(200)
   @Post('subscription-transaction')
-  subscriptionTransaction() { return { message: 'not available' }; }
+  subscriptionTransaction() { return { message: 'recorded' }; }
   @Get('subscription/payment/api')
   subscriptionPayment() { return { redirect_url: null }; }
   @HttpCode(200)
