@@ -14,6 +14,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.VendorExtrasController = void 0;
 const common_1 = require("@nestjs/common");
+const platform_express_1 = require("@nestjs/platform-express");
 const auth_guard_1 = require("../auth/auth.guard");
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
@@ -192,24 +193,31 @@ let VendorExtrasController = class VendorExtrasController {
     toggleOpen() { return { message: 'updated' }; }
     announce() { return { message: 'announcement updated' }; }
     bankInfo() { return { message: 'bank info updated' }; }
-    async basicInfo(req, body) {
+    async basicInfo(req, body = {}) {
+        const b = body ?? {};
         const data = {};
-        if (body.name !== undefined)
-            data.name = body.name;
-        if (body.translations !== undefined)
-            data.translations = body.translations;
-        if (body.contact_number !== undefined)
-            data.phone = body.contact_number;
-        if (body.phone !== undefined)
-            data.phone = body.phone;
-        if (body.address !== undefined)
-            data.address = body.address;
-        if (body.gst !== undefined)
-            data.gst = body.gst;
-        if (body.gst_status !== undefined)
-            data.gst_status = !!Number(body.gst_status);
-        if (body.minimum_order !== undefined)
-            data.minimum_order = Number(body.minimum_order);
+        if (b.name !== undefined)
+            data.name = String(b.name);
+        if (b.translations !== undefined)
+            data.translations = b.translations;
+        if (b.contact_number !== undefined)
+            data.phone = String(b.contact_number);
+        if (b.phone !== undefined)
+            data.phone = String(b.phone);
+        if (b.address !== undefined)
+            data.address = String(b.address);
+        if (b.gst !== undefined)
+            data.gst = String(b.gst);
+        if (b.gst_status !== undefined)
+            data.gst_status = !!Number(b.gst_status);
+        if (b.minimum_order !== undefined)
+            data.minimum_order = Number(b.minimum_order);
+        if (b.meta_title !== undefined)
+            data.meta_title = String(b.meta_title);
+        if (b.meta_description !== undefined)
+            data.meta_description = String(b.meta_description);
+        if (b.meta_keywords !== undefined)
+            data.meta_keywords = String(b.meta_keywords);
         if (Object.keys(data).length === 0)
             return { message: 'nothing to update' };
         data.updated_at = new Date();
@@ -225,20 +233,21 @@ let VendorExtrasController = class VendorExtrasController {
             });
         return { message: 'basic info updated' };
     }
-    async businessSetup(req, body) {
+    async businessSetup(req, body = {}) {
+        const b = body ?? {};
         const data = {};
         for (const k of ['minimum_order', 'minimum_shipping_charge']) {
-            if (body[k] !== undefined)
-                data[k] = Number(body[k]);
+            if (b[k] !== undefined)
+                data[k] = Number(b[k]);
         }
         for (const k of ['delivery', 'take_away', 'free_delivery', 'veg', 'non_veg', 'self_delivery_system']) {
-            if (body[k] !== undefined)
-                data[k] = !!Number(body[k]);
+            if (b[k] !== undefined)
+                data[k] = !!Number(b[k]);
         }
-        if (body.restaurant_model !== undefined)
-            data.restaurant_model = body.restaurant_model;
-        if (body.delivery_time !== undefined)
-            data.delivery_time = body.delivery_time;
+        if (b.restaurant_model !== undefined)
+            data.restaurant_model = String(b.restaurant_model);
+        if (b.delivery_time !== undefined)
+            data.delivery_time = String(b.delivery_time);
         if (Object.keys(data).length === 0)
             return { message: 'nothing to update' };
         data.updated_at = new Date();
@@ -809,6 +818,11 @@ __decorate([
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('update-basic-info'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.FileFieldsInterceptor)([
+        { name: 'logo', maxCount: 1 },
+        { name: 'cover_photo', maxCount: 1 },
+        { name: 'meta_image', maxCount: 1 },
+    ], { limits: { fileSize: 5 * 1024 * 1024 } })),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -818,6 +832,10 @@ __decorate([
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('update-business-setup'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.FileFieldsInterceptor)([
+        { name: 'logo', maxCount: 1 },
+        { name: 'cover_photo', maxCount: 1 },
+    ], { limits: { fileSize: 5 * 1024 * 1024 } })),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),

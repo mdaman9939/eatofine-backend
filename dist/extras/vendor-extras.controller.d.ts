@@ -167,30 +167,10 @@ export declare class VendorExtrasController {
     bankInfo(): {
         message: string;
     };
-    basicInfo(req: AuthedRequest, body: {
-        name?: string;
-        translations?: unknown[];
-        contact_number?: string;
-        phone?: string;
-        address?: string;
-        gst?: string;
-        gst_status?: number | boolean;
-        minimum_order?: number | string;
-    }): Promise<{
+    basicInfo(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
         message: string;
     }>;
-    businessSetup(req: AuthedRequest, body: {
-        minimum_order?: number | string;
-        minimum_shipping_charge?: number | string;
-        delivery?: number | boolean;
-        take_away?: number | boolean;
-        free_delivery?: number | boolean;
-        veg?: number | boolean;
-        non_veg?: number | boolean;
-        restaurant_model?: string;
-        delivery_time?: string;
-        self_delivery_system?: number | boolean;
-    }): Promise<{
+    businessSetup(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
         message: string;
     }>;
     addDineInTable(): {

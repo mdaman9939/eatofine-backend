@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Post, Query, Req, UseGuards, HttpCode } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Post, Query, Req, UseGuards, HttpCode, UseInterceptors } from '@nestjs/common';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { AuthGuard, RequireAuth } from '../auth/auth.guard';
 import type { AuthedRequest } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
@@ -342,27 +343,32 @@ export class VendorExtrasController {
   @Post('update-bank-info')
   bankInfo() { return { message: 'bank info updated' }; }
 
-  /** Persist the Edit Restaurant form's "Basic Info" tab — name (with all
-   *  translations), phone, address, GST etc. — straight to the restaurants
-   *  collection so My Restaurant + APK + admin all reflect the change. */
+  /** Persist the Edit Restaurant form's "Basic Info" tab. Flutter sends
+   *  this as multipart/form-data (logo + cover + meta_image files alongside
+   *  text fields), so the FileFieldsInterceptor is required to populate
+   *  `body` — without it `body` is undefined and we crash with the famous
+   *  "Cannot read properties of undefined (reading 'name')". */
   @HttpCode(200)
   @Post('update-basic-info')
-  async basicInfo(@Req() req: AuthedRequest, @Body() body: {
-    name?: string; translations?: unknown[];
-    contact_number?: string; phone?: string;
-    address?: string;
-    gst?: string; gst_status?: number | boolean;
-    minimum_order?: number | string;
-  }) {
+  @UseInterceptors(FileFieldsInterceptor([
+    { name: 'logo', maxCount: 1 },
+    { name: 'cover_photo', maxCount: 1 },
+    { name: 'meta_image', maxCount: 1 },
+  ], { limits: { fileSize: 5 * 1024 * 1024 } }))
+  async basicInfo(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
+    const b = body ?? {};
     const data: Record<string, unknown> = {};
-    if (body.name !== undefined) data.name = body.name;
-    if (body.translations !== undefined) data.translations = body.translations;
-    if (body.contact_number !== undefined) data.phone = body.contact_number;
-    if (body.phone !== undefined) data.phone = body.phone;
-    if (body.address !== undefined) data.address = body.address;
-    if (body.gst !== undefined) data.gst = body.gst;
-    if (body.gst_status !== undefined) data.gst_status = !!Number(body.gst_status);
-    if (body.minimum_order !== undefined) data.minimum_order = Number(body.minimum_order);
+    if (b.name !== undefined) data.name = String(b.name);
+    if (b.translations !== undefined) data.translations = b.translations;
+    if (b.contact_number !== undefined) data.phone = String(b.contact_number);
+    if (b.phone !== undefined) data.phone = String(b.phone);
+    if (b.address !== undefined) data.address = String(b.address);
+    if (b.gst !== undefined) data.gst = String(b.gst);
+    if (b.gst_status !== undefined) data.gst_status = !!Number(b.gst_status);
+    if (b.minimum_order !== undefined) data.minimum_order = Number(b.minimum_order);
+    if (b.meta_title !== undefined) data.meta_title = String(b.meta_title);
+    if (b.meta_description !== undefined) data.meta_description = String(b.meta_description);
+    if (b.meta_keywords !== undefined) data.meta_keywords = String(b.meta_keywords);
     if (Object.keys(data).length === 0) return { message: 'nothing to update' };
     data.updated_at = new Date();
 
@@ -378,26 +384,25 @@ export class VendorExtrasController {
     return { message: 'basic info updated' };
   }
 
+  /** Same multipart treatment for the Business Setup tab so it doesn't 500
+   *  when Flutter sends form-data with the restaurant_logo file. */
   @HttpCode(200)
   @Post('update-business-setup')
-  async businessSetup(@Req() req: AuthedRequest, @Body() body: {
-    minimum_order?: number | string;
-    minimum_shipping_charge?: number | string;
-    delivery?: number | boolean; take_away?: number | boolean;
-    free_delivery?: number | boolean; veg?: number | boolean; non_veg?: number | boolean;
-    restaurant_model?: string;
-    delivery_time?: string;
-    self_delivery_system?: number | boolean;
-  }) {
+  @UseInterceptors(FileFieldsInterceptor([
+    { name: 'logo', maxCount: 1 },
+    { name: 'cover_photo', maxCount: 1 },
+  ], { limits: { fileSize: 5 * 1024 * 1024 } }))
+  async businessSetup(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
+    const b = body ?? {};
     const data: Record<string, unknown> = {};
     for (const k of ['minimum_order', 'minimum_shipping_charge'] as const) {
-      if (body[k] !== undefined) data[k] = Number(body[k]);
+      if (b[k] !== undefined) data[k] = Number(b[k]);
     }
     for (const k of ['delivery', 'take_away', 'free_delivery', 'veg', 'non_veg', 'self_delivery_system'] as const) {
-      if (body[k] !== undefined) data[k] = !!Number(body[k]);
+      if (b[k] !== undefined) data[k] = !!Number(b[k]);
     }
-    if (body.restaurant_model !== undefined) data.restaurant_model = body.restaurant_model;
-    if (body.delivery_time !== undefined) data.delivery_time = body.delivery_time;
+    if (b.restaurant_model !== undefined) data.restaurant_model = String(b.restaurant_model);
+    if (b.delivery_time !== undefined) data.delivery_time = String(b.delivery_time);
     if (Object.keys(data).length === 0) return { message: 'nothing to update' };
     data.updated_at = new Date();
     if (this.useMongo()) {
