@@ -3,6 +3,34 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 
+/** Shared shape for the admin food create + update endpoints. */
+export interface FoodWriteBody {
+  name?: string;
+  description?: string;
+  price?: number;
+  restaurant_id?: number;
+  category_id?: number;
+  sub_category_id?: number | null;
+  discount?: number;
+  discount_type?: string;
+  tax?: number;
+  tax_type?: string;
+  veg?: boolean;
+  is_halal?: boolean;
+  recommended?: boolean;
+  stock_type?: string;
+  item_stock?: number;
+  maximum_cart_quantity?: number | null;
+  available_time_starts?: string;
+  available_time_ends?: string;
+  addon_ids?: number[] | string;
+  variations?: unknown[];
+  image?: string;
+  meta_title?: string | null;
+  meta_description?: string | null;
+  meta_image?: string | null;
+}
+
 const ORDER_STATUSES = [
   'pending',
   'confirmed',
@@ -740,7 +768,16 @@ export class AdminService {
 
   async updateRestaurant(
     id: number,
-    body: { name?: string; email?: string; phone?: string; address?: string; comission?: number; minimum_order?: number; status?: boolean; active?: boolean },
+    body: {
+      name?: string; email?: string; phone?: string; address?: string;
+      comission?: number; minimum_order?: number; status?: boolean; active?: boolean;
+      // Location (mirrors the Laravel admin restaurant form).
+      latitude?: string | number; longitude?: string | number;
+      // Vendor account password — only applied when a non-empty value is sent,
+      // so leaving the field blank keeps the existing password (same rule as
+      // Laravel's `strlen($request->password) > 1 ? bcrypt(...) : existing`).
+      password?: string;
+    },
   ) {
     const data: Record<string, unknown> = {};
     if (body.name !== undefined) data.name = body.name;
@@ -751,17 +788,150 @@ export class AdminService {
     if (body.minimum_order !== undefined) data.minimum_order = body.minimum_order;
     if (body.status !== undefined) data.status = body.status;
     if (body.active !== undefined) data.active = body.active;
-    if (Object.keys(data).length === 0) {
+    // Latitude / longitude are stored as strings (varchar) to match the
+    // Laravel schema. Validate ranges so a bad map pin can't be saved.
+    if (body.latitude !== undefined && body.latitude !== null && String(body.latitude) !== '') {
+      const lat = Number(body.latitude);
+      if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+        throw new BadRequestException({ errors: [{ code: 'latitude', message: 'Latitude must be between -90 and 90' }] });
+      }
+      data.latitude = String(body.latitude);
+    }
+    if (body.longitude !== undefined && body.longitude !== null && String(body.longitude) !== '') {
+      const lng = Number(body.longitude);
+      if (!Number.isFinite(lng) || lng < -180 || lng > 180) {
+        throw new BadRequestException({ errors: [{ code: 'longitude', message: 'Longitude must be between -180 and 180' }] });
+      }
+      data.longitude = String(body.longitude);
+    }
+
+    // A password is only a change when it's actually filled in.
+    const wantsPasswordChange = typeof body.password === 'string' && body.password.length > 1;
+    let passwordHash: string | null = null;
+    if (wantsPasswordChange) {
+      // Laravel $2y$ prefix so the existing vendor login flow can verify it.
+      passwordHash = (await bcrypt.hash(body.password as string, 10)).replace(/^\$2b\$/, '$2y$');
+    }
+
+    if (Object.keys(data).length === 0 && !wantsPasswordChange) {
       throw new BadRequestException({ errors: [{ code: 'body', message: 'no fields to update' }] });
     }
+
     if (this.useMongo()) {
-      const r = await this.mongo.findByMysqlId<{ mysql_id: number }>('restaurants', id);
+      const r = await this.mongo.findByMysqlId<{ mysql_id: number; mysql_vendor_id?: number }>('restaurants', id);
       if (!r) throw new NotFoundException({ errors: [{ code: 'restaurant', message: 'Restaurant not found' }] });
-      await this.mongo.updateOne('restaurants', { mysql_id: id }, data);
+      if (Object.keys(data).length > 0) {
+        await this.mongo.updateOne('restaurants', { mysql_id: id }, data);
+      }
+      if (passwordHash && r.mysql_vendor_id) {
+        await this.mongo.updateOne('vendors', { mysql_id: r.mysql_vendor_id }, { password: passwordHash });
+      }
       return { ok: true, id };
     }
-    await this.prisma.restaurants.update({ where: { id: BigInt(id) }, data });
+
+    const r = await this.prisma.restaurants.findUnique({ where: { id: BigInt(id) }, select: { vendor_id: true } });
+    if (!r) throw new NotFoundException({ errors: [{ code: 'restaurant', message: 'Restaurant not found' }] });
+    if (Object.keys(data).length > 0) {
+      await this.prisma.restaurants.update({ where: { id: BigInt(id) }, data });
+    }
+    if (passwordHash) {
+      await this.prisma.vendors.update({ where: { id: r.vendor_id }, data: { password: passwordHash } });
+    }
     return { ok: true, id };
+  }
+
+  /** Data for the restaurant detail page tabs (Foods / Orders / Reviews /
+   *  Wallet / Transactions). Everything is scoped to the one restaurant. */
+  async getRestaurantTabs(id: number, limit = 50) {
+    const rid = Number(id);
+    const empty = { foods: [], orders: [], reviews: [], transactions: [], wallet: { total_earning: 0, commission_paid: 0, delivered_count: 0, total_orders: 0, avg_rating: 0, rating_count: 0 } };
+    if (!this.useMongo()) return empty;
+
+    const restaurant = await this.mongo.findByMysqlId<{ mysql_id: number; comission?: number | null }>('restaurants', rid);
+    if (!restaurant) throw new NotFoundException({ errors: [{ code: 'restaurant', message: 'Restaurant not found' }] });
+    const commissionRate = Number(restaurant.comission ?? 0);
+
+    const [foods, orders, reviews, allOrders] = await Promise.all([
+      this.mongo.findMany<Record<string, unknown>>('foods', { mysql_restaurant_id: rid }, { sort: { mysql_id: -1 }, limit }),
+      this.mongo.findMany<Record<string, unknown>>('orders', { mysql_restaurant_id: rid }, { sort: { mysql_id: -1 }, limit }),
+      this.mongo.findMany<Record<string, unknown>>('reviews', { mysql_restaurant_id: rid }, { sort: { mysql_id: -1 }, limit }),
+      this.mongo.findMany<Record<string, unknown>>('orders', { mysql_restaurant_id: rid }),
+    ]);
+
+    // Reviewer names for the Reviews tab.
+    const userIds = Array.from(new Set(reviews.map((r) => Number(r.mysql_user_id)).filter(Boolean)));
+    const users = userIds.length
+      ? await this.mongo.findMany<{ mysql_id: number; f_name: string | null; l_name: string | null }>(
+          'users', { mysql_id: { $in: userIds } }, { projection: { mysql_id: 1, f_name: 1, l_name: 1 } as Record<string, 0 | 1> })
+      : [];
+    const userById = new Map(users.map((u) => [u.mysql_id, u]));
+
+    let totalEarning = 0, commissionPaid = 0, deliveredCount = 0, ratingSum = 0;
+    for (const o of allOrders) {
+      if (o.order_status === 'delivered' && o.payment_status === 'paid') {
+        const amt = Number(o.order_amount ?? 0);
+        totalEarning += amt;
+        commissionPaid += amt * (commissionRate / 100);
+        deliveredCount++;
+      }
+    }
+    for (const rv of reviews) ratingSum += Number(rv.rating ?? 0);
+
+    const transactions = allOrders
+      .filter((o) => o.payment_status === 'paid')
+      .sort((a, b) => Number(b.mysql_id) - Number(a.mysql_id))
+      .slice(0, limit)
+      .map((o) => {
+        const amt = Number(o.order_amount ?? 0);
+        return {
+          id: Number(o.mysql_id),
+          order_amount: amt,
+          commission: amt * (commissionRate / 100),
+          restaurant_earning: amt - amt * (commissionRate / 100),
+          order_status: o.order_status ?? null,
+          created_at: o.created_at ?? null,
+        };
+      });
+
+    return {
+      foods: foods.map((f) => ({
+        id: Number(f.mysql_id),
+        name: f.name ?? null,
+        price: Number(f.price ?? 0),
+        image: f.image ?? null,
+        status: f.status ?? true,
+        veg: f.veg ?? null,
+      })),
+      orders: orders.map((o) => ({
+        id: Number(o.mysql_id),
+        order_amount: Number(o.order_amount ?? 0),
+        order_status: o.order_status ?? null,
+        payment_status: o.payment_status ?? null,
+        order_type: o.order_type ?? null,
+        created_at: o.created_at ?? null,
+      })),
+      reviews: reviews.map((rv) => {
+        const u = userById.get(Number(rv.mysql_user_id));
+        return {
+          id: Number(rv.mysql_id),
+          rating: Number(rv.rating ?? 0),
+          comment: rv.comment ?? null,
+          reply: rv.reply ?? null,
+          food_id: rv.mysql_food_id ? Number(rv.mysql_food_id) : null,
+          customer: u ? `${u.f_name ?? ''} ${u.l_name ?? ''}`.trim() || null : null,
+        };
+      }),
+      transactions,
+      wallet: {
+        total_earning: totalEarning,
+        commission_paid: commissionPaid,
+        restaurant_earning: totalEarning - commissionPaid,
+        delivered_count: deliveredCount,
+        total_orders: allOrders.length,
+        avg_rating: reviews.length ? ratingSum / reviews.length : 0,
+        rating_count: reviews.length,
+      },
+    };
   }
 
   // ── Users / Vendors / Delivery men ─────────────────────────────────────
@@ -822,13 +992,28 @@ export class AdminService {
         login_medium?: string | null; created_at?: Date;
       }>('users', id);
       if (!u) throw new NotFoundException({ errors: [{ code: 'user', message: 'User not found' }] });
-      const [orderCount, spendAgg] = await Promise.all([
+      const [orderCount, spendAgg, allOrders, addresses, walletDoc] = await Promise.all([
         this.mongo.count('orders', { mysql_user_id: u.mysql_id }),
         this.mongo.aggregate<{ _id: null; total: number }>('orders', [
           { $match: { mysql_user_id: u.mysql_id, payment_status: 'paid' } },
           { $group: { _id: null, total: { $sum: '$order_amount' } } },
         ]),
+        this.mongo.findMany<Record<string, unknown>>('orders', { mysql_user_id: u.mysql_id }, { sort: { mysql_id: -1 }, limit: 200 }),
+        this.mongo.findMany<Record<string, unknown>>('customer_addresses', { mysql_user_id: u.mysql_id }, { limit: 20 }),
+        this.mongo.findOne<{ balance?: number }>('wallets', { mysql_user_id: u.mysql_id }),
       ]);
+
+      // Order status breakdown for the customer profile (delivered / ongoing /
+      // canceled / refunded), matching the Laravel customer detail page.
+      const breakdown = { delivered: 0, ongoing: 0, canceled: 0, refunded: 0 };
+      for (const o of allOrders) {
+        const s = String(o.order_status ?? '');
+        if (s === 'delivered') breakdown.delivered++;
+        else if (s === 'canceled') breakdown.canceled++;
+        else if (s === 'refunded' || s === 'refund_requested') breakdown.refunded++;
+        else breakdown.ongoing++;
+      }
+
       return {
         user: {
           id: u.mysql_id,
@@ -845,7 +1030,24 @@ export class AdminService {
         stats: {
           order_count: orderCount,
           total_spend: Number(spendAgg[0]?.total ?? 0),
+          wallet_balance: Number(walletDoc?.balance ?? 0),
+          avg_order_value: orderCount > 0 ? Number(spendAgg[0]?.total ?? 0) / orderCount : 0,
+          breakdown,
         },
+        addresses: addresses.map((a) => ({
+          id: Number(a.mysql_id),
+          address_type: a.address_type ?? null,
+          address: a.address ?? null,
+          contact_person_name: a.contact_person_name ?? null,
+          contact_person_number: a.contact_person_number ?? null,
+        })),
+        recent_orders: allOrders.slice(0, 15).map((o) => ({
+          id: Number(o.mysql_id),
+          order_amount: Number(o.order_amount ?? 0),
+          order_status: o.order_status ?? null,
+          payment_status: o.payment_status ?? null,
+          created_at: o.created_at ?? null,
+        })),
       };
     }
     const u = await this.prisma.users.findUnique({ where: { id: BigInt(id) } });
@@ -1439,6 +1641,10 @@ export class AdminService {
     expire_date?: string;
     limit?: number;
     coupon_type?: string;
+    // Targeting constraints (mirrors Laravel coupon scopes).
+    restaurant_id?: number | null;
+    zone_id?: number | null;
+    customer_id?: number | string | null;
   }) {
     if (!body.title || !body.code || typeof body.discount !== 'number') {
       throw new BadRequestException({
@@ -1464,6 +1670,10 @@ export class AdminService {
         expire_date: body.expire_date ? new Date(body.expire_date) : null,
         limit: body.limit ?? null,
         coupon_type: body.coupon_type ?? 'default',
+        mysql_restaurant_id: body.restaurant_id ? Number(body.restaurant_id) : null,
+        restaurant_id: body.restaurant_id ? Number(body.restaurant_id) : null,
+        mysql_zone_id: body.zone_id ? Number(body.zone_id) : null,
+        customer_id: body.customer_id !== undefined && body.customer_id !== null && body.customer_id !== '' ? String(body.customer_id) : null,
         status: true,
         created_by: 'admin',
         total_uses: 0,
@@ -1493,6 +1703,42 @@ export class AdminService {
       },
     });
     return { ok: true, id: Number(created.id) };
+  }
+
+  async updateCoupon(id: number, body: {
+    title?: string; discount?: number; discount_type?: string;
+    min_purchase?: number; max_discount?: number; start_date?: string;
+    expire_date?: string; limit?: number; coupon_type?: string;
+    restaurant_id?: number | null; zone_id?: number | null; status?: boolean;
+  }) {
+    const data: Record<string, unknown> = {};
+    if (body.title !== undefined) data.title = body.title;
+    if (body.discount !== undefined) data.discount = Number(body.discount);
+    if (body.discount_type !== undefined) data.discount_type = body.discount_type;
+    if (body.min_purchase !== undefined) data.min_purchase = Number(body.min_purchase);
+    if (body.max_discount !== undefined) data.max_discount = Number(body.max_discount);
+    if (body.start_date !== undefined) data.start_date = body.start_date ? new Date(body.start_date) : null;
+    if (body.expire_date !== undefined) data.expire_date = body.expire_date ? new Date(body.expire_date) : null;
+    if (body.limit !== undefined) data.limit = body.limit !== null ? Number(body.limit) : null;
+    if (body.coupon_type !== undefined) data.coupon_type = body.coupon_type;
+    if (body.restaurant_id !== undefined) {
+      data.mysql_restaurant_id = body.restaurant_id ? Number(body.restaurant_id) : null;
+      data.restaurant_id = body.restaurant_id ? Number(body.restaurant_id) : null;
+    }
+    if (body.zone_id !== undefined) data.mysql_zone_id = body.zone_id ? Number(body.zone_id) : null;
+    if (body.status !== undefined) data.status = body.status;
+    if (Object.keys(data).length === 0) throw new BadRequestException({ errors: [{ code: 'body', message: 'no fields to update' }] });
+    if (this.useMongo()) {
+      const c = await this.mongo.findByMysqlId<{ mysql_id: number }>('coupons', id);
+      if (!c) throw new NotFoundException({ errors: [{ code: 'coupon', message: 'Coupon not found' }] });
+      data.updated_at = new Date();
+      await this.mongo.updateOne('coupons', { mysql_id: id }, data);
+      return { ok: true, id };
+    }
+    const c = await this.prisma.coupons.findUnique({ where: { id: BigInt(id) }, select: { id: true } });
+    if (!c) throw new NotFoundException({ errors: [{ code: 'coupon', message: 'Coupon not found' }] });
+    await this.prisma.coupons.update({ where: { id: c.id }, data: data as never });
+    return { ok: true, id };
   }
 
   async updateCouponStatus(id: number, status: boolean) {
@@ -1584,6 +1830,34 @@ export class AdminService {
       },
     });
     return { ok: true, id: Number(created.id) };
+  }
+
+  async updateBanner(id: number, body: { title?: string; type?: string; zone_id?: number; data?: string; image?: string | null; status?: boolean }) {
+    const data: Record<string, unknown> = {};
+    if (body.title !== undefined) data.title = body.title;
+    if (body.type !== undefined) data.type = body.type;
+    if (body.zone_id !== undefined) {
+      data.zone_id = Number(body.zone_id);
+      data.mysql_zone_id = Number(body.zone_id);
+    }
+    if (body.data !== undefined) data.data = body.data;
+    if (body.image !== undefined && body.image) data.image = body.image;
+    if (body.status !== undefined) data.status = body.status;
+    if (Object.keys(data).length === 0) throw new BadRequestException({ errors: [{ code: 'body', message: 'no fields to update' }] });
+    if (this.useMongo()) {
+      const b = await this.mongo.findByMysqlId<{ mysql_id: number }>('banners', id);
+      if (!b) throw new NotFoundException({ errors: [{ code: 'banner', message: 'Banner not found' }] });
+      data.updated_at = new Date();
+      await this.mongo.updateOne('banners', { mysql_id: id }, data);
+      return { ok: true, id };
+    }
+    const b = await this.prisma.banners.findUnique({ where: { id: BigInt(id) }, select: { id: true } });
+    if (!b) throw new NotFoundException({ errors: [{ code: 'banner', message: 'Banner not found' }] });
+    const prismaData = { ...data };
+    if (prismaData.zone_id !== undefined) prismaData.zone_id = BigInt(Number(body.zone_id));
+    delete (prismaData as { mysql_zone_id?: unknown }).mysql_zone_id;
+    await this.prisma.banners.update({ where: { id: b.id }, data: prismaData as never });
+    return { ok: true, id };
   }
 
   async updateBannerStatus(id: number, status: boolean) {
@@ -1750,30 +2024,108 @@ export class AdminService {
     name?: string; email?: string; phone?: string; address?: string;
     minimum_order?: number; zone_id?: number; vendor_id?: number;
     delivery?: boolean; take_away?: boolean;
+    // Owner / vendor account (mirrors Laravel's VendorController::store —
+    // restaurant + vendor are created together, with a login password).
+    f_name?: string; l_name?: string; password?: string;
+    // Location + logistics + branding.
+    latitude?: string | number; longitude?: string | number;
+    minimum_delivery_time?: number; maximum_delivery_time?: number;
+    delivery_time_type?: string;
+    tax?: number; comission?: number;
+    logo?: string; cover_photo?: string;
+    cuisine_ids?: number[] | string;
+    restaurant_model?: string;
+    veg?: boolean; non_veg?: boolean;
+    documents?: string[];
+    // Per-locale name translations: [{ locale, key:'name', value }]
+    translations?: Array<{ locale?: string; key?: string; value?: string }>;
   }) {
     if (!body.name) throw new BadRequestException({ errors: [{ code: 'name', message: 'Restaurant name is required' }] });
     if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
-    const nextId = await this.mongo.nextMysqlId('restaurants');
     const now = new Date();
+
+    // ── Vendor account ────────────────────────────────────────────────
+    // If owner details are supplied, create the vendor (with a hashed,
+    // Laravel-compatible $2y$ password) and link the restaurant to it. When
+    // no owner info is given (e.g. bulk import), fall back to vendor_id.
+    let vendorId = body.vendor_id ?? null;
+    if (body.f_name || body.password) {
+      if (body.email) {
+        const dupEmail = await this.mongo.findOne<{ mysql_id: number }>('vendors', { email: body.email });
+        if (dupEmail) throw new BadRequestException({ errors: [{ code: 'email', message: 'A vendor with this email already exists' }] });
+      }
+      if (body.phone) {
+        const dupPhone = await this.mongo.findOne<{ mysql_id: number }>('vendors', { phone: body.phone });
+        if (dupPhone) throw new BadRequestException({ errors: [{ code: 'phone', message: 'A vendor with this phone already exists' }] });
+      }
+      const passwordHash = (await bcrypt.hash(body.password ?? '12345678', 10)).replace(/^\$2b\$/, '$2y$');
+      vendorId = await this.mongo.nextMysqlId('vendors');
+      await this.mongo.insertOne('vendors', {
+        mysql_id: vendorId,
+        f_name: body.f_name ?? body.name,
+        l_name: body.l_name ?? '',
+        email: body.email ?? null,
+        phone: body.phone ?? null,
+        password: passwordHash,
+        image: null,
+        status: true,
+        created_at: now,
+        updated_at: now,
+      });
+    }
+
+    // Normalise cuisine ids (the form sends an array; bulk sends nothing).
+    let cuisineIds: number[] = [];
+    if (Array.isArray(body.cuisine_ids)) cuisineIds = body.cuisine_ids.map(Number).filter(Number.isFinite);
+    else if (typeof body.cuisine_ids === 'string' && body.cuisine_ids.trim()) {
+      cuisineIds = body.cuisine_ids.split(',').map((s) => Number(s.trim())).filter(Number.isFinite);
+    }
+
+    // Laravel stores delivery_time as "min-max-type" (e.g. "10-30-min").
+    const deliveryTime = body.minimum_delivery_time !== undefined && body.maximum_delivery_time !== undefined
+      ? `${body.minimum_delivery_time}-${body.maximum_delivery_time}-${body.delivery_time_type ?? 'min'}`
+      : null;
+
+    // Multi-language: persist the translations array and prefer the English
+    // (or default) value for the canonical name column.
+    const translations = Array.isArray(body.translations) ? body.translations : [];
+    // Only an explicit English/default translation overrides the canonical
+    // name field — a Hindi-only entry must not replace the English name.
+    const trName = translations.find((t) => (t.locale === 'en' || t.locale === 'default') && t.key === 'name')?.value;
+
+    const nextId = await this.mongo.nextMysqlId('restaurants');
     await this.mongo.insertOne('restaurants', {
       mysql_id: nextId,
-      name: body.name,
+      name: trName ?? body.name,
+      translations,
+      additional_documents: Array.isArray(body.documents) ? body.documents : [],
       email: body.email ?? null,
       phone: body.phone ?? null,
       address: body.address ?? null,
+      latitude: body.latitude !== undefined && String(body.latitude) !== '' ? String(body.latitude) : null,
+      longitude: body.longitude !== undefined && String(body.longitude) !== '' ? String(body.longitude) : null,
       minimum_order: Number(body.minimum_order ?? 100),
+      tax: Number(body.tax ?? 0),
+      comission: body.comission !== undefined ? Number(body.comission) : null,
+      delivery_time: deliveryTime,
+      restaurant_model: body.restaurant_model ?? null,
       mysql_zone_id: body.zone_id ?? 1,
-      mysql_vendor_id: body.vendor_id ?? null,
+      zone_id: body.zone_id ?? 1,
+      mysql_vendor_id: vendorId,
+      cuisine_ids: cuisineIds,
       delivery: body.delivery ?? true,
       take_away: body.take_away ?? true,
+      veg: body.veg ?? true,
+      non_veg: body.non_veg ?? true,
       status: true,
+      active: false,
       approval_status: 'approved',
-      logo: null,
-      cover_photo: null,
+      logo: body.logo ?? null,
+      cover_photo: body.cover_photo ?? null,
       created_at: now,
       updated_at: now,
     });
-    return { ok: true, id: nextId, name: body.name };
+    return { ok: true, id: nextId, name: body.name, vendor_id: vendorId };
   }
 
   async createDeliveryMan(body: {
@@ -1808,33 +2160,184 @@ export class AdminService {
     return { ok: true, id: nextId, name: `${body.f_name} ${body.l_name ?? ''}`.trim() };
   }
 
-  async createFood(body: {
-    name?: string; description?: string; price?: number;
-    restaurant_id?: number; category_id?: number;
-    discount?: number; tax?: number; veg?: boolean;
-  }) {
+  async createFood(body: FoodWriteBody) {
     if (!body.name || !body.price || !body.restaurant_id) {
       throw new BadRequestException({ errors: [{ code: 'input', message: 'name, price, and restaurant_id are required' }] });
     }
     if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
     const nextId = await this.mongo.nextMysqlId('foods');
     const now = new Date();
+    const addonIds = this.normaliseIdArray(body.addon_ids);
     await this.mongo.insertOne('foods', {
       mysql_id: nextId,
       name: body.name,
       description: body.description ?? '',
       price: Number(body.price),
       tax: Number(body.tax ?? 0),
+      tax_type: body.tax_type ?? 'percent',
       discount: Number(body.discount ?? 0),
+      discount_type: body.discount_type ?? 'percent',
       mysql_restaurant_id: Number(body.restaurant_id),
       mysql_category_id: Number(body.category_id ?? 1),
+      category_id: Number(body.category_id ?? 1),
+      mysql_sub_category_id: body.sub_category_id !== undefined && body.sub_category_id !== null ? Number(body.sub_category_id) : null,
       veg: body.veg ?? true,
+      is_halal: !!body.is_halal,
+      recommended: !!body.recommended,
+      stock_type: body.stock_type ?? 'unlimited',
+      item_stock: Number(body.item_stock ?? 0),
+      sell_count: 0,
+      maximum_cart_quantity: body.maximum_cart_quantity !== undefined && body.maximum_cart_quantity !== null ? Number(body.maximum_cart_quantity) : null,
+      available_time_starts: body.available_time_starts ?? '00:00',
+      available_time_ends: body.available_time_ends ?? '23:59',
+      addon_ids: addonIds,
+      add_ons: addonIds,
+      variations: Array.isArray(body.variations) ? body.variations : [],
+      avg_rating: 0,
+      rating_count: 0,
+      meta_title: body.meta_title ?? null,
+      meta_description: body.meta_description ?? null,
+      meta_image: body.meta_image ?? null,
       status: true,
-      image: null,
+      image: body.image ?? null,
       created_at: now,
       updated_at: now,
     });
     return { ok: true, id: nextId, name: body.name };
+  }
+
+  /** Full edit of a food item from the admin panel — mirrors Laravel's
+   *  FoodController::update. Only the fields actually sent are changed. */
+  async updateFood(id: number, body: FoodWriteBody) {
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    const existing = await this.mongo.findByMysqlId<{ mysql_id: number }>('foods', id);
+    if (!existing) throw new NotFoundException({ errors: [{ code: 'food', message: 'Food not found' }] });
+
+    const data: Record<string, unknown> = {};
+    if (body.name !== undefined) data.name = body.name;
+    if (body.description !== undefined) data.description = body.description;
+    if (body.price !== undefined) data.price = Number(body.price);
+    if (body.tax !== undefined) data.tax = Number(body.tax);
+    if (body.tax_type !== undefined) data.tax_type = body.tax_type;
+    if (body.discount !== undefined) data.discount = Number(body.discount);
+    if (body.discount_type !== undefined) data.discount_type = body.discount_type;
+    if (body.restaurant_id !== undefined) data.mysql_restaurant_id = Number(body.restaurant_id);
+    if (body.category_id !== undefined) {
+      data.mysql_category_id = Number(body.category_id);
+      data.category_id = Number(body.category_id);
+    }
+    if (body.sub_category_id !== undefined) data.mysql_sub_category_id = body.sub_category_id !== null ? Number(body.sub_category_id) : null;
+    if (body.veg !== undefined) data.veg = !!body.veg;
+    if (body.is_halal !== undefined) data.is_halal = !!body.is_halal;
+    if (body.recommended !== undefined) data.recommended = !!body.recommended;
+    if (body.stock_type !== undefined) data.stock_type = body.stock_type;
+    if (body.item_stock !== undefined) data.item_stock = Number(body.item_stock);
+    if (body.maximum_cart_quantity !== undefined) data.maximum_cart_quantity = body.maximum_cart_quantity !== null ? Number(body.maximum_cart_quantity) : null;
+    if (body.available_time_starts !== undefined) data.available_time_starts = body.available_time_starts;
+    if (body.available_time_ends !== undefined) data.available_time_ends = body.available_time_ends;
+    if (body.addon_ids !== undefined) {
+      const ids = this.normaliseIdArray(body.addon_ids);
+      data.addon_ids = ids;
+      data.add_ons = ids;
+    }
+    if (body.variations !== undefined) data.variations = Array.isArray(body.variations) ? body.variations : [];
+    if (body.image !== undefined && body.image) data.image = body.image;
+    if (body.meta_title !== undefined) data.meta_title = body.meta_title;
+    if (body.meta_description !== undefined) data.meta_description = body.meta_description;
+    if (body.meta_image !== undefined && body.meta_image) data.meta_image = body.meta_image;
+    if (Object.keys(data).length === 0) {
+      throw new BadRequestException({ errors: [{ code: 'body', message: 'no fields to update' }] });
+    }
+    data.updated_at = new Date();
+    await this.mongo.updateOne('foods', { mysql_id: id }, data);
+    return { ok: true, id };
+  }
+
+  /** Coerce a number[] / "1,2,3" string into a clean number[]. */
+  private normaliseIdArray(input: number[] | string | undefined): number[] {
+    if (Array.isArray(input)) return input.map(Number).filter(Number.isFinite);
+    if (typeof input === 'string' && input.trim()) {
+      return input.split(',').map((s) => Number(s.trim())).filter(Number.isFinite);
+    }
+    return [];
+  }
+
+  /** Place a POS order on behalf of a restaurant (admin walk-in / phone order).
+   *  Mirrors Laravel's POSController::placeOrder — creates the order plus its
+   *  line items so it shows up in the orders list + detail like any order. */
+  async createPosOrder(body: {
+    restaurant_id?: number;
+    items?: Array<{ food_id?: number; name?: string; price?: number; quantity?: number }>;
+    customer_name?: string;
+    customer_phone?: string;
+    address?: string;
+    order_type?: string;
+    payment_method?: string;
+    discount?: number;
+    tax_percent?: number;
+    delivery_charge?: number;
+    order_note?: string;
+  }) {
+    if (!body.restaurant_id) throw new BadRequestException({ errors: [{ code: 'restaurant_id', message: 'restaurant is required' }] });
+    const items = (body.items ?? []).filter((i) => i.food_id && (i.quantity ?? 0) > 0);
+    if (items.length === 0) throw new BadRequestException({ errors: [{ code: 'items', message: 'add at least one item' }] });
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+
+    const restaurant = await this.mongo.findByMysqlId<{ mysql_id: number; tax?: number }>('restaurants', Number(body.restaurant_id));
+    if (!restaurant) throw new NotFoundException({ errors: [{ code: 'restaurant', message: 'Restaurant not found' }] });
+
+    const subtotal = items.reduce((s, i) => s + Number(i.price ?? 0) * Number(i.quantity ?? 0), 0);
+    const discount = Number(body.discount ?? 0);
+    const taxPercent = body.tax_percent !== undefined ? Number(body.tax_percent) : Number(restaurant.tax ?? 0);
+    const taxable = Math.max(0, subtotal - discount);
+    const taxAmount = taxable * (taxPercent / 100);
+    const deliveryCharge = Number(body.delivery_charge ?? 0);
+    const orderAmount = taxable + taxAmount + deliveryCharge;
+
+    const now = new Date();
+    const orderId = await this.mongo.nextMysqlId('orders');
+    await this.mongo.insertOne('orders', {
+      mysql_id: orderId,
+      mysql_user_id: null,
+      mysql_restaurant_id: Number(body.restaurant_id),
+      mysql_delivery_man_id: null,
+      order_amount: orderAmount,
+      total_tax_amount: taxAmount,
+      restaurant_discount_amount: discount,
+      delivery_charge: deliveryCharge,
+      payment_status: 'paid',
+      order_status: 'confirmed',
+      payment_method: body.payment_method ?? 'cash',
+      order_type: body.order_type ?? 'take_away',
+      order_note: body.order_note ?? null,
+      delivery_address: body.address ?? null,
+      contact_person_name: body.customer_name ?? 'Walk-in customer',
+      contact_person_number: body.customer_phone ?? null,
+      pending: now,
+      confirmed: now,
+      created_at: now,
+      created_at_legacy: now,
+      updated_at: now,
+    });
+
+    // Line items — getOrder() reads these from `order_details` by order_id.
+    for (const it of items) {
+      const detailId = await this.mongo.nextMysqlId('order_details');
+      await this.mongo.insertOne('order_details', {
+        mysql_id: detailId,
+        order_id: orderId,
+        food_id: Number(it.food_id),
+        price: Number(it.price ?? 0),
+        quantity: Number(it.quantity ?? 0),
+        tax_amount: 0,
+        total_add_on_price: 0,
+        food_details: JSON.stringify({ name: it.name ?? null }),
+        created_at: now,
+        updated_at: now,
+      });
+    }
+
+    return { ok: true, id: orderId, order_amount: orderAmount };
   }
 
   // ── Bulk import / export ─────────────────────────────────────────────
@@ -2774,9 +3277,16 @@ export class AdminService {
 
   // ── Reports ───────────────────────────────────────────────────────────
 
-  async salesSummary(days = 30) {
+  async salesSummary(days = 30, opts: { from?: string; to?: string; zoneId?: number; restaurantId?: number } = {}) {
     if (this.useMongo()) {
-      const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+      // Explicit from/to date range wins; otherwise fall back to the last N days.
+      const fromDate = opts.from ? new Date(opts.from) : new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+      const toDate = opts.to ? new Date(`${opts.to}T23:59:59.999Z`) : null;
+      const deliveredRange: Record<string, unknown> = { $gte: fromDate };
+      if (toDate) deliveredRange.$lte = toDate;
+      const match: Record<string, unknown> = { order_status: 'delivered', payment_status: 'paid', delivered: deliveredRange };
+      if (opts.zoneId) match.mysql_zone_id = Number(opts.zoneId);
+      if (opts.restaurantId) match.mysql_restaurant_id = Number(opts.restaurantId);
       const rows = await this.mongo.aggregate<{
         _id: string;
         orders: number;
@@ -2784,7 +3294,7 @@ export class AdminService {
         tax: number;
         delivery: number;
       }>('orders', [
-        { $match: { order_status: 'delivered', payment_status: 'paid', delivered: { $gte: cutoff } } },
+        { $match: match },
         {
           $group: {
             _id: { $dateToString: { format: '%Y-%m-%d', date: '$delivered' } },
@@ -2938,7 +3448,8 @@ declare module './admin.service' {
     deleteAttribute(id: number): Promise<unknown>;
     // — Marketing —
     listCampaigns(opts: ListOpts): Promise<unknown>;
-    createCampaign(body: { title: string; description?: string; start_date?: string; end_date?: string }): Promise<unknown>;
+    createCampaign(body: { title: string; description?: string; start_date?: string; end_date?: string; start_time?: string; end_time?: string; image?: string | null; zone_id?: number | null }): Promise<unknown>;
+    updateCampaign(id: number, body: { title?: string; description?: string; start_date?: string; end_date?: string; start_time?: string; end_time?: string; image?: string | null; zone_id?: number | null; status?: boolean }): Promise<unknown>;
     updateCampaignStatus(id: number, status: boolean): Promise<unknown>;
     deleteCampaign(id: number): Promise<unknown>;
     listAdvertisements(opts: ListOpts): Promise<unknown>;
@@ -2972,7 +3483,8 @@ declare module './admin.service' {
     listContactMessages(opts: ListOpts): Promise<unknown>;
     replyContactMessage(id: number, reply: string): Promise<unknown>;
     listNotifications(opts: ListOpts): Promise<unknown>;
-    createNotification(body: { title: string; description?: string; tergat?: string; zone_id?: number | null }): Promise<unknown>;
+    createNotification(body: { title: string; description?: string; tergat?: string; zone_id?: number | null; image?: string | null }): Promise<unknown>;
+    updateNotification(id: number, body: { title?: string; description?: string; tergat?: string; zone_id?: number | null; image?: string | null }): Promise<unknown>;
     deleteNotification(id: number): Promise<unknown>;
     listReviews(opts: ListOpts): Promise<unknown>;
     replyReview(id: number, reply: string): Promise<unknown>;
@@ -2991,6 +3503,7 @@ declare module './admin.service' {
     listEmployees(opts: ListOpts): Promise<unknown>;
     listAdminRoles(): Promise<unknown>;
     createAdminRole(body: { name: string; modules?: string }): Promise<unknown>;
+    updateAdminRole(id: number, body: { name?: string; modules?: string; status?: boolean }): Promise<unknown>;
     deleteAdminRole(id: number): Promise<unknown>;
     listSubscriptionPackages(): Promise<unknown>;
     createSubscriptionPackage(body: { package_name: string; price: number; validity: number; max_order?: string; max_product?: string }): Promise<unknown>;
@@ -3260,6 +3773,10 @@ AdminService.prototype.createCampaign = async function (this: AdminService, body
       description: body.description ?? null,
       start_date: body.start_date ? new Date(body.start_date) : null,
       end_date: body.end_date ? new Date(body.end_date) : null,
+      start_time: body.start_time ?? null,
+      end_time: body.end_time ?? null,
+      image: body.image ?? null,
+      mysql_zone_id: body.zone_id ? Number(body.zone_id) : null,
       status: true,
       created_at: new Date(),
       updated_at: new Date(),
@@ -3275,6 +3792,31 @@ AdminService.prototype.createCampaign = async function (this: AdminService, body
     },
   });
   return { ok: true, id: Number(created.id) };
+};
+
+AdminService.prototype.updateCampaign = async function (this: AdminService, id, body) {
+  const data: Record<string, unknown> = {};
+  if (body.title !== undefined) data.title = body.title;
+  if (body.description !== undefined) data.description = body.description;
+  if (body.start_date !== undefined) data.start_date = body.start_date ? new Date(body.start_date) : null;
+  if (body.end_date !== undefined) data.end_date = body.end_date ? new Date(body.end_date) : null;
+  if (body.start_time !== undefined) data.start_time = body.start_time;
+  if (body.end_time !== undefined) data.end_time = body.end_time;
+  if (body.image !== undefined && body.image) data.image = body.image;
+  if (body.zone_id !== undefined) data.mysql_zone_id = body.zone_id ? Number(body.zone_id) : null;
+  if (body.status !== undefined) data.status = body.status;
+  if (Object.keys(data).length === 0) throw new BadRequestException({ errors: [{ code: 'body', message: 'no fields to update' }] });
+  if (this['useMongo']()) {
+    const c = await this['mongo'].findByMysqlId<{ mysql_id: number }>('campaigns', Number(id));
+    if (!c) throw new NotFoundException({ errors: [{ code: 'campaign', message: 'not found' }] });
+    data.updated_at = new Date();
+    await this['mongo'].updateOne('campaigns', { mysql_id: Number(id) }, data);
+    return { ok: true, id };
+  }
+  const c = await this['prisma'].campaigns.findUnique({ where: { id: BigInt(id) }, select: { id: true } });
+  if (!c) throw new NotFoundException({ errors: [{ code: 'campaign', message: 'not found' }] });
+  await this['prisma'].campaigns.update({ where: { id: c.id }, data: { title: body.title, description: body.description } as never });
+  return { ok: true, id };
 };
 
 AdminService.prototype.updateCampaignStatus = async function (this: AdminService, id, status) {
@@ -3810,6 +4352,7 @@ AdminService.prototype.createNotification = async function (this: AdminService, 
       description: body.description ?? null,
       tergat: body.tergat ?? null,
       zone_id: body.zone_id ? Number(body.zone_id) : null,
+      image: body.image ?? null,
       created_at: now,
       updated_at: now,
     });
@@ -3824,6 +4367,27 @@ AdminService.prototype.createNotification = async function (this: AdminService, 
     },
   });
   return { ok: true, id: Number(created.id) };
+};
+
+AdminService.prototype.updateNotification = async function (this: AdminService, id, body) {
+  const data: Record<string, unknown> = {};
+  if (body.title !== undefined) data.title = body.title;
+  if (body.description !== undefined) data.description = body.description;
+  if (body.tergat !== undefined) data.tergat = body.tergat;
+  if (body.zone_id !== undefined) data.zone_id = body.zone_id ? Number(body.zone_id) : null;
+  if (body.image !== undefined && body.image) data.image = body.image;
+  if (Object.keys(data).length === 0) throw new BadRequestException({ errors: [{ code: 'body', message: 'no fields to update' }] });
+  if (this['useMongo']()) {
+    const n = await this['mongo'].findByMysqlId<{ mysql_id: number }>('notifications', Number(id));
+    if (!n) throw new NotFoundException({ errors: [{ code: 'notification', message: 'not found' }] });
+    data.updated_at = new Date();
+    await this['mongo'].updateOne('notifications', { mysql_id: Number(id) }, data);
+    return { ok: true, id };
+  }
+  const n = await this['prisma'].notifications.findUnique({ where: { id: BigInt(id) }, select: { id: true } });
+  if (!n) throw new NotFoundException({ errors: [{ code: 'notification', message: 'not found' }] });
+  await this['prisma'].notifications.update({ where: { id: n.id }, data: data as never });
+  return { ok: true, id };
 };
 
 AdminService.prototype.deleteNotification = async function (this: AdminService, id) {
@@ -4223,6 +4787,27 @@ AdminService.prototype.createAdminRole = async function (this: AdminService, bod
   }
   const created = await this['prisma'].admin_roles.create({ data: { name: body.name, modules: body.modules ?? null } });
   return { ok: true, id: Number(created.id) };
+};
+
+AdminService.prototype.updateAdminRole = async function (this: AdminService, id, body) {
+  const data: Record<string, unknown> = {};
+  if (body.name !== undefined) data.name = body.name;
+  if (body.modules !== undefined) data.modules = body.modules;
+  if (body.status !== undefined) data.status = body.status;
+  if (Object.keys(data).length === 0) {
+    throw new BadRequestException({ errors: [{ code: 'body', message: 'no fields to update' }] });
+  }
+  if (this['useMongo']()) {
+    const r = await this['mongo'].findByMysqlId<{ mysql_id: number }>('admin_roles', Number(id));
+    if (!r) throw new NotFoundException({ errors: [{ code: 'role', message: 'not found' }] });
+    data.updated_at = new Date();
+    await this['mongo'].updateOne('admin_roles', { mysql_id: Number(id) }, data);
+    return { ok: true, id };
+  }
+  const r = await this['prisma'].admin_roles.findUnique({ where: { id: BigInt(id) }, select: { id: true } });
+  if (!r) throw new NotFoundException({ errors: [{ code: 'role', message: 'not found' }] });
+  await this['prisma'].admin_roles.update({ where: { id: r.id }, data: data as never });
+  return { ok: true, id };
 };
 
 AdminService.prototype.deleteAdminRole = async function (this: AdminService, id) {

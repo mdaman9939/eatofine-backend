@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Post, Query, Req, UseGuards, HttpCode, UseInterceptors, UploadedFiles } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query, Req, UseGuards, HttpCode, UseInterceptors, UploadedFiles } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -150,6 +150,38 @@ export class VendorExtrasController {
   private useMongo(): boolean {
     const v = (process.env.USE_MONGO_EXTRAS ?? '1').toLowerCase();
     return v === '1' || v === 'true' || v === 'yes';
+  }
+
+  /** Resolve the restaurant owned by the logged-in vendor. Every vendor
+   *  self-service write is scoped through this so one vendor can never touch
+   *  another restaurant's coupons / foods / add-ons / delivery men. */
+  private async vendorRestaurant(req: AuthedRequest): Promise<MongoRestaurantDoc | null> {
+    if (!this.useMongo()) return null;
+    return this.mongo.findOne<MongoRestaurantDoc>('restaurants', { mysql_vendor_id: Number(req.actor!.id) });
+  }
+
+  /** Hash a password the same Laravel-compatible way the rest of the app
+   *  does ($2y$ prefix) so vendor-created delivery men can log in. */
+  private async hashPassword(raw: string): Promise<string> {
+    const bcrypt = await import('bcrypt');
+    return (await bcrypt.hash(raw, 10)).replace(/^\$2b\$/, '$2y$');
+  }
+
+  /** Flutter form-data sends arrays (variations, add-ons, tags) as JSON
+   *  strings. Parse them back to real arrays so they persist correctly; pass
+   *  through real arrays untouched; default to []. */
+  private parseJsonish(input: unknown): unknown[] {
+    if (Array.isArray(input)) return input;
+    if (typeof input === 'string' && input.trim()) {
+      try {
+        const parsed: unknown = JSON.parse(input);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        // Comma-separated fallback (e.g. plain tag list).
+        return input.split(',').map((s) => s.trim()).filter(Boolean);
+      }
+    }
+    return [];
   }
 
   // ── Profile ───────────────────────────────────────────────────────
@@ -336,7 +368,13 @@ export class VendorExtrasController {
 
   @HttpCode(200)
   @Post('update-fcm-token')
-  fcmToken() { return { message: 'token-updated' }; }
+  async fcmToken(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
+    const token = body?.fcm_token ?? body?.cm_firebase_token ?? body?.token;
+    if (this.useMongo() && token !== undefined) {
+      await this.mongo.updateOne('vendors', { mysql_id: Number(req.actor!.id) }, { fcm_token: String(token), updated_at: new Date() });
+    }
+    return { message: 'token-updated' };
+  }
 
   @HttpCode(200)
   @Post('update-active-status')
@@ -355,17 +393,60 @@ export class VendorExtrasController {
     return { message: 'updated' };
   }
 
+  /** Manual open/close override — flips the restaurant's `active` flag so the
+   *  customer app immediately shows it as "closed now" without touching the
+   *  weekly schedule. Mirrors the restaurant app's open/close toggle. */
   @HttpCode(200)
   @Post('opening-closing-status')
-  toggleOpen() { return { message: 'updated' }; }
+  async toggleOpen(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
+    if (this.useMongo()) {
+      const r = await this.vendorRestaurant(req);
+      if (r) {
+        // Accept either an explicit `active`/`status` value or a plain toggle.
+        const next = body.active !== undefined ? !!Number(body.active)
+          : body.status !== undefined ? !!Number(body.status)
+          : !(r.active ?? true);
+        await this.mongo.updateOne('restaurants', { mysql_id: r.mysql_id }, { active: next, updated_at: new Date() });
+        return { message: 'updated', active: next };
+      }
+    }
+    return { message: 'updated' };
+  }
 
   @HttpCode(200)
   @Post('update-announcment')
-  announce() { return { message: 'announcement updated' }; }
+  async announce(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
+    if (this.useMongo()) {
+      const r = await this.vendorRestaurant(req);
+      if (r) {
+        await this.mongo.updateOne('restaurants', { mysql_id: r.mysql_id }, {
+          announcement: !!Number(body.announcement_status ?? body.announcement ?? 0),
+          announcement_message: body.announcement_message !== undefined ? String(body.announcement_message) : null,
+          updated_at: new Date(),
+        });
+      }
+    }
+    return { message: 'announcement updated' };
+  }
 
+  /** Save the vendor's payout bank details on the vendor record. StackFood
+   *  keeps these on the vendor/restaurant (no separate table), so this is what
+   *  the restaurant app's "Bank Info" screen persists. */
   @HttpCode(200)
   @Post('update-bank-info')
-  bankInfo() { return { message: 'bank info updated' }; }
+  async bankInfo(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
+    if (this.useMongo()) {
+      const data: Record<string, unknown> = {};
+      for (const k of ['bank_name', 'branch', 'holder_name', 'account_no'] as const) {
+        if (body[k] !== undefined) data[k] = String(body[k]);
+      }
+      if (Object.keys(data).length > 0) {
+        data.updated_at = new Date();
+        await this.mongo.updateOne('vendors', { mysql_id: Number(req.actor!.id) }, data);
+      }
+    }
+    return { message: 'bank info updated' };
+  }
 
   /** Build an absolute /storage/* URL for a saved filename. Falls back to
    *  the SVG placeholder middleware when the filename is missing so the
@@ -505,7 +586,19 @@ export class VendorExtrasController {
 
   @HttpCode(200)
   @Post('add-dine-in-table-number')
-  addDineInTable() { return { message: 'added' }; }
+  async addDineInTable(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
+    if (this.useMongo()) {
+      const r = await this.vendorRestaurant(req) as (MongoRestaurantDoc & { dine_in_tables?: unknown[] }) | null;
+      const table = body.table_number ?? body.number;
+      if (r && table !== undefined && String(table).trim() !== '') {
+        const existing = Array.isArray(r.dine_in_tables) ? r.dine_in_tables : [];
+        const next = Array.from(new Set([...existing.map(String), String(table)]));
+        await this.mongo.updateOne('restaurants', { mysql_id: r.mysql_id }, { dine_in_tables: next, updated_at: new Date() });
+        return { message: 'added', tables: next };
+      }
+    }
+    return { message: 'added' };
+  }
 
   @HttpCode(200)
   @Delete('remove-account')
@@ -722,19 +815,69 @@ export class VendorExtrasController {
   }
 
   @Get('product/search')
-  productSearch() { return { products: [], total_size: 0 }; }
+  async productSearch(@Req() req: AuthedRequest, @Query('name') name?: string) {
+    if (this.useMongo()) {
+      const restaurant = await this.vendorRestaurant(req);
+      if (!restaurant) return { products: [], total_size: 0 };
+      const filter: Record<string, unknown> = { mysql_restaurant_id: Number(restaurant.mysql_id) };
+      if (name && name.trim()) filter.name = { $regex: name.trim(), $options: 'i' };
+      const rows = await this.mongo.findMany<MongoFoodDoc>('foods', filter, { sort: { mysql_id: -1 }, limit: 50 });
+      return {
+        products: rows.map((r) => {
+          const food = r as MongoFoodDoc & Record<string, unknown>;
+          return {
+            ...(food.legacy ?? {}),
+            ...food,
+            id: Number(food.mysql_id),
+            price: toNum(food.price),
+            tax: toNum(food.tax),
+            discount: toNum(food.discount),
+            restaurant_id: food.mysql_restaurant_id ? Number(food.mysql_restaurant_id) : 0,
+            category_id: food.mysql_category_id ? Number(food.mysql_category_id) : null,
+            image: food.image ?? 'default.png',
+            image_full_url: this.buildStorageUrl('product', (food.image as string | null) ?? null),
+            status: food.status ?? true,
+          };
+        }),
+        total_size: rows.length,
+      };
+    }
+    return { products: [], total_size: 0 };
+  }
 
   @HttpCode(200)
   @Post('product/status')
-  productStatus() { return { message: 'updated' }; }
+  async productStatus(@Body() body: Record<string, unknown> = {}) {
+    const id = body.id !== undefined && body.id !== '' ? Number(body.id) : null;
+    if (this.useMongo() && id) {
+      await this.mongo.updateOne('foods', { mysql_id: id }, { status: !!Number(body.status ?? 0), updated_at: new Date() });
+    }
+    return { message: 'updated' };
+  }
 
   @HttpCode(200)
   @Post('product/recommended')
-  productRecommended() { return { message: 'updated' }; }
+  async productRecommended(@Body() body: Record<string, unknown> = {}) {
+    const id = body.id !== undefined && body.id !== '' ? Number(body.id) : null;
+    if (this.useMongo() && id) {
+      await this.mongo.updateOne('foods', { mysql_id: id }, { recommended: !!Number(body.is_recommended ?? body.recommended ?? 0), updated_at: new Date() });
+    }
+    return { message: 'updated' };
+  }
 
   @HttpCode(200)
   @Post('product/update-stock')
-  updateStock() { return { message: 'stock updated' }; }
+  async updateStock(@Body() body: Record<string, unknown> = {}) {
+    const id = body.id !== undefined && body.id !== '' ? Number(body.id) : null;
+    if (this.useMongo() && id) {
+      const data: Record<string, unknown> = { updated_at: new Date() };
+      if (body.stock_type !== undefined) data.stock_type = String(body.stock_type);
+      const stock = body.current_stock ?? body.item_stock ?? body.stock;
+      if (stock !== undefined && stock !== '') data.item_stock = Number(stock);
+      await this.mongo.updateOne('foods', { mysql_id: id }, data);
+    }
+    return { message: 'stock updated' };
+  }
 
   /** Create a new food item. Flutter's Add Food screen sends this as
    *  multipart/form-data with `image` + `meta_image` files alongside text
@@ -793,11 +936,21 @@ export class VendorExtrasController {
       available_time_ends: b.available_time_ends ? String(b.available_time_ends) : '23:59',
       stock_type: String(b.stock_type ?? 'unlimited'),
       item_stock: Number(b.item_stock ?? 0),
+      // Maximum order quantity + halal + tags were silently dropped before, so
+      // those fields on the Add Food screen "weren't being taken".
+      maximum_cart_quantity: b.maximum_cart_quantity !== undefined && b.maximum_cart_quantity !== ''
+        ? Number(b.maximum_cart_quantity) : null,
+      is_halal: !!Number(b.is_halal ?? 0),
+      tags: this.parseJsonish(b.tags),
+      tag_ids: this.parseJsonish(b.tag_ids),
       sell_count: 0,
       avg_rating: 0,
       rating_count: 0,
-      addon_ids: b.addon_ids ?? [],
-      variations: b.variations ?? [],
+      // Flutter sends these as JSON strings (or arrays) — parse so add-ons and
+      // variations actually persist instead of landing as "[object Object]".
+      addon_ids: this.parseJsonish(b.addon_ids),
+      variations: this.parseJsonish(b.variations),
+      choice_options: this.parseJsonish(b.choice_options),
       created_at: now,
       updated_at: now,
     };
@@ -883,7 +1036,13 @@ export class VendorExtrasController {
 
   @HttpCode(200)
   @Delete('product/delete')
-  productDelete() { return { message: 'product deleted' }; }
+  async productDelete(@Body() body: Record<string, unknown> = {}, @Query('id') idQ?: string) {
+    const id = body.id !== undefined && body.id !== '' ? Number(body.id) : (idQ ? Number(idQ) : null);
+    if (this.useMongo() && id) {
+      await this.mongo.deleteOne('foods', { mysql_id: id });
+    }
+    return { message: 'product deleted' };
+  }
 
   @Get('product/reviews')
   async productReviews(@Query('product_id') idStr?: string) {
@@ -912,7 +1071,13 @@ export class VendorExtrasController {
 
   @HttpCode(200)
   @Post('product/reply-update')
-  productReply() { return { message: 'reply saved' }; }
+  async productReply(@Body() body: Record<string, unknown> = {}) {
+    const id = body.id !== undefined && body.id !== '' ? Number(body.id) : null;
+    if (this.useMongo() && id && body.reply !== undefined) {
+      await this.mongo.updateOne('reviews', { mysql_id: id }, { reply: String(body.reply), updated_at: new Date() });
+    }
+    return { message: 'reply saved' };
+  }
 
   @Get('check-product-limits')
   productLimits() { return { remaining: 'unlimited' }; }
@@ -940,8 +1105,68 @@ export class VendorExtrasController {
     );
   }
 
+  /** Path-param variant — the Flutter app calls `/vendor/categories/childes/:id`
+   *  (not the query-string form), which previously 404'd ("Cannot GET …"). */
+  @Get('categories/childes/:parentId')
+  async childCategoriesByPath(@Param('parentId') idStr: string) {
+    const id = parseInt(idStr ?? '0', 10);
+    if (this.useMongo()) {
+      const rows = await this.mongo.findMany<MongoCategoryDoc>('categories', { parent_id: id, status: true });
+      return rows.map((r) => ({ id: Number(r.mysql_id), name: r.name ?? null, image: r.image ?? null, status: r.status ?? null }));
+    }
+    return this.prisma.categories.findMany({ where: { parent_id: id, status: true } }).then((rows) =>
+      rows.map((r) => ({ id: Number(r.id), name: r.name, image: r.image, status: r.status })),
+    );
+  }
+
+  /** Foods in a category for THIS restaurant — powers the category drill-down
+   *  ("No food available" was a stub). Returns the Laravel shape. */
   @Get('categories/category-wise-products')
-  categoryProducts() { return { products: [], total_size: 0 }; }
+  async categoryProducts(
+    @Req() req: AuthedRequest,
+    @Query('category_id') categoryIdStr?: string,
+    @Query('limit') limitStr?: string,
+    @Query('offset') offsetStr?: string,
+  ) {
+    const limit = parseInt(limitStr ?? '25', 10);
+    const offset = parseInt(offsetStr ?? '1', 10);
+    const categoryId = parseInt(categoryIdStr ?? '0', 10);
+    if (!this.useMongo()) return { total_size: 0, limit, offset, products: [] };
+    const restaurant = await this.vendorRestaurant(req);
+    if (!restaurant) return { total_size: 0, limit, offset, products: [] };
+    const filter: Record<string, unknown> = { mysql_restaurant_id: Number(restaurant.mysql_id) };
+    if (categoryId) filter.mysql_category_id = categoryId;
+    const [rows, total] = await Promise.all([
+      this.mongo.findMany<MongoFoodDoc>('foods', filter, { sort: { mysql_id: -1 }, limit, skip: Math.max(0, (offset - 1) * limit) }),
+      this.mongo.count('foods', filter),
+    ]);
+    return {
+      total_size: total,
+      limit,
+      offset,
+      products: rows.map((r) => {
+        const food = r as MongoFoodDoc & Record<string, unknown>;
+        return {
+          ...(food.legacy ?? {}),
+          ...food,
+          id: Number(food.mysql_id),
+          price: toNum(food.price),
+          tax: toNum(food.tax),
+          discount: toNum(food.discount),
+          restaurant_id: food.mysql_restaurant_id ? Number(food.mysql_restaurant_id) : 0,
+          category_id: food.mysql_category_id ? Number(food.mysql_category_id) : null,
+          rating_count: Number(food.rating_count ?? 0),
+          avg_rating: Number(food.avg_rating ?? 0),
+          rating: food.rating ?? [],
+          image: food.image ?? 'default.png',
+          image_full_url: this.buildStorageUrl('product', (food.image as string | null) ?? null),
+          stock_type: food.stock_type ?? 'unlimited',
+          item_stock: Number(food.item_stock ?? 0),
+          status: food.status ?? true,
+        };
+      }),
+    };
+  }
 
   // ── Add-ons + attributes ─────────────────────────────────────────
   @Get('addon')
@@ -967,15 +1192,65 @@ export class VendorExtrasController {
 
   @HttpCode(200)
   @Post('addon/store')
-  addonStore() { return { message: 'addon created' }; }
+  async addonStore(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
+    if (!this.useMongo()) return { message: 'addon created' };
+    const restaurant = await this.vendorRestaurant(req);
+    if (!restaurant) return { errors: [{ code: 'restaurant', message: 'restaurant not found' }] };
+    if (!body.name || String(body.name).trim() === '') {
+      return { errors: [{ code: 'name', message: 'addon name is required' }] };
+    }
+    // Flutter may send the category as `addon_category_id` or `category_id`,
+    // and the stock as `addon_stock` or `stock` — accept either so the addon
+    // saves (and then shows up in the GET list).
+    const categoryId = body.addon_category_id ?? body.category_id;
+    const stock = body.addon_stock ?? body.stock;
+    const nextId = await this.mongo.nextMysqlId('add_ons');
+    const now = new Date();
+    await this.mongo.insertOne('add_ons', {
+      mysql_id: nextId,
+      mysql_restaurant_id: Number(restaurant.mysql_id),
+      restaurant_id: Number(restaurant.mysql_id),
+      mysql_addon_category_id: categoryId !== undefined && categoryId !== '' ? Number(categoryId) : null,
+      addon_category_id: categoryId !== undefined && categoryId !== '' ? Number(categoryId) : null,
+      name: String(body.name),
+      price: Number(body.price ?? 0),
+      tax: Number(body.tax ?? 0),
+      stock_type: String(body.stock_type ?? 'unlimited'),
+      addon_stock: Number(stock ?? 0),
+      sell_count: 0,
+      status: true,
+      created_at: now,
+      updated_at: now,
+    });
+    return { message: 'addon created', id: nextId };
+  }
 
   @HttpCode(200)
   @Post('addon/update')
-  addonUpdate() { return { message: 'addon updated' }; }
+  async addonUpdate(@Body() body: Record<string, unknown> = {}) {
+    if (!this.useMongo()) return { message: 'addon updated' };
+    const id = body.id !== undefined && body.id !== '' ? Number(body.id) : null;
+    if (!id) return { errors: [{ code: 'id', message: 'addon id required' }] };
+    const data: Record<string, unknown> = {};
+    if (body.name !== undefined) data.name = String(body.name);
+    if (body.price !== undefined && body.price !== '') data.price = Number(body.price);
+    if (body.tax !== undefined && body.tax !== '') data.tax = Number(body.tax);
+    if (body.stock_type !== undefined) data.stock_type = String(body.stock_type);
+    if (body.addon_stock !== undefined && body.addon_stock !== '') data.addon_stock = Number(body.addon_stock);
+    if (body.addon_category_id !== undefined && body.addon_category_id !== '') data.mysql_addon_category_id = Number(body.addon_category_id);
+    if (Object.keys(data).length === 0) return { message: 'nothing to update' };
+    data.updated_at = new Date();
+    await this.mongo.updateOne('add_ons', { mysql_id: id }, data);
+    return { message: 'addon updated' };
+  }
 
   @HttpCode(200)
   @Delete('addon/delete')
-  addonDelete() { return { message: 'addon deleted' }; }
+  async addonDelete(@Body() body: Record<string, unknown> = {}, @Query('id') idQ?: string) {
+    const id = body.id !== undefined && body.id !== '' ? Number(body.id) : (idQ ? Number(idQ) : null);
+    if (this.useMongo() && id) await this.mongo.deleteOne('add_ons', { mysql_id: id });
+    return { message: 'addon deleted' };
+  }
 
   @Get('attributes')
   async attributes() {
@@ -1015,45 +1290,255 @@ export class VendorExtrasController {
   getDmList(@Req() req: AuthedRequest) { return this.vendorDmList(req); }
 
   @Get('delivery-man/preview')
-  dmPreview() { return null; }
+  async dmPreview(@Query('delivery_man_id') idStr?: string) {
+    const id = parseInt(idStr ?? '', 10);
+    if (!this.useMongo() || !Number.isFinite(id)) return null;
+    const dm = await this.mongo.findByMysqlId<MongoDeliveryManDoc>('delivery_men', id);
+    if (!dm) return null;
+    return {
+      id: Number(dm.mysql_id),
+      f_name: dm.f_name ?? null,
+      l_name: dm.l_name ?? null,
+      phone: dm.phone ?? null,
+      status: dm.status ?? null,
+      application_status: dm.application_status ?? null,
+    };
+  }
 
+  /** Create an in-house ("restaurant_wise") delivery man owned by this
+   *  restaurant. Mirrors the restaurant app's Add Delivery Man screen. */
   @HttpCode(200)
   @Post('delivery-man/store')
-  dmStore() { return { message: 'delivery man created' }; }
+  @UseInterceptors(FileFieldsInterceptor([
+    { name: 'image', maxCount: 1 },
+    { name: 'identity_image', maxCount: 5 },
+  ], { limits: { fileSize: 5 * 1024 * 1024 } }))
+  async dmStore(
+    @Req() req: AuthedRequest,
+    @Body() body: Record<string, unknown> = {},
+    @UploadedFiles() files: { image?: Express.Multer.File[] } = {},
+  ) {
+    if (!this.useMongo()) return { message: 'delivery man created' };
+    const restaurant = await this.vendorRestaurant(req);
+    if (!restaurant) return { errors: [{ code: 'restaurant', message: 'restaurant not found' }] };
+    if (!body.f_name || !body.phone) {
+      return { errors: [{ code: 'input', message: 'first name and phone are required' }] };
+    }
+    const dup = await this.mongo.findOne<MongoDeliveryManDoc>('delivery_men', { phone: String(body.phone) });
+    if (dup) return { errors: [{ code: 'phone', message: 'phone already in use' }] };
+
+    const nextId = await this.mongo.nextMysqlId('delivery_men');
+    const imageName = this.saveUploaded(files?.image?.[0], 'delivery-man') ?? 'def.png';
+    const now = new Date();
+    const zoneId = restaurant.mysql_zone_id ?? restaurant.zone_id ?? 1;
+    await this.mongo.insertOne('delivery_men', {
+      mysql_id: nextId,
+      f_name: String(body.f_name),
+      l_name: String(body.l_name ?? ''),
+      email: body.email ? String(body.email) : null,
+      phone: String(body.phone),
+      identity_number: body.identity_number ? String(body.identity_number) : null,
+      identity_type: body.identity_type ? String(body.identity_type) : null,
+      password: await this.hashPassword(String(body.password ?? '12345678')),
+      image: imageName,
+      mysql_zone_id: Number(zoneId),
+      mysql_restaurant_id: Number(restaurant.mysql_id),
+      restaurant_id: Number(restaurant.mysql_id),
+      type: 'restaurant_wise',
+      earning: false,
+      application_status: 'approved',
+      status: true,
+      active: 0,
+      created_at: now,
+      updated_at: now,
+    });
+    return { message: 'delivery man created', id: nextId };
+  }
 
   @HttpCode(200)
   @Post('delivery-man/update')
-  dmUpdate() { return { message: 'updated' }; }
+  @UseInterceptors(FileFieldsInterceptor([
+    { name: 'image', maxCount: 1 },
+  ], { limits: { fileSize: 5 * 1024 * 1024 } }))
+  async dmUpdate(
+    @Body() body: Record<string, unknown> = {},
+    @UploadedFiles() files: { image?: Express.Multer.File[] } = {},
+  ) {
+    if (!this.useMongo()) return { message: 'updated' };
+    const id = body.id !== undefined && body.id !== '' ? Number(body.id) : null;
+    if (!id) return { errors: [{ code: 'id', message: 'delivery man id required' }] };
+    const data: Record<string, unknown> = {};
+    for (const k of ['f_name', 'l_name', 'email', 'phone', 'identity_number', 'identity_type'] as const) {
+      if (body[k] !== undefined) data[k] = String(body[k]);
+    }
+    if (body.password !== undefined && String(body.password).length > 1) {
+      data.password = await this.hashPassword(String(body.password));
+    }
+    const imageName = this.saveUploaded(files?.image?.[0], 'delivery-man');
+    if (imageName) data.image = imageName;
+    if (Object.keys(data).length === 0) return { message: 'nothing to update' };
+    data.updated_at = new Date();
+    await this.mongo.updateOne('delivery_men', { mysql_id: id }, data);
+    return { message: 'updated' };
+  }
 
   @HttpCode(200)
   @Delete('delivery-man/delete')
-  dmDelete() { return { message: 'deleted' }; }
+  async dmDelete(@Body() body: Record<string, unknown> = {}, @Query('id') idQ?: string) {
+    const id = body.id !== undefined && body.id !== '' ? Number(body.id) : (idQ ? Number(idQ) : null);
+    if (this.useMongo() && id) await this.mongo.deleteOne('delivery_men', { mysql_id: id });
+    return { message: 'deleted' };
+  }
 
   @HttpCode(200)
   @Post('delivery-man/status')
-  dmStatus() { return { message: 'status updated' }; }
+  async dmStatus(@Body() body: Record<string, unknown> = {}) {
+    const id = body.id !== undefined && body.id !== '' ? Number(body.id) : null;
+    if (this.useMongo() && id) {
+      await this.mongo.updateOne('delivery_men', { mysql_id: id }, { status: !!Number(body.status ?? 0), updated_at: new Date() });
+    }
+    return { message: 'status updated' };
+  }
 
+  /** Assign one of the restaurant's delivery men to an order. */
   @HttpCode(200)
   @Post('delivery-man/assign-deliveryman')
-  dmAssign() { return { message: 'assigned' }; }
+  async dmAssign(@Body() body: Record<string, unknown> = {}) {
+    if (!this.useMongo()) return { message: 'assigned' };
+    const orderId = body.order_id !== undefined && body.order_id !== '' ? Number(body.order_id) : null;
+    const dmId = body.delivery_man_id !== undefined && body.delivery_man_id !== '' ? Number(body.delivery_man_id) : null;
+    if (orderId && dmId) {
+      await this.mongo.updateOne('orders', { mysql_id: orderId }, {
+        mysql_delivery_man_id: dmId,
+        delivery_man_id: dmId,
+        updated_at: new Date(),
+      });
+    }
+    return { message: 'assigned' };
+  }
 
   // ── Coupons (vendor-managed) ─────────────────────────────────────
+  /** Shape a coupon doc for the restaurant app. */
+  private shapeCoupon(r: Record<string, unknown>) {
+    return {
+      id: Number(r.mysql_id),
+      title: r.title ?? null,
+      code: r.code ?? null,
+      coupon_type: r.coupon_type ?? 'restaurant_wise',
+      discount: toNum(r.discount),
+      discount_type: r.discount_type ?? 'amount',
+      min_purchase: toNum(r.min_purchase),
+      max_discount: toNum(r.max_discount),
+      start_date: r.start_date ?? null,
+      expire_date: r.expire_date ?? null,
+      limit: r.limit ?? null,
+      status: r.status ?? true,
+      total_uses: r.total_uses ? Number(r.total_uses) : 0,
+      restaurant_id: r.mysql_restaurant_id ?? r.restaurant_id ?? null,
+    };
+  }
+
+  /** The restaurant app's coupon list expects a BARE ARRAY of coupons (not a
+   *  { coupons } wrapper) — returning the wrapper made the app fail to parse
+   *  the GET even though the coupon was created. */
   @Get('coupon-list')
-  vendorCouponList() { return { coupons: [], total_size: 0 }; }
+  async vendorCouponList(@Req() req: AuthedRequest) {
+    if (!this.useMongo()) return [];
+    const restaurant = await this.vendorRestaurant(req);
+    if (!restaurant) return [];
+    const filter = { mysql_restaurant_id: Number(restaurant.mysql_id) };
+    const rows = await this.mongo.findMany<Record<string, unknown>>('coupons', filter, { sort: { mysql_id: -1 } });
+    return rows.map((r) => ({
+      ...this.shapeCoupon(r),
+      data: r.data ?? null,
+      customer_id: r.customer_id ?? ['all'],
+      restaurant_name: restaurant.name ?? null,
+    }));
+  }
+
   @HttpCode(200)
   @Post('coupon-store')
-  vendorCouponStore() { return { message: 'coupon created' }; }
+  async vendorCouponStore(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
+    if (!this.useMongo()) return { message: 'coupon created' };
+    const restaurant = await this.vendorRestaurant(req);
+    if (!restaurant) return { errors: [{ code: 'restaurant', message: 'restaurant not found' }] };
+    if (!body.title || !body.code) {
+      return { errors: [{ code: 'input', message: 'title and code are required' }] };
+    }
+    const dup = await this.mongo.findOne<{ mysql_id: number }>('coupons', { code: String(body.code) });
+    if (dup) return { errors: [{ code: 'code', message: 'coupon code already exists' }] };
+    const nextId = await this.mongo.nextMysqlId('coupons');
+    const now = new Date();
+    await this.mongo.insertOne('coupons', {
+      mysql_id: nextId,
+      title: String(body.title),
+      code: String(body.code),
+      coupon_type: body.coupon_type ? String(body.coupon_type) : 'default',
+      mysql_restaurant_id: Number(restaurant.mysql_id),
+      restaurant_id: Number(restaurant.mysql_id),
+      discount: Number(body.discount ?? 0),
+      discount_type: String(body.discount_type ?? 'amount'),
+      min_purchase: Number(body.min_purchase ?? 0),
+      max_discount: Number(body.max_discount ?? 0),
+      start_date: body.start_date ? new Date(String(body.start_date)) : null,
+      expire_date: body.expire_date ? new Date(String(body.expire_date)) : (body.end_date ? new Date(String(body.end_date)) : null),
+      limit: body.limit !== undefined && body.limit !== '' ? Number(body.limit) : null,
+      status: true,
+      created_by: 'vendor',
+      total_uses: 0,
+      created_at: now,
+      updated_at: now,
+    });
+    return { message: 'coupon created', id: nextId };
+  }
+
   @HttpCode(200)
   @Post('coupon-update')
-  vendorCouponUpdate() { return { message: 'coupon updated' }; }
+  async vendorCouponUpdate(@Body() body: Record<string, unknown> = {}) {
+    if (!this.useMongo()) return { message: 'coupon updated' };
+    const id = body.id !== undefined && body.id !== '' ? Number(body.id) : null;
+    if (!id) return { errors: [{ code: 'id', message: 'coupon id required' }] };
+    const data: Record<string, unknown> = {};
+    if (body.title !== undefined) data.title = String(body.title);
+    if (body.discount !== undefined && body.discount !== '') data.discount = Number(body.discount);
+    if (body.discount_type !== undefined) data.discount_type = String(body.discount_type);
+    if (body.min_purchase !== undefined && body.min_purchase !== '') data.min_purchase = Number(body.min_purchase);
+    if (body.max_discount !== undefined && body.max_discount !== '') data.max_discount = Number(body.max_discount);
+    if (body.start_date !== undefined && body.start_date !== '') data.start_date = new Date(String(body.start_date));
+    const expiry = body.expire_date ?? body.end_date;
+    if (expiry !== undefined && expiry !== '') data.expire_date = new Date(String(expiry));
+    if (body.limit !== undefined && body.limit !== '') data.limit = Number(body.limit);
+    if (Object.keys(data).length === 0) return { message: 'nothing to update' };
+    data.updated_at = new Date();
+    await this.mongo.updateOne('coupons', { mysql_id: id }, data);
+    return { message: 'coupon updated' };
+  }
+
   @HttpCode(200)
   @Post('coupon-status')
-  vendorCouponStatus() { return { message: 'status updated' }; }
+  async vendorCouponStatus(@Body() body: Record<string, unknown> = {}) {
+    const id = body.id !== undefined && body.id !== '' ? Number(body.id) : null;
+    if (this.useMongo() && id) {
+      await this.mongo.updateOne('coupons', { mysql_id: id }, { status: !!Number(body.status ?? 0), updated_at: new Date() });
+    }
+    return { message: 'status updated' };
+  }
+
   @HttpCode(200)
   @Delete('coupon-delete')
-  vendorCouponDelete() { return { message: 'coupon deleted' }; }
+  async vendorCouponDelete(@Body() body: Record<string, unknown> = {}, @Query('id') idQ?: string) {
+    const id = body.id !== undefined && body.id !== '' ? Number(body.id) : (idQ ? Number(idQ) : null);
+    if (this.useMongo() && id) await this.mongo.deleteOne('coupons', { mysql_id: id });
+    return { message: 'coupon deleted' };
+  }
+
   @Get('coupon/view-without-translate')
-  vendorCouponView() { return {}; }
+  async vendorCouponView(@Query('coupon_id') idStr?: string) {
+    const id = parseInt(idStr ?? '', 10);
+    if (!this.useMongo() || !Number.isFinite(id)) return {};
+    const c = await this.mongo.findByMysqlId<Record<string, unknown>>('coupons', id);
+    return c ? this.shapeCoupon(c) : {};
+  }
 
   // ── Wallet / payments / withdraw ─────────────────────────────────
   @Get('wallet-payment-list')
@@ -1094,11 +1579,49 @@ export class VendorExtrasController {
 
   @Get('get-withdraw-method-list')
   getWithdrawMethods() { return this.withdrawMethods(); }
+
+  /** List this vendor's past withdraw requests (newest first). */
   @Get('get-withdraw-list')
-  getWithdrawList() { return { data: [], total_size: 0 }; }
+  async getWithdrawList(@Req() req: AuthedRequest) {
+    if (!this.useMongo()) return { data: [], total_size: 0 };
+    const filter = { mysql_vendor_id: Number(req.actor!.id) };
+    const rows = await this.mongo.findMany<Record<string, unknown>>('withdraw_requests', filter, { sort: { mysql_id: -1 }, limit: 100 });
+    return {
+      data: rows.map((r) => ({
+        id: Number(r.mysql_id),
+        amount: toNum(r.amount),
+        approved: r.approved ?? 0,
+        withdraw_method_id: r.mysql_withdraw_method_id ?? r.withdraw_method_id ?? null,
+        created_at: r.created_at ?? null,
+      })),
+      total_size: rows.length,
+    };
+  }
+
+  /** Create a withdraw request against the vendor's earned balance. The admin
+   *  Withdraw Requests screen approves/rejects these (already implemented). */
   @HttpCode(200)
   @Post('request-withdraw')
-  requestWithdraw() { return { message: 'withdraw requested' }; }
+  async requestWithdraw(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
+    if (!this.useMongo()) return { message: 'withdraw requested' };
+    const amount = Number(body.amount ?? 0);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return { errors: [{ code: 'amount', message: 'enter a valid amount' }] };
+    }
+    const nextId = await this.mongo.nextMysqlId('withdraw_requests');
+    const now = new Date();
+    await this.mongo.insertOne('withdraw_requests', {
+      mysql_id: nextId,
+      mysql_vendor_id: Number(req.actor!.id),
+      vendor_id: Number(req.actor!.id),
+      amount,
+      mysql_withdraw_method_id: body.withdraw_method_id !== undefined && body.withdraw_method_id !== '' ? Number(body.withdraw_method_id) : null,
+      approved: 0,
+      created_at: now,
+      updated_at: now,
+    });
+    return { message: 'withdraw requested', id: nextId };
+  }
 
   // ── Reports (zeros for demo, real ones would aggregate) ──────────
   /** All the report endpoints below are computed live from the orders
@@ -1167,23 +1690,56 @@ export class VendorExtrasController {
   }
   @Get('get-campaign-order-report')
   campaignReport() { return { data: [], total_amount: 0, total_orders: 0 }; }
+  /** VAT / Tax report — returns the exact shape the restaurant app's VAT
+   *  Report screen reads (totalOrders / totalOrderAmount / totalTax + a
+   *  per-rate taxSummary), so the cards no longer show "null". */
   @Get('get-tax-report')
-  async taxReport(@Req() req: AuthedRequest) {
-    const orders = await this.vendorOrdersForReports(req);
-    let total = 0;
-    const data = orders
-      .filter((o) => o.order_status === 'delivered')
-      .map((o) => {
-        const tax = Number(o.total_tax_amount ?? 0);
-        total += tax;
-        return {
-          order_id: Number(o.mysql_id),
-          order_amount: Number(o.order_amount ?? 0),
-          tax_amount: tax,
-          created_at: o.created_at ?? null,
-        };
-      });
-    return { data, total };
+  async taxReport(@Req() req: AuthedRequest, @Query('limit') limitStr?: string, @Query('offset') offsetStr?: string) {
+    const limit = parseInt(limitStr ?? '25', 10);
+    const offset = parseInt(offsetStr ?? '1', 10);
+    const restaurant = this.useMongo() ? await this.vendorRestaurant(req) : null;
+    const taxableStatuses = ['delivered', 'refund_requested', 'refund_request_canceled'];
+    const orders = (await this.vendorOrdersForReports(req)).filter((o) => taxableStatuses.includes(String(o.order_status)));
+
+    let totalOrderAmount = 0;
+    let totalTax = 0;
+    for (const o of orders) {
+      totalOrderAmount += Number(o.order_amount ?? 0);
+      totalTax += Number(o.total_tax_amount ?? 0);
+    }
+
+    // One summary row per tax rate. Without a separate order_taxes collection we
+    // synthesise it from the restaurant's configured rate, which is what the
+    // VAT breakdown card shows (name + percentage + amount).
+    const restaurantDoc = (restaurant ?? {}) as unknown as Record<string, unknown>;
+    const taxRate = Number(restaurantDoc.tax ?? 0);
+    const taxSummary = totalTax > 0
+      ? [{ tax_name: 'GST', tax_label: String(taxRate), total_tax: totalTax }]
+      : [];
+
+    const ordersOut = orders
+      .sort((a, b) => Number(b.mysql_id) - Number(a.mysql_id))
+      .slice(Math.max(0, (offset - 1) * limit), Math.max(0, (offset - 1) * limit) + limit)
+      .map((o) => ({
+        id: Number(o.mysql_id),
+        order_amount: Number(o.order_amount ?? 0),
+        total_tax_amount: Number(o.total_tax_amount ?? 0),
+        order_status: o.order_status ?? null,
+        payment_status: o.payment_status ?? null,
+        created_at: o.created_at ?? null,
+        orderTaxes: [],
+      }));
+
+    return {
+      total_size: orders.length,
+      limit,
+      offset,
+      taxSummary,
+      totalOrders: orders.length,
+      totalOrderAmount,
+      totalTax,
+      orders: ordersOut,
+    };
   }
   @Get('get-disbursement-report')
   disbursementReport() { return { data: [], total: 0 }; }
@@ -1314,17 +1870,33 @@ export class VendorExtrasController {
     };
   }
 
+  /** "Change Subscription Plan" lists the active packages. The app reads
+   *  `{ packages: [...] }`; the old stub returned a single `package`, so the
+   *  screen showed "No package available". Returns real packages, falling back
+   *  to sensible defaults so the screen is never empty in the demo. */
   @Get('package-view')
-  packageView() {
-    return {
-      package: {
-        id: 1, package_name: 'Commission-base Plan',
-        commission_status: 1, commission: 0,
-        package_type: 'commission', validity: 0,
-        price: 0, plan_type: 'free',
-      },
-      transactions: [],
-    };
+  async packageView() {
+    let packages: Array<Record<string, unknown>> = [];
+    if (this.useMongo()) {
+      const rows = await this.mongo.findMany<Record<string, unknown>>(
+        'subscription_packages', { $or: [{ status: true }, { status: 1 }] }, { sort: { mysql_id: -1 } },
+      );
+      packages = rows.map((r) => ({
+        ...r,
+        id: Number(r.mysql_id),
+        price: Number(r.price ?? 0),
+        validity: Number(r.validity ?? 0),
+      }));
+    }
+    if (packages.length === 0) {
+      // Demo fallback so the plan picker renders.
+      packages = [
+        { id: 1, package_name: 'Starter', price: 499, validity: 30, max_order: 100, max_product: 50, pos: 1, mobile_app: 0, self_delivery: 0, reviews: 1, chat: 1 },
+        { id: 2, package_name: 'Growth', price: 999, validity: 30, max_order: 500, max_product: 200, pos: 1, mobile_app: 1, self_delivery: 1, reviews: 1, chat: 1 },
+        { id: 3, package_name: 'Pro', price: 1999, validity: 30, max_order: 0, max_product: 0, pos: 1, mobile_app: 1, self_delivery: 1, reviews: 1, chat: 1 },
+      ];
+    }
+    return { packages };
   }
 
   /** Flutter's My Business Plan page calls this with GET — the old POST

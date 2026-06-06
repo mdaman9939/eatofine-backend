@@ -100,6 +100,12 @@ export class AdminController {
     return this.admin.getOrder(id);
   }
 
+  @Post('pos/place-order')
+  @HttpCode(200)
+  placePosOrder(@Body() body: Parameters<AdminService['createPosOrder']>[0]) {
+    return this.admin.createPosOrder(body);
+  }
+
   @Patch('orders/:id/status')
   updateOrderStatus(
     @Param('id', ParseIntPipe) id: number,
@@ -117,11 +123,7 @@ export class AdminController {
 
   @Post('restaurants')
   @HttpCode(200)
-  createRestaurant(@Body() body: {
-    name?: string; email?: string; phone?: string; address?: string;
-    minimum_order?: number; zone_id?: number; vendor_id?: number;
-    delivery?: boolean; take_away?: boolean;
-  }) {
+  createRestaurant(@Body() body: Parameters<AdminService['createRestaurant']>[0]) {
     return this.admin.createRestaurant(body);
   }
 
@@ -156,6 +158,11 @@ export class AdminController {
   @Get('restaurants/:id')
   restaurantDetail(@Param('id', ParseIntPipe) id: number) {
     return this.admin.getRestaurant(id);
+  }
+
+  @Get('restaurants/:id/tabs')
+  restaurantTabs(@Param('id', ParseIntPipe) id: number, @Query('limit') limit?: string) {
+    return this.admin.getRestaurantTabs(id, toInt(limit, 50));
   }
 
   @Patch('restaurants/:id')
@@ -252,11 +259,7 @@ export class AdminController {
 
   @Post('food')
   @HttpCode(200)
-  createFood(@Body() body: {
-    name?: string; description?: string; price?: number;
-    restaurant_id?: number; category_id?: number;
-    discount?: number; tax?: number; veg?: boolean;
-  }) {
+  createFood(@Body() body: Parameters<AdminService['createFood']>[0]) {
     return this.admin.createFood(body);
   }
 
@@ -274,6 +277,11 @@ export class AdminController {
   @Get('food/:id')
   foodDetail(@Param('id', ParseIntPipe) id: number) {
     return this.admin.getFood(id);
+  }
+
+  @Patch('food/:id')
+  updateFood(@Param('id', ParseIntPipe) id: number, @Body() body: Parameters<AdminService['updateFood']>[1]) {
+    return this.admin.updateFood(id, body);
   }
 
   @Patch('food/:id/status')
@@ -350,6 +358,11 @@ export class AdminController {
     return this.admin.updateCouponStatus(id, body.status);
   }
 
+  @Patch('coupons/:id')
+  updateCoupon(@Param('id', ParseIntPipe) id: number, @Body() body: Parameters<AdminService['updateCoupon']>[1]) {
+    return this.admin.updateCoupon(id, body);
+  }
+
   @Delete('coupons/:id')
   deleteCoupon(@Param('id', ParseIntPipe) id: number) {
     return this.admin.deleteCoupon(id);
@@ -370,6 +383,11 @@ export class AdminController {
   @Patch('banners/:id/status')
   updateBannerStatus(@Param('id', ParseIntPipe) id: number, @Body() body: { status: boolean }) {
     return this.admin.updateBannerStatus(id, body.status);
+  }
+
+  @Patch('banners/:id')
+  updateBanner(@Param('id', ParseIntPipe) id: number, @Body() body: Parameters<AdminService['updateBanner']>[1]) {
+    return this.admin.updateBanner(id, body);
   }
 
   @Delete('banners/:id')
@@ -592,8 +610,19 @@ export class AdminController {
   // ── Reports ───────────────────────────────────────────────────────────
 
   @Get('reports/sales-summary')
-  salesSummary(@Query('days') days?: string) {
-    return this.admin.salesSummary(toInt(days, 30));
+  salesSummary(
+    @Query('days') days?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('zone_id') zoneId?: string,
+    @Query('restaurant_id') restaurantId?: string,
+  ) {
+    return this.admin.salesSummary(toInt(days, 30), {
+      from: from || undefined,
+      to: to || undefined,
+      zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
+      restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
+    });
   }
 
   @Get('reports/restaurant-earnings')
@@ -683,6 +712,10 @@ export class AdminController {
   @Patch('campaigns/:id/status')
   updateCampaignStatus(@Param('id', ParseIntPipe) id: number, @Body() body: { status: boolean }) {
     return this.admin.updateCampaignStatus(id, body.status);
+  }
+  @Patch('campaigns/:id')
+  updateCampaign(@Param('id', ParseIntPipe) id: number, @Body() body: Parameters<AdminService['updateCampaign']>[1]) {
+    return this.admin.updateCampaign(id, body);
   }
   @Delete('campaigns/:id')
   deleteCampaign(@Param('id', ParseIntPipe) id: number) {
@@ -814,6 +847,10 @@ export class AdminController {
   createNotification(@Body() body: Parameters<AdminService['createNotification']>[0]) {
     return this.admin.createNotification(body);
   }
+  @Patch('notifications/:id')
+  updateNotification(@Param('id', ParseIntPipe) id: number, @Body() body: Parameters<AdminService['updateNotification']>[1]) {
+    return this.admin.updateNotification(id, body);
+  }
   @Delete('notifications/:id')
   deleteNotification(@Param('id', ParseIntPipe) id: number) {
     return this.admin.deleteNotification(id);
@@ -893,6 +930,10 @@ export class AdminController {
   @Post('admin-roles')
   createAdminRole(@Body() body: { name: string; modules?: string }) {
     return this.admin.createAdminRole(body);
+  }
+  @Patch('admin-roles/:id')
+  updateAdminRole(@Param('id', ParseIntPipe) id: number, @Body() body: { name?: string; modules?: string; status?: boolean }) {
+    return this.admin.updateAdminRole(id, body);
   }
   @Delete('admin-roles/:id')
   deleteAdminRole(@Param('id', ParseIntPipe) id: number) {
