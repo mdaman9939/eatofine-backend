@@ -3554,6 +3554,35 @@ function paginate<T>(rows: T[], total: number, limit: number, offset: number) {
   return { total, limit, offset, items: rows };
 }
 
+/** Read a foreign key that may be stored under either the `mysql_<x>_id`
+ *  (seeded) or plain `<x>_id` (migrated) name. */
+function readFk(row: Record<string, unknown>, key: string): number | null {
+  const a = row[`mysql_${key}`];
+  const b = row[key];
+  const v = a !== undefined && a !== null ? a : b;
+  return v !== undefined && v !== null ? Number(v) : null;
+}
+
+/** Batch-resolve a Map<mysqlId, label> for a set of ids in a collection, so
+ *  list endpoints can show real names instead of "#undefined". */
+async function nameMapFor(
+  mongo: MongoDataService,
+  collection: string,
+  ids: Array<number | null>,
+  fmt: (row: Record<string, unknown>) => string,
+): Promise<Map<number, string>> {
+  const unique = Array.from(new Set(ids.filter((x): x is number => x !== null && Number.isFinite(x))));
+  if (unique.length === 0) return new Map();
+  const rows = await mongo.findMany<Record<string, unknown>>(collection, { mysql_id: { $in: unique } });
+  return new Map(rows.map((r) => [Number(r.mysql_id), fmt(r)]));
+}
+
+/** Build a "First Last" label from a row, falling back to phone/email/—. */
+function personLabel(r: Record<string, unknown>): string {
+  const name = `${r.f_name ?? ''} ${r.l_name ?? ''}`.trim();
+  return name || (r.name as string) || (r.phone as string) || (r.email as string) || '—';
+}
+
 // ── Catalog extras ───────────────────────────────────────────────────────
 
 AdminService.prototype.listAddOns = async function (this: AdminService, opts: ListOpts & { restaurantId?: number }) {
@@ -3853,7 +3882,17 @@ AdminService.prototype.listAdvertisements = async function (this: AdminService, 
       this['mongo'].findMany<Record<string, unknown>>('advertisements', {}, { limit, skip: offset, sort: { mysql_id: -1 } }),
       this['mongo'].count('advertisements'),
     ]);
-    return paginate(mrows.map((r) => ({ ...r, id: Number(r.mysql_id) })), mtotal, limit, offset);
+    const restNames = await nameMapFor(this['mongo'], 'restaurants', mrows.map((r) => readFk(r, 'restaurant_id')), (x) => (x.name as string) ?? '—');
+    return paginate(mrows.map((r) => {
+      const restaurantId = readFk(r, 'restaurant_id');
+      return {
+        ...r,
+        id: Number(r.mysql_id),
+        restaurant_id: restaurantId,
+        restaurant_name: restaurantId !== null ? (restNames.get(restaurantId) ?? null) : null,
+        add_type: (r.add_type as string) ?? (r.type as string) ?? null,
+      };
+    }), mtotal, limit, offset);
   }
   const [rows, total] = await Promise.all([
     this['prisma'].advertisements.findMany({ orderBy: { id: 'desc' }, take: limit, skip: offset }),
@@ -4055,14 +4094,20 @@ AdminService.prototype.listLoyaltyPointTransactions = async function (this: Admi
       }),
       this['mongo'].count('loyalty_point_transactions'),
     ]);
+    const userNames = await nameMapFor(this['mongo'], 'users', rows.map((r) => readFk(r, 'user_id')), personLabel);
     return paginate(
-      rows.map((r) => ({
-        ...r,
-        id: Number(r.mysql_id),
-        credit: r.credit !== undefined && r.credit !== null ? Number(r.credit) : 0,
-        debit: r.debit !== undefined && r.debit !== null ? Number(r.debit) : 0,
-        balance: r.balance !== undefined && r.balance !== null ? Number(r.balance) : 0,
-      })),
+      rows.map((r) => {
+        const userId = readFk(r, 'user_id');
+        return {
+          ...r,
+          id: Number(r.mysql_id),
+          user_id: userId,
+          user_name: userId !== null ? (userNames.get(userId) ?? null) : null,
+          credit: r.credit !== undefined && r.credit !== null ? Number(r.credit) : 0,
+          debit: r.debit !== undefined && r.debit !== null ? Number(r.debit) : 0,
+          balance: r.balance !== undefined && r.balance !== null ? Number(r.balance) : 0,
+        };
+      }),
       total,
       limit,
       offset,
@@ -4097,8 +4142,23 @@ AdminService.prototype.listCashbackHistories = async function (this: AdminServic
       }),
       this['mongo'].count('cash_back_histories'),
     ]);
+    const userNames = await nameMapFor(this['mongo'], 'users', rows.map((r) => readFk(r, 'user_id')), personLabel);
     return paginate(
-      rows.map((r) => ({ ...r, id: Number(r.mysql_id) })),
+      rows.map((r) => {
+        const userId = readFk(r, 'user_id');
+        const calculated = r.calculated_amount !== undefined && r.calculated_amount !== null ? Number(r.calculated_amount) : 0;
+        return {
+          ...r,
+          id: Number(r.mysql_id),
+          user_id: userId,
+          order_id: readFk(r, 'order_id'),
+          user_name: userId !== null ? (userNames.get(userId) ?? null) : null,
+          // The cashback amount equals the calculated amount when not stored separately.
+          cashback_amount: r.cashback_amount !== undefined && r.cashback_amount !== null ? Number(r.cashback_amount) : calculated,
+          calculated_amount: calculated,
+          cashback_type: (r.cashback_type as string) ?? 'cashback',
+        };
+      }),
       total,
       limit,
       offset,
@@ -4123,12 +4183,22 @@ AdminService.prototype.listDisbursements = async function (this: AdminService, o
       }),
       this['mongo'].count('disbursements'),
     ]);
+    const vendorNames = await nameMapFor(this['mongo'], 'vendors', rows.map((r) => readFk(r, 'vendor_id')), personLabel);
     return paginate(
-      rows.map((r) => ({
-        ...r,
-        id: Number(r.mysql_id),
-        total_amount: r.total_amount !== undefined && r.total_amount !== null ? Number(r.total_amount) : 0,
-      })),
+      rows.map((r) => {
+        const vendorId = readFk(r, 'vendor_id');
+        const amount = r.total_amount !== undefined && r.total_amount !== null ? Number(r.total_amount) : 0;
+        return {
+          ...r,
+          id: Number(r.mysql_id),
+          vendor_id: vendorId,
+          // Report reads `amount`/`recipient`; also keep total_amount.
+          amount,
+          total_amount: amount,
+          recipient: vendorId !== null ? (vendorNames.get(vendorId) ?? null) : null,
+          type: (r.type as string) ?? 'restaurant',
+        };
+      }),
       total,
       limit,
       offset,
@@ -4462,12 +4532,27 @@ AdminService.prototype.listDMReviews = async function (this: AdminService, opts)
       }),
       this['mongo'].count('d_m_reviews'),
     ]);
+    // Resolve DM + customer names so the table shows real people, not #undefined.
+    const [dmNames, userNames] = await Promise.all([
+      nameMapFor(this['mongo'], 'delivery_men', rows.map((r) => readFk(r, 'delivery_man_id')), personLabel),
+      nameMapFor(this['mongo'], 'users', rows.map((r) => readFk(r, 'user_id')), personLabel),
+    ]);
     return paginate(
-      rows.map((r) => ({
-        ...r,
-        id: Number(r.mysql_id),
-        rating: r.rating !== undefined && r.rating !== null ? Number(r.rating) : 0,
-      })),
+      rows.map((r) => {
+        const dmId = readFk(r, 'delivery_man_id');
+        const userId = readFk(r, 'user_id');
+        const orderId = readFk(r, 'order_id');
+        return {
+          ...r,
+          id: Number(r.mysql_id),
+          delivery_man_id: dmId,
+          user_id: userId,
+          order_id: orderId,
+          dm_name: dmId !== null ? (dmNames.get(dmId) ?? null) : null,
+          user_name: userId !== null ? (userNames.get(userId) ?? null) : null,
+          rating: r.rating !== undefined && r.rating !== null ? Number(r.rating) : 0,
+        };
+      }),
       total,
       limit,
       offset,
