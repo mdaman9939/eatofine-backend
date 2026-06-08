@@ -1,4 +1,4 @@
-import { Controller, Get, NotFoundException, Param, ParseIntPipe, Query } from '@nestjs/common';
+import { Controller, Get, NotFoundException, Param, Query } from '@nestjs/common';
 import { BrowseService } from './browse.service';
 
 const parseZoneIdHeader = (raw: string | string[] | undefined): number | undefined => {
@@ -43,7 +43,9 @@ export class BrowseController {
   }
 
   @Get('restaurants/details/:id')
-  async restaurantDetails(@Param('id', ParseIntPipe) id: number) {
+  async restaurantDetails(@Param('id') id: string) {
+    // Accept a numeric id OR a slug — the app sends whichever it has, so a
+    // non-numeric value must NOT 400 (that froze the detail screen).
     const result = await this.browse.getRestaurantDetails(id);
     if (!result) throw new NotFoundException({ errors: [{ code: 'restaurant_id', message: 'not_found' }] });
     return result;
@@ -70,7 +72,9 @@ export class BrowseController {
   }
 
   @Get('products/details/:id')
-  async productDetails(@Param('id', ParseIntPipe) id: number) {
+  async productDetails(@Param('id') idStr: string) {
+    const id = parseInt(idStr, 10);
+    if (!Number.isFinite(id)) throw new NotFoundException({ errors: [{ code: 'food_id', message: 'not_found' }] });
     const result = await this.browse.getProductDetails(id);
     if (!result) throw new NotFoundException({ errors: [{ code: 'food_id', message: 'not_found' }] });
     return result;
@@ -78,19 +82,20 @@ export class BrowseController {
 
   @Get('categories/products/:categoryId')
   categoryProducts(
-    @Param('categoryId', ParseIntPipe) categoryId: number,
+    @Param('categoryId') categoryIdStr: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
-    return this.browse.getCategoryProducts(categoryId, parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
+    return this.browse.getCategoryProducts(parseInt(categoryIdStr, 10) || 0, parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
   }
 
   @Get('categories/restaurants/:categoryId')
   categoryRestaurants(
-    @Param('categoryId', ParseIntPipe) categoryId: number,
+    @Param('categoryId') categoryIdStr: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
+    const categoryId = parseInt(categoryIdStr, 10) || 0;
     return this.browse.getCategoryRestaurants(categoryId, parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
   }
 }

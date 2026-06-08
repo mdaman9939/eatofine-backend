@@ -3,6 +3,7 @@ import { AuthGuard, RequireAuth } from '../auth/auth.guard';
 import type { AuthedRequest } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { storageFullUrl } from '../common/storage-url';
 
 // Delivery-man app endpoints beyond the existing core ops. All return
 // empty / acknowledged shapes so the DM app navigates without 404s.
@@ -27,9 +28,12 @@ export class DeliveryExtrasController {
   /** Shape every delivery-man order row identically. The Flutter
    *  OrderModel uses `!` on detailsCount/orderStatus/orderType/createdAt/
    *  paymentMethod — same crash pattern we hit in the restaurant app. */
-  private shapeDmOrder(r: Record<string, unknown>, detailsCount: number) {
+  private shapeDmOrder(r: Record<string, unknown>, detailsCount: number, restaurant?: Record<string, unknown> | null, user?: Record<string, unknown> | null) {
     const created = r.created_at as Date | string | null | undefined;
     const updated = r.updated_at as Date | string | null | undefined;
+    const rest = restaurant ?? null;
+    const restLogo = rest ? (rest.logo as string | null | undefined) : null;
+    const u = user ?? null;
     return {
       ...r,
       id: Number(r.mysql_id),
@@ -50,7 +54,48 @@ export class DeliveryExtrasController {
       delivery_address: r.delivery_address ?? null,
       created_at: created ? new Date(created).toISOString() : new Date().toISOString(),
       updated_at: updated ? new Date(updated).toISOString() : new Date().toISOString(),
+      // Flat restaurant fields the DM app's OrderModel reads (without these it
+      // shows "No restaurant data found").
+      restaurant_name: rest ? (rest.name ?? null) : null,
+      restaurant_address: rest ? (rest.address ?? null) : null,
+      restaurant_phone: rest ? (rest.phone ?? null) : null,
+      restaurant_lat: rest && rest.latitude != null ? String(rest.latitude) : null,
+      restaurant_lng: rest && rest.longitude != null ? String(rest.longitude) : null,
+      restaurant_logo_full_url: storageFullUrl('restaurant', restLogo ?? null),
+      restaurant_delivery_time: rest ? (rest.delivery_time ?? '30-40') : '30-40',
+      restaurant_model: rest ? (rest.restaurant_model ?? null) : null,
+      // Nested customer object the DM app reads for "Customer Details".
+      customer: u
+        ? {
+            id: Number(u.mysql_id),
+            f_name: u.f_name ?? null,
+            l_name: u.l_name ?? null,
+            phone: u.phone ?? null,
+            email: u.email ?? null,
+            image_full_url: storageFullUrl('profile', (u.image as string | null | undefined) ?? null),
+          }
+        : null,
     };
+  }
+
+  /** Batch-fetch the customers (users) referenced by a set of orders. */
+  private async dmUserMap(orders: Record<string, unknown>[]): Promise<Map<number, Record<string, unknown>>> {
+    const ids = Array.from(new Set(
+      orders.map((o) => Number(o.mysql_user_id ?? o.user_id ?? 0)).filter((n) => n > 0),
+    ));
+    if (ids.length === 0) return new Map();
+    const rows = await this.mongo.findMany<Record<string, unknown>>('users', { mysql_id: { $in: ids } });
+    return new Map(rows.map((u) => [Number(u.mysql_id), u]));
+  }
+
+  /** Batch-fetch the restaurants referenced by a set of orders, keyed by id. */
+  private async dmRestaurantMap(orders: Record<string, unknown>[]): Promise<Map<number, Record<string, unknown>>> {
+    const ids = Array.from(new Set(
+      orders.map((o) => Number(o.mysql_restaurant_id ?? o.restaurant_id ?? 0)).filter((n) => n > 0),
+    ));
+    if (ids.length === 0) return new Map();
+    const rows = await this.mongo.findMany<Record<string, unknown>>('restaurants', { mysql_id: { $in: ids } });
+    return new Map(rows.map((r) => [Number(r.mysql_id), r]));
   }
 
   private async dmDetailsCountMap(orderIds: number[]): Promise<Map<number, number>> {
@@ -109,6 +154,7 @@ export class DeliveryExtrasController {
         phone: d.phone ?? null,
         image: d.image ?? null,
         status: d.status ?? null,
+        active: Number(d.active ?? 0) ? 1 : 0,
         application_status: d.application_status ?? null,
         zone_id: d.mysql_zone_id !== undefined && d.mysql_zone_id !== null
           ? Number(d.mysql_zone_id)
@@ -177,8 +223,20 @@ export class DeliveryExtrasController {
   }
 
   @HttpCode(200)
+  @HttpCode(200)
   @Post('update-active-status')
-  toggleActive() { return { message: 'updated' }; }
+  async toggleActive(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
+    if (this.useMongo()) {
+      const actorId = Number(req.actor!.id);
+      const raw = body.active ?? body.status;
+      if (raw !== undefined) {
+        const active = Number(raw) ? 1 : 0;
+        await this.mongo.updateOne('delivery_men', { mysql_id: actorId }, { active, updated_at: new Date() });
+        return { message: 'updated', active };
+      }
+    }
+    return { message: 'updated' };
+  }
 
   @HttpCode(200)
   @Post('update-fcm-token')
@@ -199,7 +257,9 @@ export class DeliveryExtrasController {
         { sort: { mysql_id: -1 }, limit: 50 },
       );
       const counts = await this.dmDetailsCountMap(rows.map((r) => Number(r.mysql_id)));
-      return rows.map((r) => this.shapeDmOrder(r, counts.get(Number(r.mysql_id)) ?? 1));
+      const restMap = await this.dmRestaurantMap(rows);
+      const userMap = await this.dmUserMap(rows);
+      return rows.map((r) => this.shapeDmOrder(r, counts.get(Number(r.mysql_id)) ?? 1, restMap.get(Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0)), userMap.get(Number(r.mysql_user_id ?? r.user_id ?? 0))));
     }
     const rows = await this.prisma.orders.findMany({ where: { delivery_man_id: req.actor!.id }, orderBy: { id: 'desc' }, take: 50 });
     return rows.map((r) => ({ ...r, id: Number(r.id), user_id: r.user_id ? Number(r.user_id) : null, restaurant_id: Number(r.restaurant_id), order_amount: Number(r.order_amount) }));
@@ -220,7 +280,9 @@ export class DeliveryExtrasController {
         { sort: { mysql_id: -1 } },
       );
       const counts = await this.dmDetailsCountMap(rows.map((r) => Number(r.mysql_id)));
-      return rows.map((r) => this.shapeDmOrder(r, counts.get(Number(r.mysql_id)) ?? 1));
+      const restMap = await this.dmRestaurantMap(rows);
+      const userMap = await this.dmUserMap(rows);
+      return rows.map((r) => this.shapeDmOrder(r, counts.get(Number(r.mysql_id)) ?? 1, restMap.get(Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0)), userMap.get(Number(r.mysql_user_id ?? r.user_id ?? 0))));
     }
     return [];
   }
@@ -242,7 +304,9 @@ export class DeliveryExtrasController {
         { sort: { mysql_id: -1 }, limit: 20 },
       );
       const counts = await this.dmDetailsCountMap(rows.map((r) => Number(r.mysql_id)));
-      return rows.map((r) => this.shapeDmOrder(r, counts.get(Number(r.mysql_id)) ?? 1));
+      const restMap = await this.dmRestaurantMap(rows);
+      const userMap = await this.dmUserMap(rows);
+      return rows.map((r) => this.shapeDmOrder(r, counts.get(Number(r.mysql_id)) ?? 1, restMap.get(Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0)), userMap.get(Number(r.mysql_user_id ?? r.user_id ?? 0))));
     }
     return [];
   }
@@ -255,7 +319,11 @@ export class DeliveryExtrasController {
       const o = await this.mongo.findByMysqlId<Record<string, unknown>>('orders', id);
       if (!o) return null;
       const counts = await this.dmDetailsCountMap([id]);
-      return this.shapeDmOrder(o, counts.get(id) ?? 1);
+      const restId = Number(o.mysql_restaurant_id ?? o.restaurant_id ?? 0);
+      const rest = restId > 0 ? await this.mongo.findByMysqlId<Record<string, unknown>>('restaurants', restId) : null;
+      const userId = Number(o.mysql_user_id ?? o.user_id ?? 0);
+      const user = userId > 0 ? await this.mongo.findByMysqlId<Record<string, unknown>>('users', userId) : null;
+      return this.shapeDmOrder(o, counts.get(id) ?? 1, rest, user);
     }
     const o = await this.prisma.orders.findUnique({ where: { id: BigInt(id) } });
     return o ? { ...o, id: Number(o.id), user_id: o.user_id ? Number(o.user_id) : null, restaurant_id: Number(o.restaurant_id), order_amount: Number(o.order_amount) } : null;
@@ -275,9 +343,23 @@ export class DeliveryExtrasController {
         { order_id: id },
         { sort: { mysql_id: 1 } },
       );
+      // Look up the real foods so item rows show the actual name + image
+      // (the stored food_details JSON often lacks them → "Food #id").
+      const foodIds = Array.from(new Set(items.map((it) => Number(it.food_id)).filter((n) => n > 0)));
+      const foods = foodIds.length
+        ? await this.mongo.findMany<Record<string, unknown>>('foods', { mysql_id: { $in: foodIds } })
+        : [];
+      const foodMap = new Map(foods.map((f) => [Number(f.mysql_id), f]));
       return items.map((it) => {
-        let parsed: { name?: string; image?: string } = {};
-        try { parsed = JSON.parse((it.food_details as string | undefined) ?? '{}'); } catch { /* ignore */ }
+        // Stored food_details may be a JSON string OR an object — read both.
+        let stored: { name?: string; image?: string } = {};
+        const raw = it.food_details;
+        if (typeof raw === 'string') { try { stored = JSON.parse(raw); } catch { /* ignore */ } }
+        else if (raw && typeof raw === 'object') stored = raw as { name?: string; image?: string };
+        const food = foodMap.get(Number(it.food_id));
+        const name = (food?.name as string | undefined) ?? stored.name ?? `Food #${it.food_id}`;
+        const image = (food?.image as string | undefined) ?? stored.image ?? null;
+        const imageUrl = storageFullUrl('product', image);
         return {
           id: Number(it.mysql_id),
           order_id: id,
@@ -291,12 +373,16 @@ export class DeliveryExtrasController {
           total_add_on_price: Number(it.total_add_on_price ?? 0),
           variation: it.variation ?? [],
           variant: it.variant ?? null,
-          food_details: it.food_details ?? null,
-          food: {
+          // The DM app parses food_details as an OBJECT (name + image_full_url).
+          food_details: {
             id: it.food_id ?? null,
-            name: parsed.name ?? 'Item',
-            image: parsed.image ?? null,
+            name,
+            image,
+            image_full_url: imageUrl,
+            price: Number(it.price ?? 0),
+            quantity: Number(it.quantity ?? 1),
           },
+          food: { id: it.food_id ?? null, name, image, image_full_url: imageUrl },
         };
       });
     }

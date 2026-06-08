@@ -26,18 +26,21 @@ import { MigrationModule } from './mongo/migration.module';
   imports: [
     NestConfig.forRoot({ isGlobal: true }),
     // Two throttler buckets: a permissive global default + an `auth` bucket
-    // for login/signup. Defaults tuned for the demo phase — bump down with
-    // env vars once the app is in front of real users.
+    // for login/signup. The default is intentionally generous — the apps are
+    // chatty (search-as-you-type + 10–15 calls per screen), so a low cap shows
+    // up as "Too Many Requests" during normal use. Tune via env if needed.
     //
-    //   AUTH_THROTTLE_LIMIT  (default 30) attempts per IP
+    //   THROTTLE_LIMIT       (default 2000) requests per IP per window
+    //   THROTTLE_TTL         (default 60000 ms = 1 min)  window
+    //   AUTH_THROTTLE_LIMIT  (default 30) login/signup attempts per IP
     //   AUTH_THROTTLE_TTL    (default 300000 ms = 5 min)  window
     //
-    // For hardened production, set AUTH_THROTTLE_LIMIT=5 AUTH_THROTTLE_TTL=900000.
+    // For hardened production, lower THROTTLE_LIMIT and AUTH_THROTTLE_LIMIT.
     ThrottlerModule.forRoot([
       {
         name: 'default',
-        ttl: 60_000,
-        limit: 240,
+        ttl: parseInt(process.env.THROTTLE_TTL ?? '60000', 10),
+        limit: parseInt(process.env.THROTTLE_LIMIT ?? '2000', 10),
       },
       {
         name: 'auth',

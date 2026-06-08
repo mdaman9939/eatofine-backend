@@ -1,6 +1,8 @@
 import { Controller, Get, Post, Query, Param, HttpCode } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { storageFullUrl } from '../common/storage-url';
 
 // Public catalog endpoints that aren't under the existing CatalogController.
 // These mostly return seeded data or sensible empty arrays for the demo.
@@ -265,6 +267,10 @@ export class CatalogExtrasController {
   }
 
   // ── Search ───────────────────────────────────────────────────────
+  // Search-as-you-type fires one request per keystroke — exempt the search
+  // endpoints from the rate limiter so fast typing never hits "Too Many
+  // Requests" (they're read-only and cheap).
+  @SkipThrottle()
   @Get('products/food-or-restaurant-search')
   async search(@Query('name') name?: string, @Query('limit') limitStr?: string) {
     const limit = parseInt(limitStr ?? '20', 10);
@@ -342,6 +348,7 @@ export class CatalogExtrasController {
   /** Full product search — invoked from customer app's search results page
    *  with the same query params that Laravel used. Returns the same shape
    *  as `food-or-restaurant-search` but only the products half. */
+  @SkipThrottle()
   @Get('products/search')
   async productsSearch(
     @Query('name') name?: string,
@@ -388,6 +395,7 @@ export class CatalogExtrasController {
   }
 
   /** Full restaurant search — same as above but for restaurants. */
+  @SkipThrottle()
   @Get('restaurants/search')
   async restaurantsSearch(
     @Query('name') name?: string,
@@ -550,14 +558,22 @@ export class CatalogExtrasController {
     if (this.useMongo()) {
       const rows = await this.mongo.findMany<Record<string, unknown>>(
         'advertisements',
-        { status: 'approved' },
+        { status: { $in: ['approved', 'running'] } },
         { sort: { priority: 1 }, limit: 20 },
       );
+      const img = (f: unknown) => {
+        const s = f && String(f).trim() ? String(f) : '';
+        if (!s) return null;
+        return /^https?:\/\//i.test(s) ? s : storageFullUrl('advertisement', s);
+      };
       return rows.map((r) => ({
         ...r,
         id: Number(r.mysql_id),
         restaurant_id: Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0),
         created_by_id: Number(r.mysql_created_by_id ?? r.created_by_id ?? 0),
+        cover_image_full_url: img(r.cover_image),
+        profile_image_full_url: img(r.profile_image),
+        video_attachment_full_url: img(r.video_attachment),
       }));
     }
     // Prisma fallback: catch the inevitable MySQL-unreachable error so the

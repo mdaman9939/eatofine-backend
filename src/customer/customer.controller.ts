@@ -4,7 +4,6 @@ import {
   Delete,
   Get,
   HttpCode,
-  ParseIntPipe,
   Post,
   Query,
   Req,
@@ -83,11 +82,11 @@ export class CustomerController {
   @RequireAuth()
   async cartRemoveItem(
     @Req() req: AuthedRequest,
-    @Query('cart_id', ParseIntPipe) cartId: number,
+    @Query('cart_id') cartIdStr?: string,
     @Query('guest_id') guestIdStr?: string,
   ) {
     const id = await this.resolveCartIdentity(req, guestIdStr);
-    return this.customer.removeCartItem(id, cartId);
+    return this.customer.removeCartItem(id, parseInt(cartIdStr ?? '', 10) || 0);
   }
 
   @Delete('cart/remove')

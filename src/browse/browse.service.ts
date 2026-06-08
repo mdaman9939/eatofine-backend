@@ -152,15 +152,19 @@ export class BrowseService {
     };
   }
 
-  /** Map MongoDB restaurant doc â†’ response shape (mirrors mapRestaurant). */
-  private mapRestaurantMongo(r: MongoRestaurantDoc) {
+  /** Map MongoDB restaurant doc â†’ response shape (mirrors mapRestaurant).
+   *  When the restaurant has no logo, fall back to the owner's (vendor)
+   *  profile image so the card/header still shows the photo they uploaded. */
+  private mapRestaurantMongo(r: MongoRestaurantDoc, vendorImage?: string | null) {
+    const logo = r.logo ?? null;
+    const logoUrl = this.fullUrl('restaurant', logo) ?? this.fullUrl('profile', vendorImage ?? null);
     return {
       id: Number(r.mysql_id ?? 0),
       name: r.name ?? null,
       phone: r.phone ?? null,
       email: r.email ?? null,
-      logo: r.logo ?? null,
-      logo_full_url: this.fullUrl('restaurant', r.logo ?? null),
+      logo: logo ?? vendorImage ?? null,
+      logo_full_url: logoUrl,
       cover_photo: r.cover_photo ?? null,
       cover_photo_full_url: this.fullUrl('restaurant/cover', r.cover_photo ?? null),
       latitude: r.latitude != null ? String(r.latitude) : null,
@@ -186,6 +190,21 @@ export class BrowseService {
       closeing_time: r.closeing_time ?? null,
       food_section: r.food_section ? 1 : 0,
     };
+  }
+
+  /** Batch-fetch owner (vendor) images for a set of restaurants, so list cards
+   *  can fall back to the vendor's photo when a restaurant has no logo. */
+  private async vendorImageMap(restaurants: MongoRestaurantDoc[]): Promise<Map<number, string | null>> {
+    const ids = Array.from(new Set(
+      restaurants.filter((r) => !r.logo && r.mysql_vendor_id).map((r) => Number(r.mysql_vendor_id)),
+    ));
+    if (ids.length === 0) return new Map();
+    const vendors = await this.mongo.findMany<{ mysql_id: number; image?: string | null }>(
+      'vendors',
+      { mysql_id: { $in: ids } },
+      { projection: { mysql_id: 1, image: 1 } as Record<string, 0 | 1> },
+    );
+    return new Map(vendors.map((v) => [Number(v.mysql_id), v.image ?? null]));
   }
 
   private mapFood(
@@ -297,12 +316,13 @@ export class BrowseService {
         skip: Math.max(0, (opts.offset - 1) * opts.limit),
         sort: { mysql_id: 1 },
       });
+      const vendorImg = await this.vendorImageMap(rows);
       return {
         filter_data: opts.filter ?? 'all',
         total_size: total,
         limit: String(opts.limit),
         offset: String(opts.offset),
-        restaurants: rows.map((r) => this.mapRestaurantMongo(r)),
+        restaurants: rows.map((r) => this.mapRestaurantMongo(r, vendorImg.get(Number(r.mysql_vendor_id ?? 0)))),
       };
     }
     const where: { status: boolean; active?: boolean; zone_id?: bigint } = { status: true, active: true };
@@ -382,10 +402,17 @@ export class BrowseService {
     };
   }
 
-  async getRestaurantDetails(id: number) {
+  async getRestaurantDetails(idOrSlug: number | string) {
+    const numeric = /^\d+$/.test(String(idOrSlug)) ? Number(idOrSlug) : null;
     if (this.useMongo()) {
-      const r = await this.mongo.findByMysqlId<MongoRestaurantDoc>('restaurants', Number(id));
+      const r = numeric !== null
+        ? await this.mongo.findByMysqlId<MongoRestaurantDoc>('restaurants', numeric)
+        : await this.mongo.findOne<MongoRestaurantDoc>('restaurants', { slug: String(idOrSlug) });
       if (!r) return null;
+      const id = Number(r.mysql_id);
+      const vendor = r.mysql_vendor_id
+        ? await this.mongo.findByMysqlId<{ mysql_id: number; image?: string | null }>('vendors', Number(r.mysql_vendor_id))
+        : null;
       const foods = await this.mongo.findMany<MongoFoodDoc>(
         'foods',
         { mysql_restaurant_id: Number(id), status: true },
@@ -401,7 +428,7 @@ export class BrowseService {
           })
         : [];
       return {
-        ...this.mapRestaurantMongo(r),
+        ...this.mapRestaurantMongo(r, vendor?.image),
         foods: foods.map((f) => this.mapFoodMongo(f, r.name)),
         categories: cats.map((c) => ({
           id: Number(c.mysql_id ?? 0),
@@ -412,7 +439,8 @@ export class BrowseService {
         })),
       };
     }
-    const r = await this.prisma.restaurants.findUnique({ where: { id: BigInt(id) } });
+    if (numeric === null) return null; // MySQL fallback only resolves numeric ids
+    const r = await this.prisma.restaurants.findUnique({ where: { id: BigInt(numeric) } });
     if (!r) return null;
     const foods = await this.prisma.food.findMany({
       where: { restaurant_id: r.id, status: true },

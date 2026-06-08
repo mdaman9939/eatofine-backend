@@ -1,4 +1,4 @@
-import { Controller, Get, Param, ParseFloatPipe, ParseIntPipe, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { CatalogRouterService } from './catalog-router.service';
 
 @Controller()
@@ -10,9 +10,12 @@ export class CatalogController {
     return this.catalog.listZones();
   }
 
+  // Lenient parse — a missing / non-numeric lat-lng must not 400 (that breaks
+  // zone detection app-wide). Invalid coords still resolve to a default zone
+  // via the service (so the app always has a usable zone).
   @Get('zone/check')
-  checkZone(@Query('lat', ParseFloatPipe) lat: number, @Query('lng', ParseFloatPipe) lng: number) {
-    return this.catalog.checkZone(lat, lng);
+  checkZone(@Query('lat') latStr?: string, @Query('lng') lngStr?: string) {
+    return this.catalog.checkZone(Number(latStr), Number(lngStr));
   }
 
   @Get('categories')
@@ -21,8 +24,8 @@ export class CatalogController {
   }
 
   @Get('categories/childes/:parentId')
-  childCategories(@Param('parentId', ParseIntPipe) parentId: number) {
-    return this.catalog.listChildCategories(parentId);
+  childCategories(@Param('parentId') parentIdStr: string) {
+    return this.catalog.listChildCategories(parseInt(parentIdStr, 10) || 0);
   }
 
   @Get('banners')
