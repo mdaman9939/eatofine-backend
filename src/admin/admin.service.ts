@@ -1306,6 +1306,20 @@ export class AdminService {
     return { ok: true, id, status };
   }
 
+  /** Remove a delivery man. Mirrors Laravel's DeliveryManController::delete. */
+  async deleteDeliveryMan(id: number) {
+    if (this.useMongo()) {
+      const d = await this.mongo.findByMysqlId<{ mysql_id: number }>('delivery_men', id);
+      if (!d) throw new NotFoundException({ errors: [{ code: 'delivery_man', message: 'Delivery man not found' }] });
+      await this.mongo.deleteOne('delivery_men', { mysql_id: id });
+      return { ok: true, id };
+    }
+    const d = await this.prisma.delivery_men.findUnique({ where: { id: BigInt(id) }, select: { id: true } });
+    if (!d) throw new NotFoundException({ errors: [{ code: 'delivery_man', message: 'Delivery man not found' }] });
+    await this.prisma.delivery_men.delete({ where: { id: d.id } });
+    return { ok: true, id };
+  }
+
   async approveDeliveryMan(id: number, approval: 'approved' | 'denied') {
     if (this.useMongo()) {
       const d = await this.mongo.findByMysqlId<{ mysql_id: number }>('delivery_men', id);
@@ -1494,6 +1508,24 @@ export class AdminService {
     if (!f) throw new NotFoundException({ errors: [{ code: 'food', message: 'Food not found' }] });
     await this.prisma.food.update({ where: { id: f.id }, data: { recommended } });
     return { ok: true, id, recommended };
+  }
+
+  /** Delete a food item. Mirrors Laravel's FoodController::delete — also drops
+   *  the dish from any cart/wishlist rows so nothing references a ghost food. */
+  async deleteFood(id: number) {
+    if (this.useMongo()) {
+      const f = await this.mongo.findByMysqlId<{ mysql_id: number }>('foods', id);
+      if (!f) throw new NotFoundException({ errors: [{ code: 'food', message: 'Food not found' }] });
+      await this.mongo.deleteOne('foods', { mysql_id: id });
+      // Best-effort cleanup of dependent rows (ignore if collections absent).
+      await this.mongo.deleteMany('carts', { mysql_food_id: id }).catch(() => undefined);
+      await this.mongo.deleteMany('wishlists', { mysql_food_id: id }).catch(() => undefined);
+      return { ok: true, id };
+    }
+    const f = await this.prisma.food.findUnique({ where: { id: BigInt(id) }, select: { id: true } });
+    if (!f) throw new NotFoundException({ errors: [{ code: 'food', message: 'Food not found' }] });
+    await this.prisma.food.delete({ where: { id: f.id } });
+    return { ok: true, id };
   }
 
   // ── Categories ────────────────────────────────────────────────────────
@@ -2155,6 +2187,67 @@ export class AdminService {
     throw new BadRequestException({
       errors: [{ code: 'config', message: 'Zone creation requires USE_MONGO_ADMIN=1 (MySQL path is read-only).' }],
     });
+  }
+
+  /** Full zone record (incl. coverage polygon) for the edit form. */
+  async getZone(id: number) {
+    if (this.useMongo()) {
+      const z = await this.mongo.findByMysqlId<Record<string, unknown>>('zones', id);
+      if (!z) throw new NotFoundException({ errors: [{ code: 'zone', message: 'Zone not found' }] });
+      return {
+        zone: {
+          id: Number(z.mysql_id),
+          name: (z.name as string) ?? null,
+          display_name: (z.display_name as string) ?? null,
+          coordinates: Array.isArray(z.coordinates) ? z.coordinates : [],
+          status: (z.status as boolean) ?? true,
+          is_default: (z.is_default as boolean) ?? false,
+          zone_for: (z.zone_for as string) ?? 'restaurant',
+          minimum_shipping_charge: Number(z.minimum_shipping_charge ?? 0),
+          per_km_shipping_charge: Number(z.per_km_shipping_charge ?? 0),
+          maximum_shipping_charge: Number(z.maximum_shipping_charge ?? 0),
+          minimum_delivery_time: Number(z.minimum_delivery_time ?? 0),
+          max_cod_order_amount: Number(z.max_cod_order_amount ?? 0),
+        },
+      };
+    }
+    throw new BadRequestException({ errors: [{ code: 'config', message: 'Zone edit requires USE_MONGO_ADMIN=1.' }] });
+  }
+
+  /** Edit a zone's name / charges / coverage polygon. Mirrors Laravel's
+   *  ZoneController::update — only the fields actually sent are changed. */
+  async updateZone(id: number, body: {
+    name?: string; display_name?: string;
+    minimum_shipping_charge?: number; per_km_shipping_charge?: number;
+    maximum_shipping_charge?: number; minimum_delivery_time?: number;
+    max_cod_order_amount?: number; is_default?: boolean;
+    coordinates?: Array<{ lat: number; lng: number }>; zone_for?: string;
+  }) {
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Zone edit requires USE_MONGO_ADMIN=1.' }] });
+    const z = await this.mongo.findByMysqlId<{ mysql_id: number }>('zones', id);
+    if (!z) throw new NotFoundException({ errors: [{ code: 'zone', message: 'Zone not found' }] });
+
+    const data: Record<string, unknown> = {};
+    if (body.name !== undefined && body.name.trim()) data.name = body.name.trim();
+    if (body.display_name !== undefined) data.display_name = body.display_name.trim() || (data.name as string | undefined);
+    if (body.minimum_shipping_charge !== undefined) data.minimum_shipping_charge = Number(body.minimum_shipping_charge);
+    if (body.per_km_shipping_charge !== undefined) data.per_km_shipping_charge = Number(body.per_km_shipping_charge);
+    if (body.maximum_shipping_charge !== undefined) data.maximum_shipping_charge = Number(body.maximum_shipping_charge);
+    if (body.minimum_delivery_time !== undefined) data.minimum_delivery_time = Number(body.minimum_delivery_time);
+    if (body.max_cod_order_amount !== undefined) data.max_cod_order_amount = Number(body.max_cod_order_amount);
+    if (body.is_default !== undefined) data.is_default = !!body.is_default;
+    if (body.zone_for !== undefined) data.zone_for = body.zone_for === 'deliveryman' ? 'deliveryman' : 'restaurant';
+    if (Array.isArray(body.coordinates)) {
+      data.coordinates = body.coordinates
+        .filter((p) => p && typeof p.lat === 'number' && typeof p.lng === 'number')
+        .map((p) => ({ lat: Number(p.lat), lng: Number(p.lng) }));
+    }
+    if (Object.keys(data).length === 0) {
+      throw new BadRequestException({ errors: [{ code: 'body', message: 'no fields to update' }] });
+    }
+    data.updated_at = new Date();
+    await this.mongo.updateOne('zones', { mysql_id: id }, data);
+    return { ok: true, id };
   }
 
   // ── Create restaurant / food / delivery-man (admin Add forms) ────────
@@ -3687,10 +3780,12 @@ declare module './admin.service' {
     deleteAddOn(id: number): Promise<unknown>;
     listAddonCategories(opts: ListOpts): Promise<unknown>;
     createAddonCategory(body: { name: string }): Promise<unknown>;
+    updateAddonCategory(id: number, body: { name?: string }): Promise<unknown>;
     updateAddonCategoryStatus(id: number, status: boolean): Promise<unknown>;
     deleteAddonCategory(id: number): Promise<unknown>;
     listAttributes(): Promise<unknown>;
     createAttribute(body: { name: string }): Promise<unknown>;
+    updateAttribute(id: number, body: { name?: string }): Promise<unknown>;
     deleteAttribute(id: number): Promise<unknown>;
     // — Marketing —
     listCampaigns(opts: ListOpts & { type?: string }): Promise<unknown>;
@@ -3739,6 +3834,7 @@ declare module './admin.service' {
     createOfflinePaymentMethod(body: { method_name?: string; method_fields?: string; method_informations?: string }): Promise<unknown>;
     updateOfflinePaymentMethod(id: number, body: { method_name?: string; method_fields?: string; method_informations?: string; status?: number }): Promise<unknown>;
     updateOfflinePaymentMethodStatus(id: number, status: number): Promise<unknown>;
+    deleteOfflinePaymentMethod(id: number): Promise<unknown>;
     listProvideDMEarnings(opts: ListOpts): Promise<unknown>;
     // — Content / comm —
     listContactMessages(opts: ListOpts): Promise<unknown>;
@@ -3771,6 +3867,7 @@ declare module './admin.service' {
       f_name?: string; l_name?: string; email?: string; phone?: string;
       password?: string; role_id?: number; zone_id?: number | null; image?: string;
     }): Promise<unknown>;
+    deleteEmployee(id: number): Promise<unknown>;
     listAdminRoles(): Promise<unknown>;
     createAdminRole(body: { name: string; modules?: string }): Promise<unknown>;
     updateAdminRole(id: number, body: { name?: string; modules?: string; status?: boolean }): Promise<unknown>;
@@ -4048,6 +4145,20 @@ AdminService.prototype.deleteAddonCategory = async function (this: AdminService,
   return { ok: true, id };
 };
 
+AdminService.prototype.updateAddonCategory = async function (this: AdminService, id, body) {
+  if (!body.name || !body.name.trim()) throw new BadRequestException({ errors: [{ code: 'name', message: 'name required' }] });
+  if (this['useMongo']()) {
+    const c = await this['mongo'].findByMysqlId<{ mysql_id: number }>('addon_categories', id);
+    if (!c) throw new NotFoundException({ errors: [{ code: 'addon_category', message: 'not found' }] });
+    await this['mongo'].updateOne('addon_categories', { mysql_id: Number(id) }, { name: body.name.trim(), updated_at: new Date() });
+    return { ok: true, id };
+  }
+  const c = await this['prisma'].addon_categories.findUnique({ where: { id: BigInt(id) }, select: { id: true } });
+  if (!c) throw new NotFoundException({ errors: [{ code: 'addon_category', message: 'not found' }] });
+  await this['prisma'].addon_categories.update({ where: { id: c.id }, data: { name: body.name.trim() } });
+  return { ok: true, id };
+};
+
 AdminService.prototype.listAttributes = async function (this: AdminService) {
   if (this['useMongo']()) {
     const rows = await this['mongo'].findMany<Record<string, unknown>>('attributes', {}, { sort: { mysql_id: -1 } });
@@ -4078,6 +4189,20 @@ AdminService.prototype.deleteAttribute = async function (this: AdminService, id)
   const a = await this['prisma'].attributes.findUnique({ where: { id: BigInt(id) }, select: { id: true } });
   if (!a) throw new NotFoundException({ errors: [{ code: 'attribute', message: 'not found' }] });
   await this['prisma'].attributes.delete({ where: { id: a.id } });
+  return { ok: true, id };
+};
+
+AdminService.prototype.updateAttribute = async function (this: AdminService, id, body) {
+  if (!body.name || !body.name.trim()) throw new BadRequestException({ errors: [{ code: 'name', message: 'name required' }] });
+  if (this['useMongo']()) {
+    const a = await this['mongo'].findByMysqlId<{ mysql_id: number }>('attributes', id);
+    if (!a) throw new NotFoundException({ errors: [{ code: 'attribute', message: 'not found' }] });
+    await this['mongo'].updateOne('attributes', { mysql_id: Number(id) }, { name: body.name.trim(), updated_at: new Date() });
+    return { ok: true, id };
+  }
+  const a = await this['prisma'].attributes.findUnique({ where: { id: BigInt(id) }, select: { id: true } });
+  if (!a) throw new NotFoundException({ errors: [{ code: 'attribute', message: 'not found' }] });
+  await this['prisma'].attributes.update({ where: { id: a.id }, data: { name: body.name.trim() } });
   return { ok: true, id };
 };
 
@@ -4788,6 +4913,19 @@ AdminService.prototype.updateOfflinePaymentMethodStatus = async function (this: 
   return { ok: true, id, status };
 };
 
+AdminService.prototype.deleteOfflinePaymentMethod = async function (this: AdminService, id) {
+  if (this['useMongo']()) {
+    const m = await this['mongo'].findByMysqlId<{ mysql_id: number }>('offline_payment_methods', Number(id));
+    if (!m) throw new NotFoundException({ errors: [{ code: 'method', message: 'not found' }] });
+    await this['mongo'].deleteOne('offline_payment_methods', { mysql_id: Number(id) });
+    return { ok: true, id };
+  }
+  const m = await this['prisma'].offline_payment_methods.findUnique({ where: { id: BigInt(id) }, select: { id: true } });
+  if (!m) throw new NotFoundException({ errors: [{ code: 'method', message: 'not found' }] });
+  await this['prisma'].offline_payment_methods.delete({ where: { id: m.id } });
+  return { ok: true, id };
+};
+
 AdminService.prototype.listProvideDMEarnings = async function (this: AdminService, opts) {
   const limit = opts.limit ?? 50;
   const offset = opts.offset ?? 0;
@@ -5312,6 +5450,18 @@ AdminService.prototype.updateEmployee = async function (this: AdminService, id, 
   if (Object.keys(data).length === 0) throw new BadRequestException({ errors: [{ code: 'body', message: 'no fields to update' }] });
   data.updated_at = new Date();
   await this['mongo'].updateOne('admins', { mysql_id: Number(id) }, data);
+  return { ok: true, id };
+};
+
+AdminService.prototype.deleteEmployee = async function (this: AdminService, id) {
+  if (!this['useMongo']()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+  const e = await this['mongo'].findByMysqlId<{ mysql_id: number; role_id?: number | null }>('admins', Number(id));
+  if (!e) throw new NotFoundException({ errors: [{ code: 'employee', message: 'Employee not found' }] });
+  // Guard: never delete the super-admin (role_id 1) — it would lock everyone out.
+  if (Number(e.role_id) === 1) {
+    throw new BadRequestException({ errors: [{ code: 'employee', message: 'The super admin account cannot be deleted' }] });
+  }
+  await this['mongo'].deleteOne('admins', { mysql_id: Number(id) });
   return { ok: true, id };
 };
 

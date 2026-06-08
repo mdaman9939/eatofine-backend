@@ -253,6 +253,11 @@ export class AdminController {
     return this.admin.approveDeliveryMan(id, body.approval);
   }
 
+  @Delete('delivery-men/:id')
+  deleteDeliveryMan(@Param('id', ParseIntPipe) id: number) {
+    return this.admin.deleteDeliveryMan(id);
+  }
+
   // ── Food ──────────────────────────────────────────────────────────────
 
   @Get('food')
@@ -300,6 +305,11 @@ export class AdminController {
   @Patch('food/:id/recommended')
   updateFoodRecommended(@Param('id', ParseIntPipe) id: number, @Body() body: { recommended: boolean }) {
     return this.admin.updateFoodRecommended(id, body.recommended);
+  }
+
+  @Delete('food/:id')
+  deleteFood(@Param('id', ParseIntPipe) id: number) {
+    return this.admin.deleteFood(id);
   }
 
   // ── Categories ────────────────────────────────────────────────────────
@@ -419,6 +429,16 @@ export class AdminController {
   @Patch('zones/:id/status')
   updateZoneStatus(@Param('id', ParseIntPipe) id: number, @Body() body: { status: boolean }) {
     return this.admin.updateZoneStatus(id, body.status);
+  }
+
+  @Get('zones/:id')
+  zoneDetail(@Param('id', ParseIntPipe) id: number) {
+    return this.admin.getZone(id);
+  }
+
+  @Patch('zones/:id')
+  updateZone(@Param('id', ParseIntPipe) id: number, @Body() body: Parameters<AdminService['updateZone']>[1]) {
+    return this.admin.updateZone(id, body);
   }
 
   @Delete('zones/:id')
@@ -744,6 +764,10 @@ export class AdminController {
   updateAddonCategoryStatus(@Param('id', ParseIntPipe) id: number, @Body() body: { status: boolean }) {
     return this.admin.updateAddonCategoryStatus(id, body.status);
   }
+  @Patch('addon-categories/:id')
+  updateAddonCategory(@Param('id', ParseIntPipe) id: number, @Body() body: { name?: string }) {
+    return this.admin.updateAddonCategory(id, body);
+  }
   @Delete('addon-categories/:id')
   deleteAddonCategory(@Param('id', ParseIntPipe) id: number) {
     return this.admin.deleteAddonCategory(id);
@@ -756,6 +780,10 @@ export class AdminController {
   @Post('attributes')
   createAttribute(@Body() body: { name: string }) {
     return this.admin.createAttribute(body);
+  }
+  @Patch('attributes/:id')
+  updateAttribute(@Param('id', ParseIntPipe) id: number, @Body() body: { name?: string }) {
+    return this.admin.updateAttribute(id, body);
   }
   @Delete('attributes/:id')
   deleteAttribute(@Param('id', ParseIntPipe) id: number) {
@@ -917,6 +945,10 @@ export class AdminController {
   ) {
     return this.admin.updateOfflinePaymentMethodStatus(id, body.status);
   }
+  @Delete('offline-payment-methods/:id')
+  deleteOfflinePaymentMethod(@Param('id', ParseIntPipe) id: number) {
+    return this.admin.deleteOfflinePaymentMethod(id);
+  }
 
   @Get('dm-earnings')
   provideDmEarnings(@Query('limit') limit?: string, @Query('offset') offset?: string) {
@@ -1028,6 +1060,10 @@ export class AdminController {
   @Patch('employees/:id')
   updateEmployee(@Param('id', ParseIntPipe) id: number, @Body() body: Parameters<AdminService['updateEmployee']>[1]) {
     return this.admin.updateEmployee(id, body);
+  }
+  @Delete('employees/:id')
+  deleteEmployee(@Param('id', ParseIntPipe) id: number) {
+    return this.admin.deleteEmployee(id);
   }
 
   @Get('admin-roles')
