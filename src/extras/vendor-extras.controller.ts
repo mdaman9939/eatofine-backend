@@ -1906,42 +1906,225 @@ export class VendorExtrasController {
   @Post('campaign-leave')
   campaignLeave() { return { message: 'left' }; }
 
-  @Get('advertisement')
-  async ads(@Req() req: AuthedRequest) {
-    if (this.useMongo()) {
-      const r = await this.mongo.findOne<MongoRestaurantDoc>('restaurants', { mysql_vendor_id: Number(req.actor!.id) });
-      if (!r) return [];
-      const rows = await this.mongo.findMany<MongoAdDoc>('advertisements', { mysql_restaurant_id: Number(r.mysql_id) });
-      return rows.map((row) => ({
-        ...(row.legacy ?? {}),
-        ...row,
-        id: Number(row.mysql_id),
-        restaurant_id: row.mysql_restaurant_id !== null && row.mysql_restaurant_id !== undefined ? Number(row.mysql_restaurant_id) : 0,
-        created_by_id: row.mysql_created_by_id !== null && row.mysql_created_by_id !== undefined ? Number(row.mysql_created_by_id) : 0,
-      }));
-    }
-    const r = await this.prisma.restaurants.findFirst({ where: { vendor_id: req.actor!.id }, select: { id: true } });
-    if (!r) return [];
-    const rows = await this.prisma.advertisements.findMany({ where: { restaurant_id: r.id } });
-    return rows.map((row) => ({ ...row, id: Number(row.id), restaurant_id: Number(row.restaurant_id), created_by_id: Number(row.created_by_id) }));
+  /** Map a Mongo advertisement doc to the exact shape AdvertisementModel.Adds
+   *  / AdsDetailsModel expect in the restaurant app. */
+  private shapeAd(row: Record<string, unknown>) {
+    const r = row as Record<string, unknown>;
+    const img = (f: unknown) => (f && String(f).trim() ? this.buildStorageUrl('advertisement', String(f)) : null);
+    return {
+      id: Number(r.mysql_id),
+      restaurant_id: r.mysql_restaurant_id != null ? Number(r.mysql_restaurant_id) : 0,
+      add_type: r.add_type ?? 'restaurant_promotion',
+      title: r.title ?? null,
+      description: r.description ?? null,
+      start_date: r.start_date ?? null,
+      end_date: r.end_date ?? null,
+      pause_note: r.pause_note ?? null,
+      cancellation_note: r.cancellation_note ?? null,
+      cover_image: r.cover_image ?? null,
+      profile_image: r.profile_image ?? null,
+      video_attachment: r.video_attachment ?? null,
+      priority: Number(r.priority ?? 0),
+      is_rating_active: Number(r.is_rating_active ?? 0),
+      is_review_active: Number(r.is_review_active ?? 0),
+      is_paid: Number(r.is_paid ?? 0),
+      is_updated: Number(r.is_updated ?? 0),
+      created_by_id: r.mysql_created_by_id != null ? Number(r.mysql_created_by_id) : 0,
+      created_by_type: r.created_by_type ?? 'vendor',
+      status: r.status ?? 'pending',
+      active: Number(r.active ?? 1),
+      created_at: r.created_at ?? null,
+      updated_at: r.updated_at ?? null,
+      cover_image_full_url: img(r.cover_image),
+      profile_image_full_url: img(r.profile_image),
+      video_attachment_full_url: img(r.video_attachment),
+      translations: Array.isArray(r.translations) ? r.translations : [],
+      storage: [],
+    };
   }
-  @Get('advertisement/details')
-  adDetails() { return null; }
+
+  /** Parse the ad translations JSON (keys 'title' / 'description'). */
+  private parseAdTranslations(raw: unknown): { title: string | null; description: string | null; translations: Array<{ locale?: string; key?: string; value?: string }> } {
+    let translations: Array<{ locale?: string; key?: string; value?: string }> = [];
+    if (typeof raw === 'string') { try { translations = JSON.parse(raw) ?? []; } catch { translations = []; } }
+    else if (Array.isArray(raw)) translations = raw as typeof translations;
+    const pick = (key: string) =>
+      translations.find((t) => t?.locale === 'en' && t?.key === key)?.value
+      ?? translations.find((t) => t?.key === key)?.value ?? null;
+    return { title: pick('title'), description: pick('description'), translations };
+  }
+
+  /** Shared create logic for store + copy-add-post. */
+  private async createAdvertisement(req: AuthedRequest, body: Record<string, unknown>, files: { cover_image?: Express.Multer.File[]; profile_image?: Express.Multer.File[]; video_attachment?: Express.Multer.File[] }) {
+    if (!this.useMongo()) return { message: 'ad created' };
+    const restaurant = await this.vendorRestaurant(req);
+    if (!restaurant) return { errors: [{ code: 'restaurant', message: 'restaurant not found' }] };
+    const { title, description, translations } = this.parseAdTranslations(body.translations);
+    let startDate: string | null = null;
+    let endDate: string | null = null;
+    if (typeof body.dates === 'string' && body.dates.includes(' - ')) {
+      const [s, e] = body.dates.split(' - ');
+      startDate = s.trim() || null;
+      endDate = e.trim() || null;
+    }
+    const cover = this.saveUploaded(files?.cover_image?.[0], 'advertisement');
+    const profile = this.saveUploaded(files?.profile_image?.[0], 'advertisement');
+    const video = this.saveUploaded(files?.video_attachment?.[0], 'advertisement');
+    const nextId = await this.mongo.nextMysqlId('advertisements');
+    const now = new Date();
+    await this.mongo.insertOne('advertisements', {
+      mysql_id: nextId,
+      mysql_restaurant_id: Number(restaurant.mysql_id),
+      restaurant_id: Number(restaurant.mysql_id),
+      add_type: String(body.advertisement_type ?? 'restaurant_promotion'),
+      title: title ?? String(body.title ?? 'Advertisement'),
+      description: description ?? String(body.description ?? ''),
+      translations,
+      start_date: startDate,
+      end_date: endDate,
+      cover_image: cover,
+      profile_image: profile,
+      video_attachment: video,
+      is_rating_active: Number(body.is_rating_active ?? 0),
+      is_review_active: Number(body.is_review_active ?? 0),
+      is_paid: 0,
+      is_updated: 0,
+      priority: 0,
+      mysql_created_by_id: Number(req.actor!.id),
+      created_by_type: 'vendor',
+      status: 'pending',
+      active: 1,
+      created_at: now,
+      updated_at: now,
+    });
+    return { message: 'Advertisement created successfully', id: nextId };
+  }
+
+  @Get('advertisement')
+  async ads(
+    @Req() req: AuthedRequest,
+    @Query('offset') offsetQ?: string,
+    @Query('limit') limitQ?: string,
+    @Query('ads_type') adsType?: string,
+  ) {
+    const limit = parseInt(limitQ ?? '10', 10) || 10;
+    const offset = parseInt(offsetQ ?? '1', 10) || 1;
+    const empty = { total_size: 0, limit, offset, all: 0, running: 0, pending: 0, denied: 0, approved: 0, expired: 0, paused: 0, adds: [] };
+    if (!this.useMongo()) return empty;
+    const restaurantIds = await this.vendorRestaurantIds(req);
+    if (restaurantIds.length === 0) return empty;
+    const base = { mysql_restaurant_id: { $in: restaurantIds } };
+    const countFor = (s: string) => this.mongo.count('advertisements', { ...base, status: s });
+    const [all, pending, running, approved, denied, expired, paused] = await Promise.all([
+      this.mongo.count('advertisements', base),
+      countFor('pending'), countFor('running'), countFor('approved'),
+      countFor('denied'), countFor('expired'), countFor('paused'),
+    ]);
+    const filter = adsType && adsType !== 'all' ? { ...base, status: adsType } : base;
+    const total = adsType && adsType !== 'all' ? await this.mongo.count('advertisements', filter) : all;
+    const rows = await this.mongo.findMany<Record<string, unknown>>('advertisements', filter, {
+      sort: { mysql_id: -1 }, limit, skip: Math.max(0, (offset - 1) * limit),
+    });
+    return { total_size: total, limit, offset, all, running, pending, denied, approved, expired, paused, adds: rows.map((r) => this.shapeAd(r)) };
+  }
+
+  @Get('advertisement/details/:id')
+  async adDetails(@Param('id') idStr: string) {
+    const id = parseInt(idStr, 10);
+    if (!this.useMongo() || !Number.isFinite(id)) return null;
+    const doc = await this.mongo.findByMysqlId<Record<string, unknown>>('advertisements', id);
+    return doc ? this.shapeAd(doc) : null;
+  }
+
   @HttpCode(200)
   @Post('advertisement/store')
-  adStore() { return { message: 'ad created' }; }
-  @HttpCode(200)
-  @Post('advertisement/update')
-  adUpdate() { return { message: 'updated' }; }
-  @HttpCode(200)
-  @Post('advertisement/status')
-  adStatus() { return { message: 'status updated' }; }
+  @UseInterceptors(FileFieldsInterceptor([
+    { name: 'cover_image', maxCount: 1 },
+    { name: 'profile_image', maxCount: 1 },
+    { name: 'video_attachment', maxCount: 1 },
+  ], { limits: { fileSize: 30 * 1024 * 1024 } }))
+  adStore(
+    @Req() req: AuthedRequest,
+    @Body() body: Record<string, unknown> = {},
+    @UploadedFiles() files: { cover_image?: Express.Multer.File[]; profile_image?: Express.Multer.File[]; video_attachment?: Express.Multer.File[] } = {},
+  ) {
+    return this.createAdvertisement(req, body, files);
+  }
+
   @HttpCode(200)
   @Post('advertisement/copy-add-post')
-  adCopy() { return { message: 'copied' }; }
+  @UseInterceptors(FileFieldsInterceptor([
+    { name: 'cover_image', maxCount: 1 },
+    { name: 'profile_image', maxCount: 1 },
+    { name: 'video_attachment', maxCount: 1 },
+  ], { limits: { fileSize: 30 * 1024 * 1024 } }))
+  adCopy(
+    @Req() req: AuthedRequest,
+    @Body() body: Record<string, unknown> = {},
+    @UploadedFiles() files: { cover_image?: Express.Multer.File[]; profile_image?: Express.Multer.File[]; video_attachment?: Express.Multer.File[] } = {},
+  ) {
+    return this.createAdvertisement(req, body, files);
+  }
+
   @HttpCode(200)
-  @Delete('advertisement/delete')
-  adDelete() { return { message: 'deleted' }; }
+  @Post('advertisement/update/:id')
+  @UseInterceptors(FileFieldsInterceptor([
+    { name: 'cover_image', maxCount: 1 },
+    { name: 'profile_image', maxCount: 1 },
+    { name: 'video_attachment', maxCount: 1 },
+  ], { limits: { fileSize: 30 * 1024 * 1024 } }))
+  async adUpdate(
+    @Param('id') idStr: string,
+    @Body() body: Record<string, unknown> = {},
+    @UploadedFiles() files: { cover_image?: Express.Multer.File[]; profile_image?: Express.Multer.File[]; video_attachment?: Express.Multer.File[] } = {},
+  ) {
+    const id = parseInt(idStr, 10);
+    if (!this.useMongo() || !Number.isFinite(id)) return { message: 'updated' };
+    const data: Record<string, unknown> = { updated_at: new Date(), is_updated: 1 };
+    if (body.translations !== undefined) {
+      const { title, description, translations } = this.parseAdTranslations(body.translations);
+      data.translations = translations;
+      if (title) data.title = title;
+      if (description) data.description = description;
+    }
+    if (typeof body.dates === 'string' && body.dates.includes(' - ')) {
+      const [s, e] = body.dates.split(' - ');
+      data.start_date = s.trim() || null;
+      data.end_date = e.trim() || null;
+    }
+    if (body.advertisement_type !== undefined) data.add_type = String(body.advertisement_type);
+    if (body.is_rating_active !== undefined) data.is_rating_active = Number(body.is_rating_active);
+    if (body.is_review_active !== undefined) data.is_review_active = Number(body.is_review_active);
+    const cover = this.saveUploaded(files?.cover_image?.[0], 'advertisement');
+    const profile = this.saveUploaded(files?.profile_image?.[0], 'advertisement');
+    const video = this.saveUploaded(files?.video_attachment?.[0], 'advertisement');
+    if (cover) data.cover_image = cover;
+    if (profile) data.profile_image = profile;
+    if (video) data.video_attachment = video;
+    await this.mongo.updateOne('advertisements', { mysql_id: id }, data);
+    return { message: 'Advertisement updated successfully' };
+  }
+
+  @HttpCode(200)
+  @Post('advertisement/status')
+  async adStatus(@Body() body: Record<string, unknown> = {}) {
+    const id = body.id !== undefined && body.id !== '' ? Number(body.id) : null;
+    if (this.useMongo() && id) {
+      const data: Record<string, unknown> = { updated_at: new Date() };
+      if (body.status !== undefined) data.status = String(body.status);
+      if (body.pause_note !== undefined) data.pause_note = String(body.pause_note);
+      await this.mongo.updateOne('advertisements', { mysql_id: id }, data);
+    }
+    return { message: 'status updated' };
+  }
+
+  @HttpCode(200)
+  @Delete('advertisement/delete/:id')
+  async adDelete(@Param('id') idStr: string) {
+    const id = parseInt(idStr, 10);
+    if (this.useMongo() && Number.isFinite(id)) await this.mongo.deleteOne('advertisements', { mysql_id: id });
+    return { message: 'advertisement deleted' };
+  }
 
   @Get('business_plan')
   async businessPlan(@Req() req: AuthedRequest) {
