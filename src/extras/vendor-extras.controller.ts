@@ -160,6 +160,22 @@ export class VendorExtrasController {
     return this.mongo.findOne<MongoRestaurantDoc>('restaurants', { mysql_vendor_id: Number(req.actor!.id) });
   }
 
+  /** All restaurant mysql_ids owned by the logged-in vendor. Order lists must
+   *  match against ALL of them — a vendor can own more than one restaurant, and
+   *  the order may sit under a different one than findOne() happens to return. */
+  private async vendorRestaurantIds(req: AuthedRequest): Promise<number[]> {
+    if (!this.useMongo()) return [];
+    const rows = await this.mongo.findMany<MongoRestaurantDoc>('restaurants', { mysql_vendor_id: Number(req.actor!.id) });
+    return rows.map((r) => Number(r.mysql_id));
+  }
+
+  /** Ongoing (not-yet-finished) order statuses the restaurant app shows under
+   *  its Pending / Confirmed / Cooking tabs. A freshly placed order is
+   *  'pending' — it MUST be included or the restaurant never sees new orders. */
+  private static readonly ONGOING_STATUSES = [
+    'pending', 'confirmed', 'accepted', 'processing', 'cooking', 'handover', 'picked_up',
+  ];
+
   /** Hash a password the same Laravel-compatible way the rest of the app
    *  does ($2y$ prefix) so vendor-created delivery men can log in. */
   private async hashPassword(raw: string): Promise<string> {
@@ -652,11 +668,11 @@ export class VendorExtrasController {
   @Get('current-orders')
   async currentOrders(@Req() req: AuthedRequest) {
     if (this.useMongo()) {
-      const restaurant = await this.mongo.findOne<MongoRestaurantDoc>('restaurants', { mysql_vendor_id: Number(req.actor!.id) });
-      if (!restaurant) return [];
+      const restaurantIds = await this.vendorRestaurantIds(req);
+      if (restaurantIds.length === 0) return [];
       const rows = await this.mongo.findMany<MongoOrderDoc>(
         'orders',
-        { mysql_restaurant_id: Number(restaurant.mysql_id), order_status: { $in: ['accepted', 'confirmed', 'processing'] } },
+        { mysql_restaurant_id: { $in: restaurantIds }, order_status: { $in: VendorExtrasController.ONGOING_STATUSES } },
         { sort: { mysql_id: -1 } },
       );
       const countsByOrderId = await this.detailsCountMap(rows.map((r) => Number(r.mysql_id)));
@@ -665,7 +681,7 @@ export class VendorExtrasController {
     const restaurant = await this.prisma.restaurants.findFirst({ where: { vendor_id: req.actor!.id }, select: { id: true } });
     if (!restaurant) return [];
     const rows = await this.prisma.orders.findMany({
-      where: { restaurant_id: restaurant.id, order_status: { in: ['accepted', 'confirmed', 'processing'] } },
+      where: { restaurant_id: restaurant.id, order_status: { in: VendorExtrasController.ONGOING_STATUSES } },
       orderBy: { id: 'desc' },
     });
     return rows.map((r) => ({ ...r, id: Number(r.id), user_id: r.user_id ? Number(r.user_id) : null, restaurant_id: Number(r.restaurant_id), order_amount: Number(r.order_amount) }));
@@ -674,11 +690,11 @@ export class VendorExtrasController {
   @Get('completed-orders')
   async completedOrders(@Req() req: AuthedRequest) {
     if (this.useMongo()) {
-      const restaurant = await this.mongo.findOne<MongoRestaurantDoc>('restaurants', { mysql_vendor_id: Number(req.actor!.id) });
-      if (!restaurant) return { orders: [], total_size: 0 };
+      const restaurantIds = await this.vendorRestaurantIds(req);
+      if (restaurantIds.length === 0) return { orders: [], total_size: 0 };
       const rows = await this.mongo.findMany<MongoOrderDoc>(
         'orders',
-        { mysql_restaurant_id: Number(restaurant.mysql_id), order_status: { $in: ['delivered', 'canceled', 'refunded'] } },
+        { mysql_restaurant_id: { $in: restaurantIds }, order_status: { $in: ['delivered', 'canceled', 'refunded', 'failed'] } },
         { sort: { mysql_id: -1 }, limit: 50 },
       );
       const countsByOrderId = await this.detailsCountMap(rows.map((r) => Number(r.mysql_id)));
@@ -1846,11 +1862,21 @@ export class VendorExtrasController {
 
   // ── Notifications + messages ─────────────────────────────────────
   @Get('notifications')
-  async vendorNotifications() {
+  async vendorNotifications(@Req() req: AuthedRequest) {
     if (this.useMongo()) {
+      const restaurantIds = await this.vendorRestaurantIds(req);
+      // Show this restaurant's order notifications + global admin broadcasts
+      // (those have no mysql_restaurant_id).
       const rows = await this.mongo.findMany<MongoNotificationDoc>(
         'notifications',
-        { status: true },
+        {
+          status: true,
+          $or: [
+            ...(restaurantIds.length > 0 ? [{ mysql_restaurant_id: { $in: restaurantIds } }] : []),
+            { mysql_restaurant_id: { $exists: false } },
+            { mysql_restaurant_id: null },
+          ],
+        },
         { sort: { mysql_id: -1 }, limit: 50 },
       );
       return rows.map((r) => ({ id: Number(r.mysql_id), title: r.title ?? null, description: r.description ?? null }));

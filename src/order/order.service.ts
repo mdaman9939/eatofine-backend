@@ -267,6 +267,26 @@ export class OrderService {
         });
       }
 
+      // In-app notification for the restaurant — so the vendor's notification
+      // bell shows the new order even without a live FCM push (push needs the
+      // FCM server key). Scoped to this restaurant so only its owner sees it.
+      try {
+        const notifId = await this.mongo.nextMysqlId('notifications');
+        await this.mongo.insertOne('notifications', {
+          mysql_id: notifId,
+          title: 'New order received',
+          description: `Order #${orderMysqlId} has just been placed.`,
+          mysql_restaurant_id: Number(body.restaurant_id),
+          target: 'restaurant',
+          order_id: orderMysqlId,
+          status: true,
+          created_at: now,
+          updated_at: now,
+        });
+      } catch {
+        // ignore — notification is non-fatal
+      }
+
       // Clear cart for this user (best-effort — carts collection may not exist)
       try {
         await this.mongo.updateMany('carts', { mysql_user_id: Number(userId), is_guest: false }, {});
