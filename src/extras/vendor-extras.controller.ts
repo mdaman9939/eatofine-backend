@@ -489,12 +489,28 @@ export class VendorExtrasController {
 
   /** Save one uploaded file from Multer to /storage/<folder>/, returning
    *  the filename (sans path) for the DB. Renames with a timestamp so
-   *  collisions can't overwrite an existing image. */
+   *  collisions can't overwrite an existing image.
+   *
+   *  ALSO persists the bytes to the Mongo `uploads` collection. The local
+   *  disk copy serves fast on the same instance, but Render's disk is
+   *  ephemeral (wiped on redeploy); the Mongo copy is durable so /storage/*
+   *  can re-serve the image after a restart (see main.ts). */
   private saveUploaded(file: Express.Multer.File | undefined, folder: string): string | null {
     if (!file || !file.buffer || file.buffer.length === 0) return null;
     const ext = path.extname(file.originalname || '').toLowerCase() || '.png';
     const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
-    fs.writeFileSync(path.join(this.storageDir(folder), filename), file.buffer);
+    try { fs.writeFileSync(path.join(this.storageDir(folder), filename), file.buffer); } catch { /* disk may be read-only */ }
+    // Durable copy in Mongo (best-effort). Skip files near the 16MB BSON limit
+    // (e.g. ad videos) — those rely on the disk copy only.
+    if (this.useMongo() && file.buffer.length < 15 * 1024 * 1024) {
+      this.mongo.insertOne('uploads', {
+        path: `${folder}/${filename}`,
+        content_type: file.mimetype || 'image/png',
+        data: file.buffer,
+        size: file.buffer.length,
+        created_at: new Date(),
+      }).catch(() => undefined);
+    }
     return filename;
   }
 

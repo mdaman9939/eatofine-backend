@@ -27,6 +27,7 @@ interface MulterFile {
 }
 import { RequireAuth } from '../auth/auth.guard';
 import { AdminService } from './admin.service';
+import { MongoDataService } from '../mongo/mongo-data.service';
 
 // Mirrors main.ts resolution: prefer repo-local storage (deploy-friendly),
 // fall back to monorepo project-root storage (local dev). main.ts already
@@ -57,7 +58,10 @@ const ALLOWED_UPLOAD_DIRS = new Set([
 @Controller('admin')
 @RequireAuth('admin')
 export class AdminController {
-  constructor(private readonly admin: AdminService) {}
+  constructor(
+    private readonly admin: AdminService,
+    private readonly mongo: MongoDataService,
+  ) {}
 
   // ── Self / profile ────────────────────────────────────────────────────
 
@@ -1216,7 +1220,16 @@ export class AdminController {
     fs.mkdirSync(safeDir, { recursive: true });
     const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
     const targetPath = path.join(safeDir, filename);
-    fs.writeFileSync(targetPath, file.buffer);
+    try { fs.writeFileSync(targetPath, file.buffer); } catch { /* disk may be read-only */ }
+    // Durable copy in Mongo so the image survives Render's ephemeral disk
+    // (served back by the /storage/* Mongo fallback in main.ts).
+    void this.mongo.insertOne('uploads', {
+      path: `${dir}/${filename}`,
+      content_type: file.mimetype || 'image/png',
+      data: file.buffer,
+      size: file.buffer.length,
+      created_at: new Date(),
+    }).catch(() => undefined);
     return { ok: true, filename, path: `${dir}/${filename}`, url: `/storage/${dir}/${filename}` };
   }
 }

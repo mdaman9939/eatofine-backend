@@ -7,6 +7,7 @@ import { AppModule } from './app.module';
 import { validateEnv } from './common/env.validation';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
 import { storageContext } from './common/storage-url';
+import { MongoDataService } from './mongo/mongo-data.service';
 
 (BigInt.prototype as unknown as { toJSON: () => number }).toJSON = function (this: bigint) {
   return Number(this);
@@ -97,6 +98,32 @@ async function bootstrap() {
     storageRoot = fs.existsSync(repoLocalStorage) ? repoLocalStorage : monorepoStorage;
   }
   app.useStaticAssets(storageRoot, { prefix: '/storage/' });
+
+  // Durable image fallback — when a file isn't on the (ephemeral) disk, try the
+  // Mongo `uploads` collection. saveUploaded() writes every upload there too,
+  // so images survive Render redeploys without S3 / a persistent disk.
+  const mongoData = app.get(MongoDataService, { strict: false });
+  app.use('/storage', async (req: Request, res: Response, next: NextFunction) => {
+    if (res.headersSent || req.method !== 'GET') return next();
+    try {
+      const key = decodeURIComponent(req.path.replace(/^\/+/, ''));
+      if (!key) return next();
+      const doc = await mongoData.findOne<{ data?: unknown; content_type?: string }>('uploads', { path: key });
+      const raw = doc?.data as { buffer?: Buffer } | Buffer | undefined;
+      if (raw) {
+        const buf = Buffer.isBuffer(raw) ? raw : raw.buffer ? Buffer.from(raw.buffer) : Buffer.from(raw as ArrayBuffer);
+        res
+          .status(200)
+          .set('content-type', doc?.content_type || 'image/png')
+          .set('cache-control', 'public, max-age=86400')
+          .send(buf);
+        return;
+      }
+    } catch {
+      // fall through to the SVG placeholder
+    }
+    next();
+  });
 
   // Placeholder fallback for /storage/* — when a real file isn't on disk
   // (Render's ephemeral disk loses uploads on every restart, and a lot of
