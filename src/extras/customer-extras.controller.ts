@@ -324,33 +324,118 @@ export class CustomerExtrasController {
     return { message: 'Profile updated successfully', image: data.image ?? null };
   }
 
-  // ── Wallet (empty for demo) ───────────────────────────────────────
+  // ── Wallet ────────────────────────────────────────────────────────
+  /** Current wallet balance (computed/stored in the `wallets` collection). */
+  private async walletBalance(userId: number): Promise<number> {
+    const w = await this.mongo.findOne<{ balance?: number }>('wallets', { mysql_user_id: userId });
+    return Number(w?.balance ?? 0);
+  }
+  private async setWalletBalance(userId: number, balance: number) {
+    const w = await this.mongo.findOne<{ mysql_id: number }>('wallets', { mysql_user_id: userId });
+    if (w) await this.mongo.updateOne('wallets', { mysql_user_id: userId }, { balance, updated_at: new Date() });
+    else {
+      const id = await this.mongo.nextMysqlId('wallets');
+      await this.mongo.insertOne('wallets', { mysql_id: id, mysql_user_id: userId, balance, created_at: new Date(), updated_at: new Date() });
+    }
+  }
+
   @Get('wallet/transactions')
-  walletTx() {
-    return { data: [], total_size: 0, limit: 25, offset: 1 };
+  async walletTx(@Req() req: AuthedRequest, @Query('limit') limitStr?: string, @Query('offset') offsetStr?: string) {
+    const limit = parseInt(limitStr ?? '25', 10);
+    const offset = parseInt(offsetStr ?? '1', 10);
+    if (!this.useMongo()) return { data: [], total_size: 0, limit, offset };
+    const userId = Number(req.actor!.id);
+    const filter = { mysql_user_id: userId };
+    const [rows, total] = await Promise.all([
+      this.mongo.findMany<Record<string, unknown>>('wallet_transactions', filter, { sort: { mysql_id: -1 }, limit, skip: Math.max(0, (offset - 1) * limit) }),
+      this.mongo.count('wallet_transactions', filter),
+    ]);
+    return {
+      data: rows.map((r) => ({
+        id: Number(r.mysql_id), credit: Number(r.credit ?? 0), debit: Number(r.debit ?? 0),
+        balance: Number(r.balance ?? 0), transaction_type: r.transaction_type ?? null,
+        reference: r.reference ?? null, created_at: r.created_at ?? null,
+      })),
+      total_size: total, limit, offset,
+      balance: await this.walletBalance(userId),
+    };
   }
 
   @Get('wallet/bonuses')
-  walletBonuses() {
-    return [];
+  async walletBonuses() {
+    if (!this.useMongo()) return [];
+    const rows = await this.mongo.findMany<Record<string, unknown>>('wallet_bonuses', { $or: [{ status: true }, { status: 1 }] }, { sort: { mysql_id: -1 } });
+    return rows.map((r) => ({ ...r, id: Number(r.mysql_id) }));
   }
 
+  /** Add money to the wallet. No real payment gateway is wired, so the charge
+   *  is mocked as successful and the wallet is credited immediately. */
   @HttpCode(200)
   @Post('wallet/add-fund')
-  addFund() {
-    return { message: 'Not available in demo' };
+  async addFund(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
+    if (!this.useMongo()) return { message: 'Not available in demo' };
+    const userId = Number(req.actor!.id);
+    const amount = Number(body.amount ?? 0);
+    if (!Number.isFinite(amount) || amount <= 0) return { errors: [{ code: 'amount', message: 'Enter a valid amount' }] };
+    const newBalance = (await this.walletBalance(userId)) + amount;
+    await this.setWalletBalance(userId, newBalance);
+    const txId = await this.mongo.nextMysqlId('wallet_transactions');
+    await this.mongo.insertOne('wallet_transactions', {
+      mysql_id: txId, mysql_user_id: userId, credit: amount, debit: 0, balance: newBalance,
+      transaction_type: 'add_fund', reference: String(body.payment_method ?? 'payment'), created_at: new Date(),
+    });
+    return { message: 'Fund added to wallet', balance: newBalance };
   }
 
-  // ── Loyalty (empty) ───────────────────────────────────────────────
+  // ── Loyalty ───────────────────────────────────────────────────────
   @Get('loyalty-point/transactions')
-  loyaltyTx() {
-    return { data: [], total_size: 0, limit: 25, offset: 1 };
+  async loyaltyTx(@Req() req: AuthedRequest, @Query('limit') limitStr?: string, @Query('offset') offsetStr?: string) {
+    const limit = parseInt(limitStr ?? '25', 10);
+    const offset = parseInt(offsetStr ?? '1', 10);
+    if (!this.useMongo()) return { data: [], total_size: 0, limit, offset };
+    const userId = Number(req.actor!.id);
+    const filter = { mysql_user_id: userId };
+    const [rows, total] = await Promise.all([
+      this.mongo.findMany<Record<string, unknown>>('loyalty_point_transactions', filter, { sort: { mysql_id: -1 }, limit, skip: Math.max(0, (offset - 1) * limit) }),
+      this.mongo.count('loyalty_point_transactions', filter),
+    ]);
+    return {
+      data: rows.map((r) => ({
+        id: Number(r.mysql_id), credit: Number(r.credit ?? 0), debit: Number(r.debit ?? 0),
+        balance: Number(r.balance ?? 0), transaction_type: r.transaction_type ?? null, created_at: r.created_at ?? null,
+      })),
+      total_size: total, limit, offset,
+    };
   }
 
+  /** Convert loyalty points to wallet money (1 point = ₹1 by default). */
   @HttpCode(200)
   @Post('loyalty-point/point-transfer')
-  pointTransfer() {
-    return { message: 'Not available in demo' };
+  async pointTransfer(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
+    if (!this.useMongo()) return { message: 'Not available in demo' };
+    const userId = Number(req.actor!.id);
+    const points = Number(body.point ?? body.points ?? 0);
+    if (!Number.isFinite(points) || points <= 0) return { errors: [{ code: 'point', message: 'Enter a valid point amount' }] };
+    // Current loyalty balance = latest transaction balance.
+    const last = await this.mongo.findMany<{ balance?: number }>('loyalty_point_transactions', { mysql_user_id: userId }, { sort: { mysql_id: -1 }, limit: 1 });
+    const loyaltyBalance = Number(last[0]?.balance ?? 0);
+    if (points > loyaltyBalance) return { errors: [{ code: 'point', message: 'Not enough loyalty points' }] };
+    const now = new Date();
+    // Debit loyalty points.
+    const lpId = await this.mongo.nextMysqlId('loyalty_point_transactions');
+    await this.mongo.insertOne('loyalty_point_transactions', {
+      mysql_id: lpId, mysql_user_id: userId, credit: 0, debit: points, balance: loyaltyBalance - points,
+      transaction_type: 'point_to_wallet', transaction_id: `LP${lpId}`, created_at: now,
+    });
+    // Credit wallet (1:1).
+    const newBalance = (await this.walletBalance(userId)) + points;
+    await this.setWalletBalance(userId, newBalance);
+    const wtId = await this.mongo.nextMysqlId('wallet_transactions');
+    await this.mongo.insertOne('wallet_transactions', {
+      mysql_id: wtId, mysql_user_id: userId, credit: points, debit: 0, balance: newBalance,
+      transaction_type: 'loyalty_point', reference: 'point_transfer', created_at: now,
+    });
+    return { message: 'Points transferred to wallet', wallet_balance: newBalance, loyalty_balance: loyaltyBalance - points };
   }
 
   // ── Messages ──────────────────────────────────────────────────────

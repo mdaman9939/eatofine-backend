@@ -432,13 +432,86 @@ export class DeliveryExtrasController {
     return rows.map((r) => ({ id: Number(r.id), title: r.title, description: r.description }));
   }
 
+  // ── Messaging (real, DB-backed) ───────────────────────────────────
+  // The DM is the `delivery_man` counterpart in the shared conversations.
   @Get('message/list')
-  messageList() { return { conversations: [], total_size: 0 }; }
+  async messageList(@Req() req: AuthedRequest) {
+    if (!this.useMongo()) return { conversations: [], total_size: 0 };
+    const dmId = Number(req.actor!.id);
+    const rows = await this.mongo.findMany<Record<string, unknown>>(
+      'conversations', { counterpart_type: 'delivery_man', counterpart_id: dmId },
+      { sort: { last_message_at: -1 }, limit: 50 },
+    );
+    return {
+      conversations: rows.map((c) => ({
+        id: Number(c.mysql_id),
+        type: 'user',
+        user_id: c.user_id != null ? Number(c.user_id) : null,
+        name: (c.user_name as string) ?? `Customer #${c.user_id}`,
+        last_message: c.last_message ?? null,
+        last_message_at: c.last_message_at ?? null,
+        unread: c.unread ?? 0,
+      })),
+      total_size: rows.length,
+    };
+  }
+
   @Get('message/details')
-  messageDetails() { return { messages: [] }; }
+  async messageDetails(@Req() req: AuthedRequest, @Query('conversation_id') convId?: string) {
+    if (!this.useMongo() || !convId) return { messages: [] };
+    const dmId = Number(req.actor!.id);
+    const rows = await this.mongo.findMany<Record<string, unknown>>(
+      'messages', { conversation_id: Number(convId) }, { sort: { mysql_id: 1 }, limit: 100 },
+    );
+    return {
+      messages: rows.map((m) => ({
+        id: Number(m.mysql_id),
+        sender_type: m.sender_type,
+        sender_id: m.sender_id != null ? Number(m.sender_id) : null,
+        body: m.body,
+        sent_by_me: m.sender_type === 'delivery_man' && Number(m.sender_id) === dmId,
+        created_at: m.created_at ?? null,
+      })),
+    };
+  }
+
   @Get('message/search-list')
-  messageSearch() { return { conversations: [] }; }
+  async messageSearch(@Req() req: AuthedRequest, @Query('search') q?: string) {
+    if (!this.useMongo() || !q?.trim()) return { conversations: [] };
+    const dmId = Number(req.actor!.id);
+    const rows = await this.mongo.findMany<Record<string, unknown>>('conversations', {
+      counterpart_type: 'delivery_man', counterpart_id: dmId, user_name: { $regex: q, $options: 'i' },
+    }, { limit: 25 });
+    return { conversations: rows.map((c) => ({ id: Number(c.mysql_id), name: c.user_name ?? `Customer #${c.user_id}` })) };
+  }
+
   @HttpCode(200)
   @Post('message/send')
-  messageSend() { return { message: 'sent' }; }
+  async messageSend(@Req() req: AuthedRequest, @Body() body: { conversation_id?: number; user_id?: number; body?: string } = {}) {
+    if (!this.useMongo()) return { message: 'sent' };
+    const dmId = Number(req.actor!.id);
+    if (!body.body || !body.body.trim()) return { errors: [{ code: 'body', message: 'message body required' }] };
+    let convId = body.conversation_id;
+    if (!convId && body.user_id) {
+      const existing = await this.mongo.findOne<{ mysql_id: number }>('conversations', {
+        user_id: Number(body.user_id), counterpart_type: 'delivery_man', counterpart_id: dmId,
+      });
+      if (existing) convId = Number(existing.mysql_id);
+      else {
+        convId = await this.mongo.nextMysqlId('conversations');
+        await this.mongo.insertOne('conversations', {
+          mysql_id: convId, user_id: Number(body.user_id), counterpart_type: 'delivery_man', counterpart_id: dmId,
+          last_message: body.body, last_message_at: new Date(), unread: 0,
+        });
+      }
+    }
+    if (!convId) return { errors: [{ code: 'conversation', message: 'conversation_id or user_id required' }] };
+    const msgId = await this.mongo.nextMysqlId('messages');
+    await this.mongo.insertOne('messages', {
+      mysql_id: msgId, conversation_id: convId, sender_type: 'delivery_man', sender_id: dmId,
+      body: body.body, created_at: new Date(),
+    });
+    await this.mongo.updateOne('conversations', { mysql_id: convId }, { last_message: body.body, last_message_at: new Date() });
+    return { message: 'sent', conversation_id: convId };
+  }
 }

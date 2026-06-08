@@ -91,8 +91,9 @@ export class AdminController {
     @Query('offset') offset?: string,
     @Query('status') status?: string,
     @Query('q') q?: string,
+    @Query('order_type') orderType?: string,
   ) {
-    return this.admin.listOrders(toInt(limit, 50), toInt(offset, 0), status || undefined, q || undefined);
+    return this.admin.listOrders(toInt(limit, 50), toInt(offset, 0), status || undefined, q || undefined, orderType || undefined);
   }
 
   @Get('orders/:id')
@@ -208,10 +209,7 @@ export class AdminController {
 
   @Post('delivery-men')
   @HttpCode(200)
-  createDeliveryMan(@Body() body: {
-    f_name?: string; l_name?: string; email?: string; phone?: string;
-    password?: string; zone_id?: number; vehicle_id?: number;
-  }) {
+  createDeliveryMan(@Body() body: Parameters<AdminService['createDeliveryMan']>[0]) {
     return this.admin.createDeliveryMan(body);
   }
 
@@ -220,6 +218,11 @@ export class AdminController {
   @Get('delivery-men/pending')
   deliveryMenPending() {
     return this.admin.listPendingDeliveryMen();
+  }
+
+  @Get('delivery-men/:id')
+  deliveryManDetail(@Param('id', ParseIntPipe) id: number) {
+    return this.admin.getDeliveryMan(id);
   }
 
   @Patch('delivery-men/:id/approve')
@@ -235,6 +238,11 @@ export class AdminController {
   @Patch('delivery-men/:id/status')
   updateDMStatus(@Param('id', ParseIntPipe) id: number, @Body() body: { status: boolean }) {
     return this.admin.updateDeliveryManStatus(id, body.status);
+  }
+
+  @Patch('delivery-men/:id')
+  updateDeliveryMan(@Param('id', ParseIntPipe) id: number, @Body() body: Parameters<AdminService['updateDeliveryMan']>[1]) {
+    return this.admin.updateDeliveryMan(id, body);
   }
 
   @Patch('delivery-men/:id/approval')
@@ -302,14 +310,14 @@ export class AdminController {
   }
 
   @Post('categories')
-  createCategory(@Body() body: { name: string; parent_id?: number; position?: number; priority?: number }) {
+  createCategory(@Body() body: Parameters<AdminService['createCategory']>[0]) {
     return this.admin.createCategory(body);
   }
 
   @Patch('categories/:id')
   updateCategory(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: { name?: string; status?: boolean; priority?: number },
+    @Body() body: Parameters<AdminService['updateCategory']>[1],
   ) {
     return this.admin.updateCategory(id, body);
   }
@@ -398,22 +406,13 @@ export class AdminController {
   // ── Zones ─────────────────────────────────────────────────────────────
 
   @Get('zones')
-  zones() {
-    return this.admin.listZones();
+  zones(@Query('zone_for') zoneFor?: string) {
+    return this.admin.listZones(zoneFor || undefined);
   }
 
   @Post('zones')
   @HttpCode(200)
-  createZone(@Body() body: {
-    name?: string;
-    display_name?: string;
-    minimum_shipping_charge?: number;
-    per_km_shipping_charge?: number;
-    maximum_shipping_charge?: number;
-    minimum_delivery_time?: number;
-    max_cod_order_amount?: number;
-    is_default?: boolean;
-  }) {
+  createZone(@Body() body: Parameters<AdminService['createZone']>[0]) {
     return this.admin.createZone(body);
   }
 
@@ -626,23 +625,83 @@ export class AdminController {
   }
 
   @Get('reports/restaurant-earnings')
-  restaurantEarnings(@Query('limit') limit?: string) {
-    return this.admin.restaurantEarnings(toInt(limit, 10));
+  restaurantEarnings(
+    @Query('limit') limit?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('zone_id') zoneId?: string,
+    @Query('restaurant_id') restaurantId?: string,
+  ) {
+    return this.admin.restaurantEarnings(toInt(limit, 10), {
+      from: from || undefined,
+      to: to || undefined,
+      zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
+      restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
+    });
   }
 
   @Get('reports/admin-earnings')
-  adminEarningReport(@Query('days') days?: string) {
-    return this.admin.adminEarningReport(toInt(days, 30));
+  adminEarningReport(
+    @Query('days') days?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('zone_id') zoneId?: string,
+    @Query('restaurant_id') restaurantId?: string,
+  ) {
+    return this.admin.adminEarningReport(toInt(days, 30), {
+      from: from || undefined,
+      to: to || undefined,
+      zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
+      restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
+    });
   }
 
   @Get('reports/top-customers')
-  customerReport(@Query('limit') limit?: string) {
-    return this.admin.customerReport(toInt(limit, 10));
+  customerReport(
+    @Query('limit') limit?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('zone_id') zoneId?: string,
+    @Query('restaurant_id') restaurantId?: string,
+  ) {
+    return this.admin.customerReport(toInt(limit, 10), {
+      from: from || undefined,
+      to: to || undefined,
+      zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
+      restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
+    });
+  }
+
+  @Get('reports/top-foods')
+  topFoods(
+    @Query('limit') limit?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('zone_id') zoneId?: string,
+    @Query('restaurant_id') restaurantId?: string,
+  ) {
+    return this.admin.topFoods(toInt(limit, 50), {
+      from: from || undefined,
+      to: to || undefined,
+      zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
+      restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
+    });
   }
 
   @Get('reports/top-deliverymen')
-  deliverymanEarningReport(@Query('limit') limit?: string) {
-    return this.admin.deliverymanEarningReport(toInt(limit, 10));
+  deliverymanEarningReport(
+    @Query('limit') limit?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('zone_id') zoneId?: string,
+    @Query('restaurant_id') restaurantId?: string,
+  ) {
+    return this.admin.deliverymanEarningReport(toInt(limit, 10), {
+      from: from || undefined,
+      to: to || undefined,
+      zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
+      restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
+    });
   }
 
   // ── Catalog extras ───────────────────────────────────────────────────
@@ -663,6 +722,10 @@ export class AdminController {
   @Patch('add-ons/:id/status')
   updateAddOnStatus(@Param('id', ParseIntPipe) id: number, @Body() body: { status: boolean }) {
     return this.admin.updateAddOnStatus(id, body.status);
+  }
+  @Patch('add-ons/:id')
+  updateAddOn(@Param('id', ParseIntPipe) id: number, @Body() body: Parameters<AdminService['updateAddOn']>[1]) {
+    return this.admin.updateAddOn(id, body);
   }
   @Delete('add-ons/:id')
   deleteAddOn(@Param('id', ParseIntPipe) id: number) {
@@ -702,8 +765,8 @@ export class AdminController {
   // ── Marketing ────────────────────────────────────────────────────────
 
   @Get('campaigns')
-  campaigns(@Query('limit') limit?: string, @Query('offset') offset?: string, @Query('q') q?: string) {
-    return this.admin.listCampaigns({ limit: toInt(limit, 50), offset: toInt(offset, 0), q: q || undefined });
+  campaigns(@Query('limit') limit?: string, @Query('offset') offset?: string, @Query('q') q?: string, @Query('type') type?: string) {
+    return this.admin.listCampaigns({ limit: toInt(limit, 50), offset: toInt(offset, 0), q: q || undefined, type: type || undefined });
   }
   @Post('campaigns')
   createCampaign(@Body() body: Parameters<AdminService['createCampaign']>[0]) {
@@ -726,6 +789,14 @@ export class AdminController {
   advertisements(@Query('limit') limit?: string, @Query('offset') offset?: string) {
     return this.admin.listAdvertisements({ limit: toInt(limit, 50), offset: toInt(offset, 0) });
   }
+  @Post('advertisements')
+  createAdvertisement(@Body() body: Parameters<AdminService['createAdvertisement']>[0]) {
+    return this.admin.createAdvertisement(body);
+  }
+  @Delete('advertisements/:id')
+  deleteAdvertisement(@Param('id', ParseIntPipe) id: number) {
+    return this.admin.deleteAdvertisement(id);
+  }
   @Patch('advertisements/:id/status')
   updateAdvertisementStatus(
     @Param('id', ParseIntPipe) id: number,
@@ -737,6 +808,18 @@ export class AdminController {
   @Get('cash-backs')
   cashBacks() {
     return this.admin.listCashBacks();
+  }
+  @Post('cash-backs')
+  createCashBack(@Body() body: Parameters<AdminService['createCashBack']>[0]) {
+    return this.admin.createCashBack(body);
+  }
+  @Patch('cash-backs/:id/status')
+  updateCashBackStatus(@Param('id', ParseIntPipe) id: number, @Body() body: { status: boolean }) {
+    return this.admin.updateCashBackStatus(id, body.status);
+  }
+  @Delete('cash-backs/:id')
+  deleteCashBack(@Param('id', ParseIntPipe) id: number) {
+    return this.admin.deleteCashBack(id);
   }
 
   @Get('wallet-bonuses')
@@ -779,8 +862,12 @@ export class AdminController {
   }
 
   @Get('disbursements')
-  disbursements(@Query('limit') limit?: string, @Query('offset') offset?: string) {
-    return this.admin.listDisbursements({ limit: toInt(limit, 50), offset: toInt(offset, 0) });
+  disbursements(@Query('limit') limit?: string, @Query('offset') offset?: string, @Query('type') type?: string) {
+    return this.admin.listDisbursements({ limit: toInt(limit, 50), offset: toInt(offset, 0), type: type || undefined });
+  }
+  @Patch('disbursements/:id/status')
+  updateDisbursementStatus(@Param('id', ParseIntPipe) id: number, @Body() body: { status: string }) {
+    return this.admin.updateDisbursementStatus(id, body.status);
   }
 
   @Get('withdraw-requests')
@@ -814,6 +901,14 @@ export class AdminController {
   @Get('offline-payment-methods')
   offlinePaymentMethods() {
     return this.admin.listOfflinePaymentMethods();
+  }
+  @Post('offline-payment-methods')
+  createOfflinePaymentMethod(@Body() body: Parameters<AdminService['createOfflinePaymentMethod']>[0]) {
+    return this.admin.createOfflinePaymentMethod(body);
+  }
+  @Patch('offline-payment-methods/:id')
+  updateOfflinePaymentMethod(@Param('id', ParseIntPipe) id: number, @Body() body: Parameters<AdminService['updateOfflinePaymentMethod']>[1]) {
+    return this.admin.updateOfflinePaymentMethod(id, body);
   }
   @Patch('offline-payment-methods/:id/status')
   updateOfflinePaymentMethodStatus(
@@ -921,6 +1016,18 @@ export class AdminController {
   @Get('employees')
   employees(@Query('limit') limit?: string, @Query('offset') offset?: string, @Query('q') q?: string) {
     return this.admin.listEmployees({ limit: toInt(limit, 50), offset: toInt(offset, 0), q: q || undefined });
+  }
+  @Post('employees')
+  createEmployee(@Body() body: Parameters<AdminService['createEmployee']>[0]) {
+    return this.admin.createEmployee(body);
+  }
+  @Get('employees/:id')
+  employeeDetail(@Param('id', ParseIntPipe) id: number) {
+    return this.admin.getEmployee(id);
+  }
+  @Patch('employees/:id')
+  updateEmployee(@Param('id', ParseIntPipe) id: number, @Body() body: Parameters<AdminService['updateEmployee']>[1]) {
+    return this.admin.updateEmployee(id, body);
   }
 
   @Get('admin-roles')
