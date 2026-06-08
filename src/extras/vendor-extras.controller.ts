@@ -7,6 +7,7 @@ import type { AuthedRequest } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { storageBaseUrl } from '../common/storage-url';
+import { compressImage } from '../common/image-compress';
 
 // Mongo doc shapes (only fields we read).
 interface MongoVendorDoc {
@@ -370,7 +371,7 @@ export class VendorExtrasController {
     for (const k of ['f_name', 'l_name', 'email', 'phone', 'password'] as const) {
       if (b[k] !== undefined) data[k] = String(b[k]);
     }
-    const avatarName = this.saveUploaded(files?.image?.[0], 'profile');
+    const avatarName = await this.saveUploaded(files?.image?.[0], 'profile');
     if (avatarName) data.image = avatarName;
     if (Object.keys(data).length === 0) return { message: 'nothing to update' };
     data.updated_at = new Date();
@@ -495,19 +496,27 @@ export class VendorExtrasController {
    *  disk copy serves fast on the same instance, but Render's disk is
    *  ephemeral (wiped on redeploy); the Mongo copy is durable so /storage/*
    *  can re-serve the image after a restart (see main.ts). */
-  private saveUploaded(file: Express.Multer.File | undefined, folder: string): string | null {
+  private async saveUploaded(file: Express.Multer.File | undefined, folder: string): Promise<string | null> {
     if (!file || !file.buffer || file.buffer.length === 0) return null;
-    const ext = path.extname(file.originalname || '').toLowerCase() || '.png';
+    let data = file.buffer;
+    let ext = path.extname(file.originalname || '').toLowerCase() || '.png';
+    let contentType = file.mimetype || 'image/png';
+    // Auto-compress raster images to a small WebP (~150–300 KB). Videos / SVGs /
+    // anything sharp can't handle fall through to the original bytes untouched.
+    if (/^image\//i.test(contentType) && !/svg/i.test(contentType)) {
+      const compressed = await compressImage(file.buffer);
+      if (compressed) { data = compressed.buffer; ext = compressed.ext; contentType = compressed.contentType; }
+    }
     const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
-    try { fs.writeFileSync(path.join(this.storageDir(folder), filename), file.buffer); } catch { /* disk may be read-only */ }
+    try { fs.writeFileSync(path.join(this.storageDir(folder), filename), data); } catch { /* disk may be read-only */ }
     // Durable copy in Mongo (best-effort). Skip files near the 16MB BSON limit
     // (e.g. ad videos) — those rely on the disk copy only.
-    if (this.useMongo() && file.buffer.length < 15 * 1024 * 1024) {
+    if (this.useMongo() && data.length < 15 * 1024 * 1024) {
       this.mongo.insertOne('uploads', {
         path: `${folder}/${filename}`,
-        content_type: file.mimetype || 'image/png',
-        data: file.buffer,
-        size: file.buffer.length,
+        content_type: contentType,
+        data,
+        size: data.length,
         created_at: new Date(),
       }).catch(() => undefined);
     }
@@ -571,9 +580,9 @@ export class VendorExtrasController {
     if (b.meta_keywords !== undefined) data.meta_keywords = String(b.meta_keywords);
 
     // Persist uploaded files to disk + record new filenames in the DB.
-    const logoName = this.saveUploaded(files?.logo?.[0], 'restaurant');
-    const coverName = this.saveUploaded(files?.cover_photo?.[0], 'restaurant/cover');
-    const metaName = this.saveUploaded(files?.meta_image?.[0], 'restaurant');
+    const logoName = await this.saveUploaded(files?.logo?.[0], 'restaurant');
+    const coverName = await this.saveUploaded(files?.cover_photo?.[0], 'restaurant/cover');
+    const metaName = await this.saveUploaded(files?.meta_image?.[0], 'restaurant');
     if (logoName) data.logo = logoName;
     if (coverName) data.cover_photo = coverName;
     if (metaName) data.meta_image = metaName;
@@ -962,8 +971,8 @@ export class VendorExtrasController {
       this.parseProductTranslations(b.translations);
 
     const nextId = await this.mongo.nextMysqlId('foods');
-    const imageName = this.saveUploaded(files?.image?.[0], 'product') ?? 'default.png';
-    const metaImage = this.saveUploaded(files?.meta_image?.[0], 'product');
+    const imageName = await this.saveUploaded(files?.image?.[0], 'product') ?? 'default.png';
+    const metaImage = await this.saveUploaded(files?.meta_image?.[0], 'product');
 
     const now = new Date();
     const food: Record<string, unknown> = {
@@ -1058,8 +1067,8 @@ export class VendorExtrasController {
       data.maximum_cart_quantity = Number(b.maximum_cart_quantity);
     }
     if (b.is_halal !== undefined) data.is_halal = !!Number(b.is_halal);
-    const imageName = this.saveUploaded(files?.image?.[0], 'product');
-    const metaImage = this.saveUploaded(files?.meta_image?.[0], 'product');
+    const imageName = await this.saveUploaded(files?.image?.[0], 'product');
+    const metaImage = await this.saveUploaded(files?.meta_image?.[0], 'product');
     if (imageName) data.image = imageName;
     if (metaImage) data.meta_image = metaImage;
     if (Object.keys(data).length === 0) return { message: 'nothing to update' };
@@ -1398,7 +1407,7 @@ export class VendorExtrasController {
     if (dup) return { errors: [{ code: 'phone', message: 'phone already in use' }] };
 
     const nextId = await this.mongo.nextMysqlId('delivery_men');
-    const imageName = this.saveUploaded(files?.image?.[0], 'delivery-man') ?? 'def.png';
+    const imageName = await this.saveUploaded(files?.image?.[0], 'delivery-man') ?? 'def.png';
     const now = new Date();
     const zoneId = restaurant.mysql_zone_id ?? restaurant.zone_id ?? 1;
     await this.mongo.insertOne('delivery_men', {
@@ -1444,7 +1453,7 @@ export class VendorExtrasController {
     if (body.password !== undefined && String(body.password).length > 1) {
       data.password = await this.hashPassword(String(body.password));
     }
-    const imageName = this.saveUploaded(files?.image?.[0], 'delivery-man');
+    const imageName = await this.saveUploaded(files?.image?.[0], 'delivery-man');
     if (imageName) data.image = imageName;
     if (Object.keys(data).length === 0) return { message: 'nothing to update' };
     data.updated_at = new Date();
@@ -1991,9 +2000,9 @@ export class VendorExtrasController {
       startDate = s.trim() || null;
       endDate = e.trim() || null;
     }
-    const cover = this.saveUploaded(files?.cover_image?.[0], 'advertisement');
-    const profile = this.saveUploaded(files?.profile_image?.[0], 'advertisement');
-    const video = this.saveUploaded(files?.video_attachment?.[0], 'advertisement');
+    const cover = await this.saveUploaded(files?.cover_image?.[0], 'advertisement');
+    const profile = await this.saveUploaded(files?.profile_image?.[0], 'advertisement');
+    const video = await this.saveUploaded(files?.video_attachment?.[0], 'advertisement');
     const nextId = await this.mongo.nextMysqlId('advertisements');
     const now = new Date();
     await this.mongo.insertOne('advertisements', {
@@ -2119,9 +2128,9 @@ export class VendorExtrasController {
     if (body.advertisement_type !== undefined) data.add_type = String(body.advertisement_type);
     if (body.is_rating_active !== undefined) data.is_rating_active = Number(body.is_rating_active);
     if (body.is_review_active !== undefined) data.is_review_active = Number(body.is_review_active);
-    const cover = this.saveUploaded(files?.cover_image?.[0], 'advertisement');
-    const profile = this.saveUploaded(files?.profile_image?.[0], 'advertisement');
-    const video = this.saveUploaded(files?.video_attachment?.[0], 'advertisement');
+    const cover = await this.saveUploaded(files?.cover_image?.[0], 'advertisement');
+    const profile = await this.saveUploaded(files?.profile_image?.[0], 'advertisement');
+    const video = await this.saveUploaded(files?.video_attachment?.[0], 'advertisement');
     if (cover) data.cover_image = cover;
     if (profile) data.profile_image = profile;
     if (video) data.video_attachment = video;

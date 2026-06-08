@@ -28,6 +28,7 @@ interface MulterFile {
 import { RequireAuth } from '../auth/auth.guard';
 import { AdminService } from './admin.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { compressImage } from '../common/image-compress';
 
 // Mirrors main.ts resolution: prefer repo-local storage (deploy-friendly),
 // fall back to monorepo project-root storage (local dev). main.ts already
@@ -1202,7 +1203,7 @@ export class AdminController {
 
   @Post('upload')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
-  uploadImage(
+  async uploadImage(
     @UploadedFile() file: MulterFile | undefined,
     @Query('dir') dir?: string,
   ) {
@@ -1212,22 +1213,28 @@ export class AdminController {
         errors: [{ code: 'dir', message: `dir must be one of: ${[...ALLOWED_UPLOAD_DIRS].join(', ')}` }],
       });
     }
-    const ext = (path.extname(file.originalname) || '.bin').toLowerCase();
+    let ext = (path.extname(file.originalname) || '.bin').toLowerCase();
     if (!/^\.(png|jpe?g|webp|gif)$/i.test(ext)) {
       throw new BadRequestException({ errors: [{ code: 'ext', message: 'only png/jpg/jpeg/webp/gif allowed' }] });
     }
+    // Auto-compress to a small WebP (~150–300 KB). Fall back to the original
+    // bytes if sharp can't process it.
+    let data = file.buffer;
+    let contentType = file.mimetype || 'image/png';
+    const compressed = await compressImage(file.buffer);
+    if (compressed) { data = compressed.buffer; ext = compressed.ext; contentType = compressed.contentType; }
     const safeDir = path.join(STORAGE_ROOT, dir);
     fs.mkdirSync(safeDir, { recursive: true });
     const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
     const targetPath = path.join(safeDir, filename);
-    try { fs.writeFileSync(targetPath, file.buffer); } catch { /* disk may be read-only */ }
+    try { fs.writeFileSync(targetPath, data); } catch { /* disk may be read-only */ }
     // Durable copy in Mongo so the image survives Render's ephemeral disk
     // (served back by the /storage/* Mongo fallback in main.ts).
     void this.mongo.insertOne('uploads', {
       path: `${dir}/${filename}`,
-      content_type: file.mimetype || 'image/png',
-      data: file.buffer,
-      size: file.buffer.length,
+      content_type: contentType,
+      data,
+      size: data.length,
       created_at: new Date(),
     }).catch(() => undefined);
     return { ok: true, filename, path: `${dir}/${filename}`, url: `/storage/${dir}/${filename}` };
