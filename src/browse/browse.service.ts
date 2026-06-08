@@ -86,7 +86,11 @@ export class BrowseService {
     return process.env.STORAGE_BASE_URL ?? 'http://127.0.0.1:3000/storage';
   }
   private fullUrl(folder: string, file?: string | null) {
-    return file ? `${this.storageBase()}/${folder}/${file}` : null;
+    if (!file) return null;
+    // Already an absolute URL (e.g. an external CDN / pasted image link) — use
+    // it as-is so it loads on any network regardless of STORAGE_BASE_URL.
+    if (/^https?:\/\//i.test(file)) return file;
+    return `${this.storageBase()}/${folder}/${file}`;
   }
 
   private mapRestaurant(r: {

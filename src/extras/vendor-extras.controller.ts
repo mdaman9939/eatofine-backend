@@ -468,6 +468,8 @@ export class VendorExtrasController {
    *  the SVG placeholder middleware when the filename is missing so the
    *  Flutter NetworkImage never sees an empty string. */
   private buildStorageUrl(folder: string, filename?: string | null): string {
+    // Pass absolute URLs (external CDN / pasted links) through untouched.
+    if (filename && /^https?:\/\//i.test(String(filename))) return String(filename);
     const base = (process.env.STORAGE_BASE_URL ?? 'http://127.0.0.1:3000/storage').replace(/\/$/, '');
     const safeName = filename && String(filename).trim() ? String(filename) : 'default.png';
     return `${base}/${folder}/${safeName}`;
