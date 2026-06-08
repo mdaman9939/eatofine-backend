@@ -6,11 +6,11 @@ import { CatalogMongoService } from './catalog-mongo.service';
  * Routes the 4 migratable catalog endpoints to either MySQL (Prisma) or
  * MongoDB (Mongoose) based on the `USE_MONGO_CATALOG` env var.
  *
- *   USE_MONGO_CATALOG=1   → reads from MongoDB
- *   anything else / unset → reads from MySQL (default, safe)
+ *   USE_MONGO_CATALOG=1   → reads from MongoDB (default)
+ *   anything else         → reads from MySQL
  *
- * Zones, currencies and advertisements stay on MySQL for now — they'll
- * migrate in a later phase.
+ * Every endpoint (incl. zones / currencies / advertisements) now has a Mongo
+ * implementation, so the whole catalog works on a MongoDB-only deployment.
  */
 @Injectable()
 export class CatalogRouterService {
@@ -45,9 +45,17 @@ export class CatalogRouterService {
     return this.useMongo() ? this.mongo.listCuisines() : this.mysql.listCuisines();
   }
 
-  // ── Unchanged methods (still MySQL only) ──────────────────────
-  listZones() { return this.mysql.listZones(); }
-  checkZone(lat: number, lng: number) { return this.mysql.checkZone(lat, lng); }
-  listCurrencies() { return this.mysql.listCurrencies(); }
-  listAdvertisements() { return this.mysql.listAdvertisements(); }
+  // ── Zones / currencies / advertisements (now Mongo-capable too) ─────
+  listZones() {
+    return this.useMongo() ? this.mongo.listZones() : this.mysql.listZones();
+  }
+  checkZone(lat: number, lng: number) {
+    return this.useMongo() ? this.mongo.checkZone(lat, lng) : this.mysql.checkZone(lat, lng);
+  }
+  listCurrencies() {
+    return this.useMongo() ? this.mongo.listCurrencies() : this.mysql.listCurrencies();
+  }
+  listAdvertisements() {
+    return this.useMongo() ? this.mongo.listAdvertisements() : this.mysql.listAdvertisements();
+  }
 }

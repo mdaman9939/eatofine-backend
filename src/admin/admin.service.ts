@@ -136,6 +136,12 @@ export class AdminService {
     if (body.image !== undefined) data.image = body.image;
     if (Object.keys(data).length === 0) throw new BadRequestException({ errors: [{ code: 'body', message: 'no fields' }] });
     data.updated_at = new Date();
+    if (this.useMongo()) {
+      const a = await this.mongo.findByMysqlId<{ mysql_id: number }>('admins', Number(adminId));
+      if (!a) throw new NotFoundException({ errors: [{ code: 'admin', message: 'not_found' }] });
+      await this.mongo.updateOne('admins', { mysql_id: Number(adminId) }, data);
+      return this.getMe(adminId);
+    }
     await this.prisma.admins.update({ where: { id: adminId }, data });
     return this.getMe(adminId);
   }
@@ -146,6 +152,17 @@ export class AdminService {
     }
     if (body.new_password.length < 6) {
       throw new BadRequestException({ errors: [{ code: 'new_password', message: 'must be at least 6 characters' }] });
+    }
+    if (this.useMongo()) {
+      const a = await this.mongo.findByMysqlId<{ mysql_id: number; password?: string | null }>('admins', Number(adminId));
+      if (!a) throw new NotFoundException({ errors: [{ code: 'admin', message: 'not_found' }] });
+      if (!a.password) throw new BadRequestException({ errors: [{ code: 'password', message: 'no password on record' }] });
+      const phpStyleMongo = a.password.replace(/^\$2y\$/, '$2b$');
+      const okMongo = await bcrypt.compare(body.current_password, phpStyleMongo);
+      if (!okMongo) throw new BadRequestException({ errors: [{ code: 'current_password', message: 'incorrect current password' }] });
+      const newHashMongo = (await bcrypt.hash(body.new_password, 10)).replace(/^\$2b\$/, '$2y$');
+      await this.mongo.updateOne('admins', { mysql_id: Number(adminId) }, { password: newHashMongo, updated_at: new Date() });
+      return { ok: true };
     }
     const a = await this.prisma.admins.findUnique({ where: { id: adminId } });
     if (!a) throw new NotFoundException({ errors: [{ code: 'admin', message: 'not_found' }] });

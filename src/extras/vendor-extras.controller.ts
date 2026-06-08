@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Query, Req, UseGuards, HttpCode, UseInterceptors, UploadedFiles } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query, Req, UseGuards, HttpCode, UseInterceptors, UploadedFiles } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -1225,6 +1225,14 @@ export class VendorExtrasController {
     return { message: 'addon created', id: nextId };
   }
 
+  // The restaurant app sends this as PUT (some builds POST). Accept both so the
+  // "Update Addon" screen never 404s.
+  @HttpCode(200)
+  @Put('addon/update')
+  addonUpdatePut(@Body() body: Record<string, unknown> = {}) {
+    return this.addonUpdate(body);
+  }
+
   @HttpCode(200)
   @Post('addon/update')
   async addonUpdate(@Body() body: Record<string, unknown> = {}) {
@@ -1444,15 +1452,22 @@ export class VendorExtrasController {
   @Get('coupon-list')
   async vendorCouponList(@Req() req: AuthedRequest) {
     if (!this.useMongo()) return [];
+    const vendorId = Number(req.actor!.id);
     const restaurant = await this.vendorRestaurant(req);
-    if (!restaurant) return [];
-    const filter = { mysql_restaurant_id: Number(restaurant.mysql_id) };
-    const rows = await this.mongo.findMany<Record<string, unknown>>('coupons', filter, { sort: { mysql_id: -1 } });
+    // Match coupons owned by this vendor OR any of the vendor's restaurants —
+    // so a coupon created against a sibling restaurant still shows up.
+    const restaurantIds = restaurant
+      ? (await this.mongo.findMany<MongoRestaurantDoc>('restaurants', { mysql_vendor_id: vendorId }))
+          .map((r) => Number(r.mysql_id))
+      : [];
+    const or: Record<string, unknown>[] = [{ mysql_vendor_id: vendorId }];
+    if (restaurantIds.length > 0) or.push({ mysql_restaurant_id: { $in: restaurantIds } });
+    const rows = await this.mongo.findMany<Record<string, unknown>>('coupons', { $or: or }, { sort: { mysql_id: -1 } });
     return rows.map((r) => ({
       ...this.shapeCoupon(r),
       data: r.data ?? null,
       customer_id: r.customer_id ?? ['all'],
-      restaurant_name: restaurant.name ?? null,
+      restaurant_name: restaurant?.name ?? null,
     }));
   }
 
@@ -1474,8 +1489,12 @@ export class VendorExtrasController {
       title: String(body.title),
       code: String(body.code),
       coupon_type: body.coupon_type ? String(body.coupon_type) : 'default',
+      // Tie the coupon to BOTH the restaurant and the owning vendor so the
+      // list query finds it even if the vendor has more than one restaurant
+      // (findOne could otherwise resolve a different restaurant on read).
       mysql_restaurant_id: Number(restaurant.mysql_id),
       restaurant_id: Number(restaurant.mysql_id),
+      mysql_vendor_id: Number(req.actor!.id),
       discount: Number(body.discount ?? 0),
       discount_type: String(body.discount_type ?? 'amount'),
       min_purchase: Number(body.min_purchase ?? 0),
@@ -1490,6 +1509,13 @@ export class VendorExtrasController {
       updated_at: now,
     });
     return { message: 'coupon created', id: nextId };
+  }
+
+  // Some builds of the restaurant app PUT the coupon update (like addon/update).
+  @HttpCode(200)
+  @Put('coupon-update')
+  vendorCouponUpdatePut(@Body() body: Record<string, unknown> = {}) {
+    return this.vendorCouponUpdate(body);
   }
 
   @HttpCode(200)
