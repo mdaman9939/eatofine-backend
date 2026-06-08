@@ -845,22 +845,40 @@ export class VendorExtrasController {
     return { products: [], total_size: 0 };
   }
 
+  // The restaurant app toggles these via GET with query params
+  // (?id=94&status=1); some builds POST a body. Accept both so neither 404s.
+  @HttpCode(200)
+  @Get('product/status')
+  productStatusGet(@Query() query: Record<string, unknown> = {}) {
+    return this.productStatus({}, query);
+  }
+
   @HttpCode(200)
   @Post('product/status')
-  async productStatus(@Body() body: Record<string, unknown> = {}) {
-    const id = body.id !== undefined && body.id !== '' ? Number(body.id) : null;
+  async productStatus(@Body() body: Record<string, unknown> = {}, @Query() query: Record<string, unknown> = {}) {
+    const src = { ...query, ...body };
+    const id = src.id !== undefined && src.id !== '' ? Number(src.id) : null;
     if (this.useMongo() && id) {
-      await this.mongo.updateOne('foods', { mysql_id: id }, { status: !!Number(body.status ?? 0), updated_at: new Date() });
+      await this.mongo.updateOne('foods', { mysql_id: id }, { status: !!Number(src.status ?? 0), updated_at: new Date() });
     }
     return { message: 'updated' };
   }
 
   @HttpCode(200)
+  @Get('product/recommended')
+  productRecommendedGet(@Query() query: Record<string, unknown> = {}) {
+    return this.productRecommended({}, query);
+  }
+
+  @HttpCode(200)
   @Post('product/recommended')
-  async productRecommended(@Body() body: Record<string, unknown> = {}) {
-    const id = body.id !== undefined && body.id !== '' ? Number(body.id) : null;
+  async productRecommended(@Body() body: Record<string, unknown> = {}, @Query() query: Record<string, unknown> = {}) {
+    const src = { ...query, ...body };
+    const id = src.id !== undefined && src.id !== '' ? Number(src.id) : null;
     if (this.useMongo() && id) {
-      await this.mongo.updateOne('foods', { mysql_id: id }, { recommended: !!Number(body.is_recommended ?? body.recommended ?? 0), updated_at: new Date() });
+      // The recommended value arrives as `is_recommended`, `recommended`, or `status`.
+      const value = !!Number(src.is_recommended ?? src.recommended ?? src.status ?? 0);
+      await this.mongo.updateOne('foods', { mysql_id: id }, { recommended: value, updated_at: new Date() });
     }
     return { message: 'updated' };
   }
@@ -1252,6 +1270,14 @@ export class VendorExtrasController {
     return { message: 'addon updated' };
   }
 
+  // The restaurant app sends delete as POST (some builds DELETE). Accept both
+  // so the "Delete Addon" confirm never 404s.
+  @HttpCode(200)
+  @Post('addon/delete')
+  addonDeletePost(@Body() body: Record<string, unknown> = {}, @Query('id') idQ?: string) {
+    return this.addonDelete(body, idQ);
+  }
+
   @HttpCode(200)
   @Delete('addon/delete')
   async addonDelete(@Body() body: Record<string, unknown> = {}, @Query('id') idQ?: string) {
@@ -1548,6 +1574,13 @@ export class VendorExtrasController {
       await this.mongo.updateOne('coupons', { mysql_id: id }, { status: !!Number(body.status ?? 0), updated_at: new Date() });
     }
     return { message: 'status updated' };
+  }
+
+  // Accept POST as well as DELETE (some app builds POST the delete).
+  @HttpCode(200)
+  @Post('coupon-delete')
+  vendorCouponDeletePost(@Body() body: Record<string, unknown> = {}, @Query('id') idQ?: string) {
+    return this.vendorCouponDelete(body, idQ);
   }
 
   @HttpCode(200)
