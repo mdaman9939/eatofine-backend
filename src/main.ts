@@ -6,6 +6,7 @@ import * as path from 'path';
 import { AppModule } from './app.module';
 import { validateEnv } from './common/env.validation';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
+import { storageContext } from './common/storage-url';
 
 (BigInt.prototype as unknown as { toJSON: () => number }).toJSON = function (this: bigint) {
   return Number(this);
@@ -61,6 +62,18 @@ async function bootstrap() {
       console.log(`${req.method} ${req.originalUrl} → ${res.statusCode} ${ms}ms`);
     });
     next();
+  });
+
+  // Capture the request's public origin so every image URL we return points at
+  // the SAME host the client used to reach us (works behind Render's proxy via
+  // x-forwarded-* headers). This makes uploaded images load without anyone
+  // having to set STORAGE_BASE_URL correctly.
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const pick = (v: unknown) => (Array.isArray(v) ? v[0] : v) as string | undefined;
+    const host = pick(req.headers['x-forwarded-host']) || pick(req.headers['host']);
+    const proto = (pick(req.headers['x-forwarded-proto']) || req.protocol || 'http').split(',')[0];
+    const baseUrl = host ? `${proto}://${host}/storage` : undefined;
+    storageContext.run({ baseUrl }, () => next());
   });
 
   // Serve uploaded images at /storage/*.

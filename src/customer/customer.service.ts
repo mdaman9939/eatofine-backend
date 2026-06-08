@@ -1,6 +1,7 @@
 ﻿import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { storageBaseUrl } from '../common/storage-url';
 
 // A cart can belong to either an authenticated customer or an anonymous
 // guest. We store both in the same row via `is_guest`; `id` here holds
@@ -81,7 +82,7 @@ export class CustomerService {
   }
 
   private storageBase(): string {
-    return process.env.STORAGE_BASE_URL ?? 'http://127.0.0.1:3000/storage';
+    return storageBaseUrl();
   }
 
   async info(userId: bigint) {

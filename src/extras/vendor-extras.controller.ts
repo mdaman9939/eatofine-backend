@@ -6,6 +6,7 @@ import { AuthGuard, RequireAuth } from '../auth/auth.guard';
 import type { AuthedRequest } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { storageBaseUrl } from '../common/storage-url';
 
 // Mongo doc shapes (only fields we read).
 interface MongoVendorDoc {
@@ -470,9 +471,10 @@ export class VendorExtrasController {
   private buildStorageUrl(folder: string, filename?: string | null): string {
     // Pass absolute URLs (external CDN / pasted links) through untouched.
     if (filename && /^https?:\/\//i.test(String(filename))) return String(filename);
-    const base = (process.env.STORAGE_BASE_URL ?? 'http://127.0.0.1:3000/storage').replace(/\/$/, '');
+    // storageBaseUrl() resolves from the current request's host (see main.ts),
+    // so images always point at the origin the app actually reached us on.
     const safeName = filename && String(filename).trim() ? String(filename) : 'default.png';
-    return `${base}/${folder}/${safeName}`;
+    return `${storageBaseUrl()}/${folder}/${safeName}`;
   }
 
   /** Resolve the on-disk storage folder so uploaded images survive across
@@ -1907,10 +1909,16 @@ export class VendorExtrasController {
   campaignLeave() { return { message: 'left' }; }
 
   /** Map a Mongo advertisement doc to the exact shape AdvertisementModel.Adds
-   *  / AdsDetailsModel expect in the restaurant app. */
+   *  / AdsDetailsModel expect in the restaurant app. Image URLs come from
+   *  storageBaseUrl() which is request-host aware (see main.ts). */
   private shapeAd(row: Record<string, unknown>) {
     const r = row as Record<string, unknown>;
-    const img = (f: unknown) => (f && String(f).trim() ? this.buildStorageUrl('advertisement', String(f)) : null);
+    const img = (f: unknown) => {
+      const s = f && String(f).trim() ? String(f) : '';
+      if (!s) return null;
+      if (/^https?:\/\//i.test(s)) return s; // already absolute
+      return `${storageBaseUrl()}/advertisement/${s}`;
+    };
     return {
       id: Number(r.mysql_id),
       restaurant_id: r.mysql_restaurant_id != null ? Number(r.mysql_restaurant_id) : 0,

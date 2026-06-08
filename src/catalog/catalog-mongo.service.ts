@@ -5,6 +5,7 @@ import { Category, CategoryDocument } from '../mongo/schemas/category.schema';
 import { Cuisine, CuisineDocument } from '../mongo/schemas/cuisine.schema';
 import { Banner, BannerDocument } from '../mongo/schemas/banner.schema';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { storageFullUrl } from '../common/storage-url';
 
 // Mongoose-backed implementation of the catalog endpoints. The shape of
 // every method's return value is intentionally identical to the existing
@@ -20,12 +21,8 @@ export class CatalogMongoService {
     private readonly mongo: MongoDataService,
   ) {}
 
-  private storageBase(): string {
-    return process.env.STORAGE_BASE_URL ?? 'http://127.0.0.1:3000/storage';
-  }
-
   private fullUrl(folder: string, file?: string | null) {
-    return file ? `${this.storageBase()}/${folder}/${file}` : null;
+    return storageFullUrl(folder, file);
   }
 
   async listCategories() {

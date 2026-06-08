@@ -1,6 +1,7 @@
 ﻿import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { storageBaseUrl } from '../common/storage-url';
 
 const VENDOR_STATUSES = ['accepted', 'confirmed', 'processing', 'handover'] as const;
 const DM_STATUSES = ['picked_up', 'delivered'] as const;
@@ -58,7 +59,7 @@ export class OpsService {
   }
 
   private storageBase(): string {
-    return process.env.STORAGE_BASE_URL ?? 'http://127.0.0.1:3000/storage';
+    return storageBaseUrl();
   }
 
   private async restaurantForVendor(vendorId: bigint) {
