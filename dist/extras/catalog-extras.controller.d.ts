@@ -235,6 +235,7 @@ export declare class CatalogExtrasController {
     advertisementList(): Promise<{
         id: number;
         restaurant_id: number;
+        restaurant_status: number;
         restaurant_name: string | null;
         restaurant_logo_full_url: string | null;
         created_by_id: number;

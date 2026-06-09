@@ -520,19 +520,25 @@ let CatalogExtrasController = class CatalogExtrasController {
                 : [];
             const restMap = new Map(restaurants.map((r) => [Number(r.mysql_id), r]));
             return rows
-                .filter((r) => restMap.has(Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0)))
+                .filter((r) => {
+                const rest = restMap.get(Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0));
+                return !!rest && rest.status !== false && rest.active !== false;
+            })
                 .map((r) => {
                 const rid = Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0);
                 const rest = restMap.get(rid);
+                const coverUrl = img(r.cover_image) ?? (0, storage_url_1.storageFullUrl)('restaurant/cover', rest?.cover_photo ?? null) ?? (0, storage_url_1.storageFullUrl)('restaurant', rest?.logo ?? null);
+                const profileUrl = img(r.profile_image) ?? (0, storage_url_1.storageFullUrl)('restaurant', rest?.logo ?? null);
                 return {
                     ...r,
                     id: Number(r.mysql_id),
                     restaurant_id: rid,
+                    restaurant_status: 1,
                     restaurant_name: rest?.name ?? null,
                     restaurant_logo_full_url: (0, storage_url_1.storageFullUrl)('restaurant', rest?.logo ?? null),
                     created_by_id: Number(r.mysql_created_by_id ?? r.created_by_id ?? 0),
-                    cover_image_full_url: img(r.cover_image),
-                    profile_image_full_url: img(r.profile_image),
+                    cover_image_full_url: coverUrl,
+                    profile_image_full_url: profileUrl,
                     video_attachment_full_url: img(r.video_attachment),
                 };
             });

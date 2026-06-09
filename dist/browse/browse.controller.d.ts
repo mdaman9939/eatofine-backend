@@ -32,6 +32,7 @@ export declare class BrowseController {
             minimum_shipping_charge: number;
             schedule_order: number;
             status: number;
+            restaurant_status: number;
             active: number;
             open: number;
             zone_id: number | null;
@@ -69,6 +70,7 @@ export declare class BrowseController {
             minimum_shipping_charge: number;
             schedule_order: number;
             status: number;
+            restaurant_status: number;
             active: number;
             open: number;
             zone_id: bigint | null;
@@ -106,6 +108,7 @@ export declare class BrowseController {
             minimum_shipping_charge: number;
             schedule_order: number;
             status: number;
+            restaurant_status: number;
             active: number;
             open: number;
             zone_id: number | null;
@@ -142,6 +145,7 @@ export declare class BrowseController {
             minimum_shipping_charge: number;
             schedule_order: number;
             status: number;
+            restaurant_status: number;
             active: number;
             open: number;
             zone_id: bigint | null;
@@ -179,6 +183,7 @@ export declare class BrowseController {
             minimum_shipping_charge: number;
             schedule_order: number;
             status: number;
+            restaurant_status: number;
             active: number;
             open: number;
             zone_id: number | null;
@@ -215,6 +220,7 @@ export declare class BrowseController {
             minimum_shipping_charge: number;
             schedule_order: number;
             status: number;
+            restaurant_status: number;
             active: number;
             open: number;
             zone_id: bigint | null;
@@ -280,6 +286,7 @@ export declare class BrowseController {
         minimum_shipping_charge: number;
         schedule_order: number;
         status: number;
+        restaurant_status: number;
         active: number;
         open: number;
         zone_id: number | null;
@@ -343,6 +350,7 @@ export declare class BrowseController {
         minimum_shipping_charge: number;
         schedule_order: number;
         status: number;
+        restaurant_status: number;
         active: number;
         open: number;
         zone_id: bigint | null;
@@ -723,6 +731,7 @@ export declare class BrowseController {
             minimum_shipping_charge: number;
             schedule_order: number;
             status: number;
+            restaurant_status: number;
             active: number;
             open: number;
             zone_id: number | null;
@@ -759,6 +768,7 @@ export declare class BrowseController {
             minimum_shipping_charge: number;
             schedule_order: number;
             status: number;
+            restaurant_status: number;
             active: number;
             open: number;
             zone_id: bigint | null;

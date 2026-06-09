@@ -142,6 +142,11 @@ export class BrowseService {
       minimum_shipping_charge: Number(r.minimum_shipping_charge ?? 0),
       schedule_order: r.schedule_order ? 1 : 0,
       status: r.status ? 1 : 0,
+      // Flutter restaurant cards gate navigation on restaurant_status (== 1).
+      // Without it the field is null and tapping a card does nothing / shows
+      // "Restaurant is not available". Browse only returns live restaurants,
+      // so mirror status here.
+      restaurant_status: r.status ? 1 : 0,
       active: r.active ? 1 : 0,
       open: r.open ?? 1,
       zone_id: r.zone_id,
@@ -182,6 +187,11 @@ export class BrowseService {
       minimum_shipping_charge: Number(r.minimum_shipping_charge ?? 0),
       schedule_order: r.schedule_order ? 1 : 0,
       status: r.status ? 1 : 0,
+      // Flutter restaurant cards gate navigation on restaurant_status (== 1).
+      // Without it the field is null and tapping a card does nothing / shows
+      // "Restaurant is not available". Browse only returns live restaurants,
+      // so mirror status here.
+      restaurant_status: r.status ? 1 : 0,
       active: r.active ? 1 : 0,
       open: r.open ?? 1,
       zone_id: r.mysql_zone_id != null ? Number(r.mysql_zone_id) : null,

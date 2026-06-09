@@ -612,24 +612,35 @@ export class CatalogExtrasController {
         .map((r) => Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0))
         .filter((n) => n > 0)));
       const restaurants = restIds.length
-        ? await this.mongo.findMany<{ mysql_id: number; name?: string | null; logo?: string | null }>(
+        ? await this.mongo.findMany<{ mysql_id: number; name?: string | null; logo?: string | null; cover_photo?: string | null; status?: boolean | null; active?: boolean | null }>(
             'restaurants', { mysql_id: { $in: restIds } })
         : [];
       const restMap = new Map(restaurants.map((r) => [Number(r.mysql_id), r]));
       return rows
-        .filter((r) => restMap.has(Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0)))
+        // Only keep ads whose restaurant exists AND is live (status + active) —
+        // tapping an ad for an inactive restaurant shows "Restaurant is not
+        // available", which is exactly what we want to avoid here.
+        .filter((r) => {
+          const rest = restMap.get(Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0));
+          return !!rest && rest.status !== false && rest.active !== false;
+        })
         .map((r) => {
           const rid = Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0);
           const rest = restMap.get(rid);
+          // Fall back to the restaurant's own cover/logo when the ad has no
+          // image of its own, so the highlight card never shows a grey box.
+          const coverUrl = img(r.cover_image) ?? storageFullUrl('restaurant/cover', rest?.cover_photo ?? null) ?? storageFullUrl('restaurant', rest?.logo ?? null);
+          const profileUrl = img(r.profile_image) ?? storageFullUrl('restaurant', rest?.logo ?? null);
           return {
             ...r,
             id: Number(r.mysql_id),
             restaurant_id: rid,
+            restaurant_status: 1,
             restaurant_name: rest?.name ?? null,
             restaurant_logo_full_url: storageFullUrl('restaurant', rest?.logo ?? null),
             created_by_id: Number(r.mysql_created_by_id ?? r.created_by_id ?? 0),
-            cover_image_full_url: img(r.cover_image),
-            profile_image_full_url: img(r.profile_image),
+            cover_image_full_url: coverUrl,
+            profile_image_full_url: profileUrl,
             video_attachment_full_url: img(r.video_attachment),
           };
         });
