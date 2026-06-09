@@ -134,16 +134,48 @@ export class CustomerExtrasController {
     }>('wishlists', { user_id: userId });
     const foodIds = rows.map((r) => r.food_id).filter((x): x is number => x != null);
     const restaurantIds = rows.map((r) => r.restaurant_id).filter((x): x is number => x != null);
-    const [foods, restaurants] = await Promise.all([
+    type MongoRestaurantDoc = {
+      mysql_id: number; name?: string | null; logo?: string | null; cover_photo?: string | null;
+      address?: string | null; avg_rating?: number | null; rating_count?: number | null;
+      delivery_time?: string | null; free_delivery?: boolean | null; slug?: string | null;
+      open?: number | null; active?: boolean | null; status?: boolean | null;
+      mysql_zone_id?: number | null; mysql_vendor_id?: number | null;
+    };
+    const [foods, restaurants, restFoods] = await Promise.all([
       foodIds.length
         ? this.mongo.findMany<MongoFoodDoc>('foods', { mysql_id: { $in: foodIds } })
         : Promise.resolve([] as MongoFoodDoc[]),
       restaurantIds.length
-        ? this.mongo.findMany<{ mysql_id: number; name?: string | null; logo?: string | null; address?: string | null; avg_rating?: number | null }>(
-            'restaurants', { mysql_id: { $in: restaurantIds } },
-          )
-        : Promise.resolve([] as Array<{ mysql_id: number; name?: string | null; logo?: string | null; address?: string | null; avg_rating?: number | null }>),
+        ? this.mongo.findMany<MongoRestaurantDoc>('restaurants', { mysql_id: { $in: restaurantIds } })
+        : Promise.resolve([] as MongoRestaurantDoc[]),
+      // Foods belonging to the wishlisted restaurants, so each card can show a
+      // real food-thumbnail strip + count instead of "No food available".
+      restaurantIds.length
+        ? this.mongo.findMany<MongoFoodDoc>('foods', { mysql_restaurant_id: { $in: restaurantIds } }, { limit: 200 })
+        : Promise.resolve([] as MongoFoodDoc[]),
     ]);
+
+    const foodsByRest = new Map<number, MongoFoodDoc[]>();
+    for (const f of restFoods) {
+      const rid = f.mysql_restaurant_id != null ? Number(f.mysql_restaurant_id) : null;
+      if (rid == null) continue;
+      const arr = foodsByRest.get(rid) ?? [];
+      arr.push(f);
+      foodsByRest.set(rid, arr);
+    }
+
+    // Vendor-image fallback for restaurants that have no logo of their own.
+    const vendorIds = Array.from(new Set(
+      restaurants.filter((r) => !r.logo && r.mysql_vendor_id).map((r) => Number(r.mysql_vendor_id)),
+    ));
+    const vendorImgMap = new Map<number, string | null>();
+    if (vendorIds.length) {
+      const vendors = await this.mongo.findMany<{ mysql_id: number; image?: string | null }>(
+        'vendors', { mysql_id: { $in: vendorIds } },
+      );
+      for (const v of vendors) vendorImgMap.set(Number(v.mysql_id), v.image ?? null);
+    }
+
     return {
       product: foods.map((f) => ({
         ...(f.legacy ?? {}),
@@ -157,14 +189,43 @@ export class CustomerExtrasController {
         // The app reads image_full_url for the wishlist card image.
         image_full_url: storageFullUrl('product', (f.image as string | null | undefined) ?? null),
       })),
-      restaurant: restaurants.map((r) => ({
-        id: Number(r.mysql_id),
-        name: r.name ?? null,
-        logo: r.logo ?? null,
-        logo_full_url: storageFullUrl('restaurant', r.logo ?? null),
-        address: r.address ?? null,
-        avg_rating: r.avg_rating ?? 0,
-      })),
+      restaurant: restaurants.map((r) => {
+        const rid = Number(r.mysql_id);
+        const rFoods = foodsByRest.get(rid) ?? [];
+        const vendorImg = r.logo ? null : (vendorImgMap.get(Number(r.mysql_vendor_id ?? 0)) ?? null);
+        return {
+          id: rid,
+          name: r.name ?? null,
+          logo: r.logo ?? vendorImg ?? null,
+          // Restaurant logo first, fall back to the owner's profile photo so the
+          // card shows a real image instead of the grey "Closed Now" placeholder.
+          logo_full_url: storageFullUrl('restaurant', r.logo ?? null) ?? storageFullUrl('profile', vendorImg),
+          cover_photo_full_url: storageFullUrl('restaurant/cover', r.cover_photo ?? null),
+          address: r.address ?? null,
+          avg_rating: r.avg_rating ?? 0,
+          rating_count: r.rating_count ?? 0,
+          delivery_time: r.delivery_time ?? '30-40',
+          free_delivery: r.free_delivery ? 1 : 0,
+          slug: r.slug ?? null,
+          // open/active drive the "Closed Now" overlay — default to open so a
+          // wishlisted restaurant isn't shown as permanently shut.
+          open: r.open ?? 1,
+          active: r.active !== false,
+          status: r.status === false ? 0 : 1,
+          restaurant_status: r.status === false ? 0 : 1,
+          zone_id: r.mysql_zone_id != null ? Number(r.mysql_zone_id) : null,
+          foods_count: rFoods.length,
+          foods: rFoods.slice(0, 6).map((f) => ({
+            id: Number(f.mysql_id),
+            name: f.name ?? null,
+            image: f.image ?? null,
+            image_full_url: storageFullUrl('product', (f.image as string | null | undefined) ?? null),
+            price: toNum(f.price),
+            avg_rating: f.avg_rating ?? 0,
+            rating_count: (f as unknown as { rating_count?: number | null }).rating_count ?? 0,
+          })),
+        };
+      }),
     };
   }
 
