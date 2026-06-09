@@ -1,7 +1,7 @@
 ﻿import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
-import { storageBaseUrl } from '../common/storage-url';
+import { storageBaseUrl, storageFullUrl } from '../common/storage-url';
 
 // A cart can belong to either an authenticated customer or an anonymous
 // guest. We store both in the same row via `is_guest`; `id` here holds
@@ -106,7 +106,7 @@ export class CustomerService {
         phone: u.phone ?? null,
         email: u.email ?? null,
         image: u.image ?? null,
-        image_full_url: u.image ? `${this.storageBase()}/profile/${u.image}` : null,
+        image_full_url: storageFullUrl('profile', u.image ?? null),
         is_phone_verified: u.is_phone_verified ? 1 : 0,
         is_email_verified: u.is_email_verified ? 1 : 0,
         email_verified_at: (legacy.email_verified_at as Date | string | null) ?? null,
@@ -138,7 +138,7 @@ export class CustomerService {
       phone: u.phone,
       email: u.email,
       image: u.image,
-      image_full_url: u.image ? `${this.storageBase()}/profile/${u.image}` : null,
+      image_full_url: storageFullUrl('profile', u.image ?? null),
       is_phone_verified: u.is_phone_verified ? 1 : 0,
       is_email_verified: u.is_email_verified ? 1 : 0,
       email_verified_at: u.email_verified_at,
@@ -338,7 +338,7 @@ export class CustomerService {
             name: f.name ?? null,
             description: f.description ?? null,
             image: f.image ?? null,
-            image_full_url: f.image ? `${this.storageBase()}/product/${f.image}` : null,
+            image_full_url: storageFullUrl('product', f.image ?? null),
             restaurant_id: Number(f.mysql_restaurant_id ?? 0),
             price: Number(f.price ?? 0),
             veg: f.veg ? 1 : 0,
@@ -372,7 +372,7 @@ export class CustomerService {
             name: f.name,
             description: f.description,
             image: f.image,
-            image_full_url: f.image ? `${this.storageBase()}/product/${f.image}` : null,
+            image_full_url: storageFullUrl('product', f.image ?? null),
             restaurant_id: Number(f.restaurant_id),
             price: Number(f.price as number),
             veg: f.veg ? 1 : 0,

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Query, Param, HttpCode } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Param, HttpCode } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
@@ -481,8 +481,47 @@ export class CatalogExtrasController {
 
   @HttpCode(200)
   @Post('products/reviews/submit')
-  submitProductReview() {
+  async submitProductReview(@Body() body: Record<string, unknown> = {}) {
+    if (!this.useMongo()) return { message: 'review submitted' };
+    const foodId = Number(body.food_id ?? body.product_id ?? 0);
+    const rating = Math.max(1, Math.min(5, Math.round(Number(body.rating ?? 0))));
+    if (!foodId || !rating) return { errors: [{ code: 'input', message: 'food_id and rating are required' }] };
+    const food = await this.mongo.findByMysqlId<{ mysql_id: number; mysql_restaurant_id?: number | null }>('foods', foodId);
+    if (!food) return { errors: [{ code: 'food', message: 'not found' }] };
+    const restId = Number(food.mysql_restaurant_id ?? 0);
+    const now = new Date();
+    const nextId = await this.mongo.nextMysqlId('reviews');
+    await this.mongo.insertOne('reviews', {
+      mysql_id: nextId,
+      mysql_food_id: foodId,
+      food_id: foodId,
+      mysql_restaurant_id: restId || null,
+      mysql_user_id: body.user_id ? Number(body.user_id) : null,
+      order_id: body.order_id ? Number(body.order_id) : null,
+      comment: body.comment ? String(body.comment) : null,
+      rating,
+      created_at: now,
+      updated_at: now,
+    });
+    await this.recomputeRating('foods', foodId, { mysql_food_id: foodId });
+    if (restId) await this.recomputeRating('restaurants', restId, { mysql_restaurant_id: restId });
     return { message: 'review submitted' };
+  }
+
+  /** Recompute avg_rating + rating_count for a food or restaurant from its
+   *  reviews, so the new rating shows up immediately. */
+  private async recomputeRating(collection: string, mysqlId: number, match: Record<string, unknown>) {
+    const agg = await this.mongo.aggregate<{ _id: null; avg: number; count: number }>('reviews', [
+      { $match: match },
+      { $group: { _id: null, avg: { $avg: '$rating' }, count: { $sum: 1 } } },
+    ]);
+    const avg = agg[0]?.avg ?? 0;
+    const count = agg[0]?.count ?? 0;
+    await this.mongo.updateOne(collection, { mysql_id: mysqlId }, {
+      avg_rating: Math.round(avg * 10) / 10,
+      rating_count: count,
+      updated_at: new Date(),
+    });
   }
 
   @Get('products/recommended/most-reviewed')
