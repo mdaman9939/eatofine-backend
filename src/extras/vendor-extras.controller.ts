@@ -63,10 +63,18 @@ interface MongoFoodDoc {
 interface MongoReviewDoc {
   mysql_id: number;
   mysql_food_id?: number | null;
+  food_id?: number | null;
   mysql_user_id?: number | null;
+  user_id?: number | null;
+  mysql_restaurant_id?: number | null;
+  restaurant_id?: number | null;
+  mysql_order_id?: number | null;
+  order_id?: number | null;
   comment?: string | null;
   rating?: number | null;
   reply?: string | null;
+  created_at?: Date | string | null;
+  updated_at?: Date | string | null;
 }
 
 interface MongoCategoryDoc {
@@ -1133,29 +1141,96 @@ export class VendorExtrasController {
     return { message: 'product deleted' };
   }
 
+  // The restaurant app's "Customer Reviews" screen calls this with
+  // ?restaurant_id=N&search=… and expects ALL reviews across the restaurant's
+  // products (enriched with food + customer + order id). The product-details
+  // screen calls it with ?product_id=N for a single food. Reviews in Mongo use
+  // legacy `food_id`/`restaurant_id`/`user_id` keys (no mysql_ prefix), so we
+  // match either spelling.
   @Get('product/reviews')
-  async productReviews(@Query('product_id') idStr?: string) {
-    const id = parseInt(idStr ?? '', 10);
-    if (!Number.isFinite(id)) return [];
+  async productReviews(
+    @Req() req: AuthedRequest,
+    @Query('product_id') productIdStr?: string,
+    @Query('restaurant_id') restaurantIdStr?: string,
+    @Query('search') search?: string,
+  ) {
+    if (!this.useMongo()) {
+      const pid = parseInt(productIdStr ?? '', 10);
+      if (!Number.isFinite(pid)) return [];
+      const rows = await this.prisma.reviews.findMany({ where: { food_id: BigInt(pid) }, orderBy: { id: 'desc' }, take: 50 });
+      return rows.map((r) => ({ id: Number(r.id), food_id: Number(r.food_id), user_id: Number(r.user_id), comment: r.comment, rating: r.rating, reply: r.reply }));
+    }
 
-    if (this.useMongo()) {
-      const rows = await this.mongo.findMany<MongoReviewDoc>(
-        'reviews',
-        { mysql_food_id: id },
-        { sort: { mysql_id: -1 }, limit: 50 },
-      );
-      return rows.map((r) => ({
+    const productId = parseInt(productIdStr ?? '', 10);
+    let restaurantId = parseInt(restaurantIdStr ?? '', 10);
+    // Neither id provided → default to the logged-in vendor's own restaurant.
+    if (!Number.isFinite(restaurantId) && !Number.isFinite(productId)) {
+      const rest = await this.vendorRestaurant(req).catch(() => null);
+      if (rest) restaurantId = Number(rest.mysql_id);
+    }
+
+    let filter: Record<string, unknown>;
+    if (Number.isFinite(productId)) {
+      filter = { $or: [{ mysql_food_id: productId }, { food_id: productId }] };
+    } else if (Number.isFinite(restaurantId)) {
+      const foods = await this.mongo.findMany<MongoFoodDoc>('foods', { mysql_restaurant_id: restaurantId });
+      const foodIds = foods.map((f) => Number(f.mysql_id)).filter((n) => n > 0);
+      const or: Record<string, unknown>[] = [{ mysql_restaurant_id: restaurantId }, { restaurant_id: restaurantId }];
+      if (foodIds.length) or.push({ mysql_food_id: { $in: foodIds } }, { food_id: { $in: foodIds } });
+      filter = { $or: or };
+    } else {
+      return [];
+    }
+
+    const rows = await this.mongo.findMany<MongoReviewDoc>('reviews', filter, { sort: { mysql_id: -1 }, limit: 100 });
+    if (rows.length === 0) return [];
+
+    // Enrich each review with its food (name + image) and customer (name + phone).
+    const foodIds = Array.from(new Set(rows.map((r) => Number(r.mysql_food_id ?? r.food_id ?? 0)).filter((n) => n > 0)));
+    const userIds = Array.from(new Set(rows.map((r) => Number(r.mysql_user_id ?? r.user_id ?? 0)).filter((n) => n > 0)));
+    const [foods, users] = await Promise.all([
+      foodIds.length ? this.mongo.findMany<MongoFoodDoc>('foods', { mysql_id: { $in: foodIds } }) : Promise.resolve([] as MongoFoodDoc[]),
+      userIds.length ? this.mongo.findMany<{ mysql_id: number; f_name?: string; l_name?: string; phone?: string; image?: string }>('users', { mysql_id: { $in: userIds } }) : Promise.resolve([] as Array<{ mysql_id: number; f_name?: string; l_name?: string; phone?: string; image?: string }>),
+    ]);
+    const foodMap = new Map(foods.map((f) => [Number(f.mysql_id), f]));
+    const userMap = new Map(users.map((u) => [Number(u.mysql_id), u]));
+
+    let shaped = rows.map((r) => {
+      const fid = Number(r.mysql_food_id ?? r.food_id ?? 0);
+      const uid = Number(r.mysql_user_id ?? r.user_id ?? 0);
+      const food = foodMap.get(fid);
+      const user = userMap.get(uid);
+      const customerName = user ? `${user.f_name ?? ''} ${user.l_name ?? ''}`.trim() || null : null;
+      return {
         id: Number(r.mysql_id),
-        food_id: r.mysql_food_id !== null && r.mysql_food_id !== undefined ? Number(r.mysql_food_id) : 0,
-        user_id: r.mysql_user_id !== null && r.mysql_user_id !== undefined ? Number(r.mysql_user_id) : 0,
+        food_id: fid || null,
+        user_id: uid || null,
+        order_id: r.mysql_order_id ?? r.order_id ?? null,
         comment: r.comment ?? null,
         rating: r.rating ?? null,
         reply: r.reply ?? null,
-      }));
-    }
+        food_name: (food?.name as string | undefined) ?? null,
+        food_image_full_url: storageFullUrl('product', (food?.image as string | null | undefined) ?? null),
+        customer_name: customerName,
+        customer_phone: user?.phone ?? null,
+        customer: user ? {
+          id: uid,
+          f_name: user.f_name ?? null,
+          l_name: user.l_name ?? null,
+          phone: user.phone ?? null,
+          image_full_url: storageFullUrl('profile', user.image ?? null),
+        } : null,
+        created_at: r.created_at ?? null,
+        updated_at: r.updated_at ?? null,
+      };
+    });
 
-    const rows = await this.prisma.reviews.findMany({ where: { food_id: BigInt(id) }, orderBy: { id: 'desc' }, take: 50 });
-    return rows.map((r) => ({ id: Number(r.id), food_id: Number(r.food_id), user_id: Number(r.user_id), comment: r.comment, rating: r.rating, reply: r.reply }));
+    // Search box: match by order id or food name.
+    const q = (search ?? '').trim().toLowerCase();
+    if (q && q !== 'null') {
+      shaped = shaped.filter((s) => String(s.order_id ?? '').includes(q) || (s.food_name ?? '').toLowerCase().includes(q));
+    }
+    return shaped;
   }
 
   @HttpCode(200)

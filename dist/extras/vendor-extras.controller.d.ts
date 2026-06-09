@@ -716,13 +716,34 @@ export declare class VendorExtrasController {
     productDelete(body?: Record<string, unknown>, idQ?: string): Promise<{
         message: string;
     }>;
-    productReviews(idStr?: string): Promise<{
+    productReviews(req: AuthedRequest, productIdStr?: string, restaurantIdStr?: string, search?: string): Promise<{
         id: number;
         food_id: number;
         user_id: number;
         comment: string | null;
+        rating: number;
+        reply: string | null;
+    }[] | {
+        id: number;
+        food_id: number | null;
+        user_id: number | null;
+        order_id: number | null;
+        comment: string | null;
         rating: number | null;
         reply: string | null;
+        food_name: string | null;
+        food_image_full_url: string | null;
+        customer_name: string | null;
+        customer_phone: string | null;
+        customer: {
+            id: number;
+            f_name: string | null;
+            l_name: string | null;
+            phone: string | null;
+            image_full_url: string | null;
+        } | null;
+        created_at: string | Date | null;
+        updated_at: string | Date | null;
     }[]>;
     productReply(body?: Record<string, unknown>): Promise<{
         message: string;
