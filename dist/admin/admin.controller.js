@@ -718,22 +718,40 @@ let AdminController = class AdminController {
     translations(limit, offset) {
         return this.admin.listTranslations({ limit: toInt(limit, 200), offset: toInt(offset, 0) });
     }
-    async uploadImage(file, dir) {
-        if (!file)
+    async uploadImage(file, dir, body) {
+        let buffer = file?.buffer;
+        let originalName = file?.originalname;
+        let mimetype = file?.mimetype;
+        if ((!buffer || buffer.length === 0) && body) {
+            const b64 = (body.image ?? body.file ?? body.photo ?? body.data ?? body.base64);
+            if (typeof b64 === 'string' && b64.trim().length > 0) {
+                const m = /^data:(image\/[a-z0-9.+-]+);base64,(.*)$/is.exec(b64.trim());
+                const raw = m ? m[2] : b64.trim();
+                mimetype = m ? m[1] : (mimetype ?? 'image/png');
+                try {
+                    buffer = Buffer.from(raw, 'base64');
+                }
+                catch {
+                    buffer = undefined;
+                }
+                originalName = body.filename ?? `upload.${(mimetype.split('/')[1] || 'png')}`;
+            }
+        }
+        if (!buffer || buffer.length === 0)
             throw new common_1.BadRequestException({ errors: [{ code: 'file', message: 'file is required' }] });
         if (!dir || !ALLOWED_UPLOAD_DIRS.has(dir)) {
             throw new common_1.BadRequestException({
                 errors: [{ code: 'dir', message: `dir must be one of: ${[...ALLOWED_UPLOAD_DIRS].join(', ')}` }],
             });
         }
-        let ext = (path.extname(file.originalname) || '.bin').toLowerCase();
+        let ext = (path.extname(originalName ?? '') || `.${(mimetype ?? 'image/png').split('/')[1] || 'bin'}`).toLowerCase();
         if (!/^\.(png|jpe?g|webp|gif)$/i.test(ext)) {
             throw new common_1.BadRequestException({ errors: [{ code: 'ext', message: 'only png/jpg/jpeg/webp/gif allowed' }] });
         }
-        let data = file.buffer;
-        let contentType = file.mimetype || 'image/png';
+        let data = buffer;
+        let contentType = mimetype || 'image/png';
         try {
-            const compressed = await (0, image_compress_1.compressImage)(file.buffer);
+            const compressed = await (0, image_compress_1.compressImage)(buffer);
             if (compressed) {
                 data = compressed.buffer;
                 ext = compressed.ext;
@@ -2267,8 +2285,9 @@ __decorate([
     (0, common_1.UseInterceptors)((0, platform_express_1.FileInterceptor)('file', { limits: { fileSize: 10 * 1024 * 1024 } })),
     __param(0, (0, common_1.UploadedFile)()),
     __param(1, (0, common_1.Query)('dir')),
+    __param(2, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:paramtypes", [Object, String, Object]),
     __metadata("design:returntype", Promise)
 ], AdminController.prototype, "uploadImage", null);
 exports.AdminController = AdminController = __decorate([

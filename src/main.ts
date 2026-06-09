@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import type { NextFunction, Request, Response } from 'express';
+import { json, urlencoded } from 'express';
 import * as path from 'path';
 import { AppModule } from './app.module';
 import { validateEnv } from './common/env.validation';
@@ -21,7 +22,17 @@ async function bootstrap() {
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger: ['error', 'warn', 'log'],
+    // Disable the default body parser (100 kb limit) so we can register our own
+    // with a generous limit — base64 image uploads (admin banner/logo etc.)
+    // otherwise fail with "request entity too large" (HTTP 413).
+    bodyParser: false,
   });
+
+  // Body parsers with a 25 MB ceiling. Multipart file uploads still go through
+  // multer (FileInterceptor); these cover JSON/urlencoded payloads, including
+  // base64-encoded images sent by the admin panel.
+  app.use(json({ limit: '25mb' }));
+  app.use(urlencoded({ extended: true, limit: '25mb' }));
 
   // Global pipes: trim/coerce primitive bodies (only really kicks in once
   // controllers add DTO classes — until then it's a no-op safety net).

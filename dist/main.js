@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 const core_1 = require("@nestjs/core");
 const common_1 = require("@nestjs/common");
+const express_1 = require("express");
 const path = __importStar(require("path"));
 const app_module_1 = require("./app.module");
 const env_validation_1 = require("./common/env.validation");
@@ -48,7 +49,10 @@ async function bootstrap() {
     (0, env_validation_1.validateEnv)();
     const app = await core_1.NestFactory.create(app_module_1.AppModule, {
         logger: ['error', 'warn', 'log'],
+        bodyParser: false,
     });
+    app.use((0, express_1.json)({ limit: '25mb' }));
+    app.use((0, express_1.urlencoded)({ extended: true, limit: '25mb' }));
     app.useGlobalPipes(new common_1.ValidationPipe({
         whitelist: true,
         transform: true,

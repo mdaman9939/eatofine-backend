@@ -1206,23 +1206,40 @@ export class AdminController {
   async uploadImage(
     @UploadedFile() file: MulterFile | undefined,
     @Query('dir') dir?: string,
+    @Body() body?: Record<string, unknown>,
   ) {
-    if (!file) throw new BadRequestException({ errors: [{ code: 'file', message: 'file is required' }] });
+    // Accept EITHER a multipart file (field "file") OR a base64 image in the
+    // JSON body (the admin panel sends the latter for some forms). Without the
+    // base64 path a large data-URL payload 413s ("request entity too large").
+    let buffer: Buffer | undefined = file?.buffer;
+    let originalName: string | undefined = file?.originalname;
+    let mimetype: string | undefined = file?.mimetype;
+    if ((!buffer || buffer.length === 0) && body) {
+      const b64 = (body.image ?? body.file ?? body.photo ?? body.data ?? body.base64) as string | undefined;
+      if (typeof b64 === 'string' && b64.trim().length > 0) {
+        const m = /^data:(image\/[a-z0-9.+-]+);base64,(.*)$/is.exec(b64.trim());
+        const raw = m ? m[2] : b64.trim();
+        mimetype = m ? m[1] : (mimetype ?? 'image/png');
+        try { buffer = Buffer.from(raw, 'base64'); } catch { buffer = undefined; }
+        originalName = (body.filename as string | undefined) ?? `upload.${(mimetype.split('/')[1] || 'png')}`;
+      }
+    }
+    if (!buffer || buffer.length === 0) throw new BadRequestException({ errors: [{ code: 'file', message: 'file is required' }] });
     if (!dir || !ALLOWED_UPLOAD_DIRS.has(dir)) {
       throw new BadRequestException({
         errors: [{ code: 'dir', message: `dir must be one of: ${[...ALLOWED_UPLOAD_DIRS].join(', ')}` }],
       });
     }
-    let ext = (path.extname(file.originalname) || '.bin').toLowerCase();
+    let ext = (path.extname(originalName ?? '') || `.${(mimetype ?? 'image/png').split('/')[1] || 'bin'}`).toLowerCase();
     if (!/^\.(png|jpe?g|webp|gif)$/i.test(ext)) {
       throw new BadRequestException({ errors: [{ code: 'ext', message: 'only png/jpg/jpeg/webp/gif allowed' }] });
     }
     // Auto-compress to a small WebP (~150–300 KB). Fall back to the original
     // bytes if sharp can't process it (compressImage never throws).
-    let data = file.buffer;
-    let contentType = file.mimetype || 'image/png';
+    let data = buffer;
+    let contentType = mimetype || 'image/png';
     try {
-      const compressed = await compressImage(file.buffer);
+      const compressed = await compressImage(buffer);
       if (compressed) { data = compressed.buffer; ext = compressed.ext; contentType = compressed.contentType; }
     } catch { /* keep original bytes */ }
 

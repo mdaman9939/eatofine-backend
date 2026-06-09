@@ -1571,7 +1571,7 @@ export declare class AdminController {
     currencies(): Promise<unknown>;
     tags(): Promise<unknown>;
     translations(limit?: string, offset?: string): Promise<unknown>;
-    uploadImage(file: MulterFile | undefined, dir?: string): Promise<{
+    uploadImage(file: MulterFile | undefined, dir?: string, body?: Record<string, unknown>): Promise<{
         ok: boolean;
         filename: string;
         path: string;
