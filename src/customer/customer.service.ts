@@ -99,6 +99,28 @@ export class CustomerService {
         }
         return Number(v) || 0;
       };
+      // The migrated `legacy.order_count/wallet_balance/loyalty_point` values are
+      // stale zeros — compute them live so the profile screen shows real numbers.
+      const uid = Number(u.mysql_id);
+      const sumPipeline = (match: Record<string, unknown>) => [
+        { $match: match },
+        { $group: {
+          _id: null,
+          credit: { $sum: { $toDouble: { $ifNull: ['$credit', 0] } } },
+          debit: { $sum: { $toDouble: { $ifNull: ['$debit', 0] } } },
+        } },
+      ];
+      const [orderCount, walletAgg, loyaltyAgg] = await Promise.all([
+        this.mongo.count('orders', { mysql_user_id: uid }),
+        this.mongo.aggregate<{ credit: number; debit: number }>('wallet_transactions', sumPipeline({ mysql_user_id: uid })),
+        this.mongo.aggregate<{ credit: number; debit: number }>('loyalty_point_transactions', sumPipeline({ user_id: uid })),
+      ]);
+      const walletBalance = walletAgg[0]
+        ? Math.max(0, Number((walletAgg[0].credit - walletAgg[0].debit).toFixed(2)))
+        : num(legacy.wallet_balance);
+      const loyaltyPoint = loyaltyAgg[0]
+        ? Math.max(0, Math.round(loyaltyAgg[0].credit - loyaltyAgg[0].debit))
+        : num(legacy.loyalty_point);
       return {
         id: Number(u.mysql_id),
         f_name: u.f_name ?? null,
@@ -114,10 +136,10 @@ export class CustomerService {
         created_at: (legacy.created_at as Date | string | null) ?? null,
         updated_at: (legacy.updated_at as Date | string | null) ?? null,
         status: u.status ? 1 : 0,
-        order_count: num(legacy.order_count),
+        order_count: orderCount,
         login_medium: (legacy.login_medium as string | null) ?? null,
-        wallet_balance: num(legacy.wallet_balance),
-        loyalty_point: num(legacy.loyalty_point),
+        wallet_balance: walletBalance,
+        loyalty_point: loyaltyPoint,
         ref_code: u.ref_code ?? null,
         current_language_key: (legacy.current_language_key as string | null) ?? null,
         userinfo: null,
