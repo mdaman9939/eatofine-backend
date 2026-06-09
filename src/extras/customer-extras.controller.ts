@@ -9,8 +9,10 @@ import {
   Query,
   Req,
   UploadedFile,
+  UploadedFiles,
   UseGuards, UseInterceptors, HttpCode } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, AnyFilesInterceptor } from '@nestjs/platform-express';
+import { compressImage } from '../common/image-compress';
 import * as fs from 'fs';
 import * as path from 'path';
 import { AuthGuard, RequireAuth } from '../auth/auth.guard';
@@ -538,14 +540,23 @@ export class CustomerExtrasController {
     if (!convId) return { messages: [] };
     const rows = await this.mongo.findMany<{
       mysql_id: number; conversation_id: number; sender_type: string;
-      sender_id: number; body: string; created_at?: Date | string | null;
+      sender_id: number; body?: string; message?: string; files?: string[];
+      is_seen?: number; created_at?: Date | string | null;
     }>('messages', { conversation_id: Number(convId) }, { sort: { mysql_id: 1 }, limit: 100 });
     return {
       messages: rows.map((m) => ({
         id: Number(m.mysql_id),
+        conversation_id: Number(m.conversation_id),
         sender_type: m.sender_type,
         sender_id: Number(m.sender_id),
-        body: m.body,
+        // Flutter MessageModel reads `message` for the text and `file_full_url`
+        // for image attachments — keep `body` too for any older parser.
+        message: m.message ?? m.body ?? '',
+        body: m.message ?? m.body ?? '',
+        file_full_url: Array.isArray(m.files)
+          ? m.files.map((f) => storageFullUrl('conversation', f)).filter((u): u is string => !!u)
+          : [],
+        is_seen: m.is_seen ?? 1,
         sent_by_me: m.sender_type === 'user' && Number(m.sender_id) === Number(req.actor!.id),
         created_at: m.created_at ?? null,
       })),
@@ -573,19 +584,42 @@ export class CustomerExtrasController {
   }
 
   @HttpCode(200)
+  @HttpCode(200)
   @Post('message/send')
-  async messageSend(@Req() req: AuthedRequest, @Body() body: { conversation_id?: number; counterpart_type?: string; counterpart_id?: number; body?: string }) {
+  // The Flutter chat screen posts multipart/form-data (it can attach images),
+  // so without a multipart interceptor @Body() arrives `undefined` and the old
+  // handler crashed with "Cannot read properties of undefined (reading 'body')".
+  // AnyFilesInterceptor parses the multipart payload → text fields populate and
+  // the optional `image[]` files become available.
+  @UseInterceptors(AnyFilesInterceptor({ limits: { fileSize: 10 * 1024 * 1024 } }))
+  async messageSend(
+    @Req() req: AuthedRequest,
+    @UploadedFiles() files: MulterFile[] | undefined,
+    @Body() rawBody: {
+      conversation_id?: number | string; counterpart_type?: string; counterpart_id?: number | string;
+      receiver_type?: string; receiver_id?: number | string; message?: string; body?: string;
+    } | undefined,
+  ) {
     const userId = Number(req.actor!.id);
-    if (!body.body || !body.body.trim()) {
+    const body = rawBody ?? {};
+    // The app sends the text under `message`; keep `body` as a fallback.
+    const text = (body.message ?? body.body ?? '').toString();
+    const images = await this.saveChatImages(files);
+    if (!text.trim() && images.length === 0) {
       return { message: 'message body required' };
     }
-    let convId = body.conversation_id;
-    if (!convId && body.counterpart_type && body.counterpart_id) {
+    // Accept both the StackFood field names (receiver_*) and our own (counterpart_*).
+    const counterpartType = body.counterpart_type ?? body.receiver_type ?? null;
+    const counterpartIdRaw = body.counterpart_id ?? body.receiver_id ?? null;
+    const counterpartId = counterpartIdRaw != null ? Number(counterpartIdRaw) : null;
+
+    let convId = body.conversation_id != null ? Number(body.conversation_id) : undefined;
+    if (!convId && counterpartType && counterpartId) {
       // Find-or-create a conversation row for the (user, counterpart) pair.
       const existing = await this.mongo.findOne<{ mysql_id: number }>('conversations', {
         user_id: userId,
-        counterpart_type: body.counterpart_type,
-        counterpart_id: Number(body.counterpart_id),
+        counterpart_type: counterpartType,
+        counterpart_id: counterpartId,
       });
       if (existing) {
         convId = Number(existing.mysql_id);
@@ -594,10 +628,10 @@ export class CustomerExtrasController {
         await this.mongo.insertOne('conversations', {
           mysql_id: convId,
           user_id: userId,
-          counterpart_type: body.counterpart_type,
-          counterpart_id: Number(body.counterpart_id),
+          counterpart_type: counterpartType,
+          counterpart_id: counterpartId,
           counterpart_name: null,
-          last_message: body.body,
+          last_message: text,
           last_message_at: new Date(),
           unread: 0,
         });
@@ -610,14 +644,55 @@ export class CustomerExtrasController {
       conversation_id: convId,
       sender_type: 'user',
       sender_id: userId,
-      body: body.body,
+      message: text,
+      body: text,
+      files: images,
       created_at: new Date(),
     });
     await this.mongo.updateOne('conversations', { mysql_id: convId }, {
-      last_message: body.body,
+      last_message: text || (images.length ? 'Photo' : ''),
       last_message_at: new Date(),
     });
-    return { message: 'sent', conversation_id: convId, id: msgId };
+    return { message: 'sent', conversation_id: convId, id: msgId, files: images };
+  }
+
+  /** Persist chat attachments durably: compress, best-effort disk write, and
+   *  always store the bytes in the Mongo `uploads` collection so they survive
+   *  Render's ephemeral disk. Returns the stored filenames (folder-relative). */
+  private async saveChatImages(files: MulterFile[] | undefined): Promise<string[]> {
+    if (!files || files.length === 0) return [];
+    const saved: string[] = [];
+    for (const file of files) {
+      if (!file?.buffer || file.buffer.length === 0) continue;
+      const ext = (path.extname(file.originalname) || '.jpg').toLowerCase();
+      if (!/^\.(png|jpe?g|webp|gif)$/i.test(ext)) continue;
+      const compressed = await compressImage(file.buffer).catch(() => null);
+      const buffer = compressed ? compressed.buffer : file.buffer;
+      const outExt = compressed ? compressed.ext : ext;
+      const contentType = compressed ? compressed.contentType : `image/${ext.replace('.', '').replace('jpg', 'jpeg')}`;
+      const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${outExt}`;
+      const relPath = `conversation/${filename}`;
+      try {
+        const dir = path.join(STORAGE_ROOT, 'conversation');
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, filename), buffer);
+      } catch {
+        // Read-only disk (Render) — Mongo copy below is the durable path.
+      }
+      try {
+        await this.mongo.insertOne('uploads', {
+          path: relPath,
+          content_type: contentType,
+          data: buffer,
+          size: buffer.length,
+          created_at: new Date(),
+        });
+      } catch {
+        // best-effort
+      }
+      saved.push(filename);
+    }
+    return saved;
   }
 
   // ── Subscription / interest ───────────────────────────────────────
