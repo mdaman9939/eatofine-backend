@@ -110,6 +110,46 @@ export class DeliveryExtrasController {
     return new Map(rows.map((r) => [Number(r._id), r.count]));
   }
 
+  /** Shape a page of order rows (item count + restaurant + customer). */
+  private async shapeDmOrderList(rows: Record<string, unknown>[]) {
+    const counts = await this.dmDetailsCountMap(rows.map((r) => Number(r.mysql_id)));
+    const restMap = await this.dmRestaurantMap(rows);
+    const userMap = await this.dmUserMap(rows);
+    return rows.map((r) => this.shapeDmOrder(
+      r,
+      counts.get(Number(r.mysql_id)) ?? 1,
+      restMap.get(Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0)),
+      userMap.get(Number(r.mysql_user_id ?? r.user_id ?? 0)),
+    ));
+  }
+
+  /** Per-status counts across ALL of this rider's orders — feeds the tab
+   *  badges (All / Delivered / Cancelled / Refunded + running statuses). */
+  private async dmOrderCount(actorId: number) {
+    const rows = await this.mongo.aggregate<{ _id: string; count: number }>('orders', [
+      { $match: { mysql_delivery_man_id: actorId } },
+      { $group: { _id: '$order_status', count: { $sum: 1 } } },
+    ]);
+    const by: Record<string, number> = {};
+    let all = 0;
+    for (const r of rows) { by[String(r._id)] = r.count; all += r.count; }
+    return {
+      all,
+      pending: by.pending ?? 0,
+      confirmed: by.confirmed ?? 0,
+      accepted: by.accepted ?? 0,
+      processing: by.processing ?? 0,
+      handover: by.handover ?? 0,
+      picked_up: by.picked_up ?? 0,
+      delivered: by.delivered ?? 0,
+      canceled: by.canceled ?? 0,
+      refund_requested: by.refund_requested ?? 0,
+      refunded: by.refunded ?? 0,
+      refund_request_canceled: by.refund_request_canceled ?? 0,
+      failed: by.failed ?? 0,
+    };
+  }
+
   // ── Profile ──────────────────────────────────────────────────────
   @Get('profile')
   async profile(@Req() req: AuthedRequest) {
@@ -251,44 +291,58 @@ export class DeliveryExtrasController {
   remove() { return { message: 'Not available in demo' }; }
 
   // ── Orders ───────────────────────────────────────────────────────
+  // The app calls all-orders two ways:
+  //   • no query params           → getList(): a BARE ARRAY of orders.
+  //   • ?offset&limit&status      → getCompletedOrderList(): a PaginatedOrderModel
+  //     { total_size, limit, offset, order_count, orders } with the tab counts.
   @Get('all-orders')
-  async allOrders(@Req() req: AuthedRequest) {
+  async allOrders(
+    @Req() req: AuthedRequest,
+    @Query('offset') offsetQ?: string,
+    @Query('limit') limitQ?: string,
+    @Query('status') status?: string,
+  ) {
     const actorId = Number(req.actor!.id);
+    const paginated = offsetQ !== undefined || limitQ !== undefined || status !== undefined;
     if (this.useMongo()) {
-      const rows = await this.mongo.findMany<Record<string, unknown>>(
-        'orders',
-        { mysql_delivery_man_id: actorId },
-        { sort: { mysql_id: -1 }, limit: 50 },
-      );
-      const counts = await this.dmDetailsCountMap(rows.map((r) => Number(r.mysql_id)));
-      const restMap = await this.dmRestaurantMap(rows);
-      const userMap = await this.dmUserMap(rows);
-      return rows.map((r) => this.shapeDmOrder(r, counts.get(Number(r.mysql_id)) ?? 1, restMap.get(Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0)), userMap.get(Number(r.mysql_user_id ?? r.user_id ?? 0))));
+      const base = { mysql_delivery_man_id: actorId };
+      if (!paginated) {
+        const rows = await this.mongo.findMany<Record<string, unknown>>('orders', base, { sort: { mysql_id: -1 }, limit: 50 });
+        return this.shapeDmOrderList(rows);
+      }
+      const limit = parseInt(limitQ ?? '10', 10) || 10;
+      const offset = parseInt(offsetQ ?? '1', 10) || 1;
+      const filter = status && status !== 'all' ? { ...base, order_status: status } : base;
+      const total = await this.mongo.count('orders', filter);
+      const rows = await this.mongo.findMany<Record<string, unknown>>('orders', filter, {
+        sort: { mysql_id: -1 }, limit, skip: Math.max(0, (offset - 1) * limit),
+      });
+      return { total_size: total, limit, offset, order_count: await this.dmOrderCount(actorId), orders: await this.shapeDmOrderList(rows) };
     }
     const rows = await this.prisma.orders.findMany({ where: { delivery_man_id: req.actor!.id }, orderBy: { id: 'desc' }, take: 50 });
-    return rows.map((r) => ({ ...r, id: Number(r.id), user_id: r.user_id ? Number(r.user_id) : null, restaurant_id: Number(r.restaurant_id), order_amount: Number(r.order_amount) }));
+    const mapped = rows.map((r) => ({ ...r, id: Number(r.id), user_id: r.user_id ? Number(r.user_id) : null, restaurant_id: Number(r.restaurant_id), order_amount: Number(r.order_amount) }));
+    return paginated ? { total_size: mapped.length, limit: 10, offset: 1, order_count: { all: mapped.length }, orders: mapped } : mapped;
   }
 
-  /** Active "running" orders — what the home dashboard "Active Order" card
-   *  + the Orders → Running Orders tab read. */
+  /** Active "running" orders — the home "Active Order" card + Running Orders
+   *  tab. Returns a PaginatedOrderModel (with order_count for the tab badges). */
   @Get('current-orders')
-  async currentOrders(@Req() req: AuthedRequest) {
+  async currentOrders(@Req() req: AuthedRequest, @Query('status') status?: string) {
     const actorId = Number(req.actor!.id);
     if (this.useMongo()) {
-      const rows = await this.mongo.findMany<Record<string, unknown>>(
-        'orders',
-        {
-          mysql_delivery_man_id: actorId,
-          order_status: { $in: ['handover', 'picked_up', 'confirmed', 'processing'] },
-        },
-        { sort: { mysql_id: -1 } },
-      );
-      const counts = await this.dmDetailsCountMap(rows.map((r) => Number(r.mysql_id)));
-      const restMap = await this.dmRestaurantMap(rows);
-      const userMap = await this.dmUserMap(rows);
-      return rows.map((r) => this.shapeDmOrder(r, counts.get(Number(r.mysql_id)) ?? 1, restMap.get(Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0)), userMap.get(Number(r.mysql_user_id ?? r.user_id ?? 0))));
+      const ongoing = ['handover', 'picked_up', 'confirmed', 'processing', 'accepted', 'pending', 'cooking'];
+      const filter: Record<string, unknown> = { mysql_delivery_man_id: actorId, order_status: { $in: ongoing } };
+      if (status && status !== 'all') filter.order_status = status;
+      const rows = await this.mongo.findMany<Record<string, unknown>>('orders', filter, { sort: { mysql_id: -1 } });
+      return {
+        total_size: rows.length,
+        limit: rows.length,
+        offset: 1,
+        order_count: await this.dmOrderCount(actorId),
+        orders: await this.shapeDmOrderList(rows),
+      };
     }
-    return [];
+    return { total_size: 0, limit: 0, offset: 1, order_count: { all: 0 }, orders: [] };
   }
 
   /** Latest unassigned orders the rider can accept — drives the Request tab. */
@@ -307,12 +361,10 @@ export class DeliveryExtrasController {
         },
         { sort: { mysql_id: -1 }, limit: 20 },
       );
-      const counts = await this.dmDetailsCountMap(rows.map((r) => Number(r.mysql_id)));
-      const restMap = await this.dmRestaurantMap(rows);
-      const userMap = await this.dmUserMap(rows);
-      return rows.map((r) => this.shapeDmOrder(r, counts.get(Number(r.mysql_id)) ?? 1, restMap.get(Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0)), userMap.get(Number(r.mysql_user_id ?? r.user_id ?? 0))));
+      // The app reads `response.body['orders']`, so wrap the list in an object.
+      return { orders: await this.shapeDmOrderList(rows), total_size: rows.length };
     }
-    return [];
+    return { orders: [], total_size: 0 };
   }
 
   @Get('order')
