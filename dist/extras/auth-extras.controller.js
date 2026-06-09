@@ -27,26 +27,88 @@ let AuthExtrasController = class AuthExtrasController {
         const v = (process.env.USE_MONGO_EXTRAS ?? '1').toLowerCase();
         return v === '1' || v === 'true' || v === 'yes';
     }
-    forgot() { return { message: 'Reset link sent (demo)' }; }
-    reset() { return { message: 'Password reset (demo)' }; }
-    verifyToken() { return { message: 'token verified', otp: '1234' }; }
+    identifier(body) {
+        const v = body.phone ?? body.email ?? body.identity ?? body.email_or_phone ?? body.contact;
+        return v !== undefined && v !== null && String(v).trim() !== '' ? String(v).trim() : null;
+    }
+    async findAccount(collection, ident) {
+        return this.mongo.findOne(collection, { $or: [{ phone: ident }, { email: ident }] });
+    }
+    async requestOtp(collection, body) {
+        const ident = this.identifier(body);
+        if (!ident)
+            return { errors: [{ code: 'identity', message: 'Phone or email is required' }] };
+        if (!this.useMongo())
+            return { message: 'OTP sent (demo)' };
+        const account = await this.findAccount(collection, ident);
+        if (!account)
+            return { errors: [{ code: 'account', message: 'No account found with that phone/email' }] };
+        const otp = String(Math.floor(1000 + Math.random() * 9000));
+        const now = new Date();
+        await this.mongo.deleteMany('password_resets', { collection, identifier: ident });
+        await this.mongo.insertOne('password_resets', {
+            collection, identifier: ident, mysql_id: account.mysql_id, otp,
+            expires_at: new Date(now.getTime() + 10 * 60 * 1000), created_at: now,
+        });
+        console.log(`[OTP] ${collection} ${ident} -> ${otp}`);
+        return { message: 'OTP sent', demo_otp: otp };
+    }
+    async verifyOtp(collection, body) {
+        const ident = this.identifier(body);
+        const otp = body.otp ?? body.token ?? body.reset_token;
+        if (!ident || otp === undefined)
+            return { errors: [{ code: 'input', message: 'identity and otp required' }] };
+        if (!this.useMongo())
+            return { message: 'token verified' };
+        const row = await this.mongo.findOne('password_resets', { collection, identifier: ident });
+        if (!row || String(row.otp) !== String(otp))
+            return { errors: [{ code: 'otp', message: 'Invalid OTP' }] };
+        if (new Date(row.expires_at) < new Date())
+            return { errors: [{ code: 'otp', message: 'OTP expired' }] };
+        return { message: 'token verified' };
+    }
+    async resetPassword(collection, body) {
+        const ident = this.identifier(body);
+        const otp = body.otp ?? body.token ?? body.reset_token;
+        const password = body.password ?? body.new_password;
+        if (!ident || otp === undefined || !password)
+            return { errors: [{ code: 'input', message: 'identity, otp and password required' }] };
+        if (body.confirm_password !== undefined && String(body.confirm_password) !== String(password)) {
+            return { errors: [{ code: 'confirm_password', message: 'Passwords do not match' }] };
+        }
+        if (!this.useMongo())
+            return { message: 'Password reset (demo)' };
+        const row = await this.mongo.findOne('password_resets', { collection, identifier: ident });
+        if (!row || String(row.otp) !== String(otp))
+            return { errors: [{ code: 'otp', message: 'Invalid OTP' }] };
+        if (new Date(row.expires_at) < new Date())
+            return { errors: [{ code: 'otp', message: 'OTP expired' }] };
+        const bcrypt = await import('bcrypt');
+        const hash = (await bcrypt.hash(String(password), 10)).replace(/^\$2b\$/, '$2y$');
+        await this.mongo.updateOne(collection, { mysql_id: row.mysql_id }, { password: hash, updated_at: new Date() });
+        await this.mongo.deleteMany('password_resets', { collection, identifier: ident });
+        return { message: 'Password reset successfully' };
+    }
+    forgot(body = {}) { return this.requestOtp('users', body); }
+    reset(body = {}) { return this.resetPassword('users', body); }
+    verifyToken(body = {}) { return this.verifyOtp('users', body); }
     verifyEmail() { return { message: 'email verified' }; }
     verifyPhone() { return { message: 'phone verified' }; }
     checkEmail() { return { message: 'available' }; }
     updateInfo() { return { message: 'info updated' }; }
     firebaseVerify() { return { message: 'verified' }; }
     firebaseReset() { return { message: 'password reset (demo)' }; }
-    vendorForgot() { return { message: 'Reset link sent (demo)' }; }
-    vendorReset() { return { message: 'Password reset (demo)' }; }
-    vendorVerifyToken() { return { message: 'token verified' }; }
+    vendorForgot(body = {}) { return this.requestOtp('vendors', body); }
+    vendorReset(body = {}) { return this.resetPassword('vendors', body); }
+    vendorVerifyToken(body = {}) { return this.verifyOtp('vendors', body); }
     vendorRegister(_body) {
         return { message: 'Vendor registration is disabled in this demo' };
     }
     packageRenew() { return { message: 'not available' }; }
     subscriptionPayment() { return { redirect_url: null }; }
-    dmForgot() { return { message: 'Reset link sent (demo)' }; }
-    dmReset() { return { message: 'Password reset (demo)' }; }
-    dmVerifyToken() { return { message: 'token verified' }; }
+    dmForgot(body = {}) { return this.requestOtp('delivery_men', body); }
+    dmReset(body = {}) { return this.resetPassword('delivery_men', body); }
+    dmVerifyToken(body = {}) { return this.verifyOtp('delivery_men', body); }
     dmFirebaseVerify() { return { message: 'verified' }; }
     dmCheckPassword() { return { message: 'ok' }; }
     dmBiometric() { return { message: 'Biometric login not enabled in demo' }; }
@@ -58,22 +120,25 @@ exports.AuthExtrasController = AuthExtrasController;
 __decorate([
     (0, common_1.Post)('forgot-password'),
     (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], AuthExtrasController.prototype, "forgot", null);
 __decorate([
     (0, common_1.Post)('reset-password'),
     (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], AuthExtrasController.prototype, "reset", null);
 __decorate([
     (0, common_1.Post)('verify-token'),
     (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], AuthExtrasController.prototype, "verifyToken", null);
 __decorate([
@@ -121,22 +186,25 @@ __decorate([
 __decorate([
     (0, common_1.Post)('vendor/forgot-password'),
     (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], AuthExtrasController.prototype, "vendorForgot", null);
 __decorate([
     (0, common_1.Post)('vendor/reset-password'),
     (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], AuthExtrasController.prototype, "vendorReset", null);
 __decorate([
     (0, common_1.Post)('vendor/verify-token'),
     (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], AuthExtrasController.prototype, "vendorVerifyToken", null);
 __decorate([
@@ -164,22 +232,25 @@ __decorate([
 __decorate([
     (0, common_1.Post)('delivery-man/forgot-password'),
     (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], AuthExtrasController.prototype, "dmForgot", null);
 __decorate([
     (0, common_1.Post)('delivery-man/reset-password'),
     (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], AuthExtrasController.prototype, "dmReset", null);
 __decorate([
     (0, common_1.Post)('delivery-man/verify-token'),
     (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], AuthExtrasController.prototype, "dmVerifyToken", null);
 __decorate([

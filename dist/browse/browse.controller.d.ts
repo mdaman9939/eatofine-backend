@@ -224,7 +224,7 @@ export declare class BrowseController {
             food_section: number;
         }[];
     }>;
-    restaurantDetails(id: number): Promise<{
+    restaurantDetails(id: string): Promise<{
         foods: {
             id: number;
             name: string | null;
@@ -587,7 +587,7 @@ export declare class BrowseController {
             recommended: number;
         }[];
     }>;
-    productDetails(id: number): Promise<{
+    productDetails(idStr: string): Promise<{
         id: bigint;
         name: string | null;
         description: string | null;
@@ -636,7 +636,7 @@ export declare class BrowseController {
         rating_count: number;
         recommended: number;
     }>;
-    categoryProducts(categoryId: number, limit?: string, offset?: string): Promise<{
+    categoryProducts(categoryIdStr: string, limit?: string, offset?: string): Promise<{
         total_size: number;
         limit: string;
         offset: string;
@@ -695,7 +695,7 @@ export declare class BrowseController {
             recommended: number;
         }[];
     }>;
-    categoryRestaurants(categoryId: number, limit?: string, offset?: string): Promise<{
+    categoryRestaurants(categoryIdStr: string, limit?: string, offset?: string): Promise<{
         total_size: number;
         limit: string;
         offset: string;

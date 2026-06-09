@@ -41,10 +41,18 @@ let CatalogRouterService = class CatalogRouterService {
     listCuisines() {
         return this.useMongo() ? this.mongo.listCuisines() : this.mysql.listCuisines();
     }
-    listZones() { return this.mysql.listZones(); }
-    checkZone(lat, lng) { return this.mysql.checkZone(lat, lng); }
-    listCurrencies() { return this.mysql.listCurrencies(); }
-    listAdvertisements() { return this.mysql.listAdvertisements(); }
+    listZones() {
+        return this.useMongo() ? this.mongo.listZones() : this.mysql.listZones();
+    }
+    checkZone(lat, lng) {
+        return this.useMongo() ? this.mongo.checkZone(lat, lng) : this.mysql.checkZone(lat, lng);
+    }
+    listCurrencies() {
+        return this.useMongo() ? this.mongo.listCurrencies() : this.mysql.listCurrencies();
+    }
+    listAdvertisements() {
+        return this.useMongo() ? this.mongo.listAdvertisements() : this.mysql.listAdvertisements();
+    }
 };
 exports.CatalogRouterService = CatalogRouterService;
 exports.CatalogRouterService = CatalogRouterService = __decorate([

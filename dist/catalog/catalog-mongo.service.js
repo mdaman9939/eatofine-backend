@@ -19,20 +19,21 @@ const mongoose_2 = require("mongoose");
 const category_schema_1 = require("../mongo/schemas/category.schema");
 const cuisine_schema_1 = require("../mongo/schemas/cuisine.schema");
 const banner_schema_1 = require("../mongo/schemas/banner.schema");
+const mongo_data_service_1 = require("../mongo/mongo-data.service");
+const storage_url_1 = require("../common/storage-url");
 let CatalogMongoService = class CatalogMongoService {
     categoryModel;
     cuisineModel;
     bannerModel;
-    constructor(categoryModel, cuisineModel, bannerModel) {
+    mongo;
+    constructor(categoryModel, cuisineModel, bannerModel, mongo) {
         this.categoryModel = categoryModel;
         this.cuisineModel = cuisineModel;
         this.bannerModel = bannerModel;
-    }
-    storageBase() {
-        return process.env.STORAGE_BASE_URL ?? 'http://127.0.0.1:3000/storage';
+        this.mongo = mongo;
     }
     fullUrl(folder, file) {
-        return file ? `${this.storageBase()}/${folder}/${file}` : null;
+        return (0, storage_url_1.storageFullUrl)(folder, file);
     }
     async listCategories() {
         const cats = await this.categoryModel
@@ -97,6 +98,43 @@ let CatalogMongoService = class CatalogMongoService {
             status: c.status ? 1 : 0,
         }));
     }
+    async listZones() {
+        const rows = await this.mongo.findMany('zones', { status: true }, { sort: { mysql_id: -1 } });
+        return rows.map((z) => ({
+            id: Number(z.mysql_id),
+            name: z.name ?? null,
+            coordinates: Array.isArray(z.coordinates) ? z.coordinates : null,
+            status: z.status ? 1 : 0,
+        }));
+    }
+    async checkZone(lat, lng) {
+        const rows = await this.mongo.findMany('zones', { status: true });
+        const matched = rows.filter((z) => Array.isArray(z.coordinates) && z.coordinates.length >= 3 && pointInPolygon(lat, lng, z.coordinates));
+        const list = matched.length > 0 ? matched : rows.slice(0, 1);
+        return {
+            zone_id: list.map((z) => Number(z.mysql_id)),
+            zone_data: list.map((z) => ({ id: Number(z.mysql_id), name: z.name ?? null })),
+        };
+    }
+    async listCurrencies() {
+        const rows = await this.mongo.findMany('currencies', {}, { sort: { mysql_id: 1 } });
+        return rows.map((c) => ({
+            id: Number(c.mysql_id),
+            country: c.country ?? null,
+            currency_code: c.currency_code ?? null,
+            currency_symbol: c.currency_symbol ?? null,
+            exchange_rate: c.exchange_rate ?? null,
+        }));
+    }
+    async listAdvertisements() {
+        const rows = await this.mongo.findMany('advertisements', { status: 'approved' }, { sort: { mysql_id: -1 } });
+        return rows.map((a) => ({
+            id: Number(a.mysql_id),
+            title: a.title ?? null,
+            description: a.description ?? null,
+            status: a.status ?? null,
+        }));
+    }
 };
 exports.CatalogMongoService = CatalogMongoService;
 exports.CatalogMongoService = CatalogMongoService = __decorate([
@@ -106,6 +144,18 @@ exports.CatalogMongoService = CatalogMongoService = __decorate([
     __param(2, (0, mongoose_1.InjectModel)(banner_schema_1.Banner.name)),
     __metadata("design:paramtypes", [mongoose_2.Model,
         mongoose_2.Model,
-        mongoose_2.Model])
+        mongoose_2.Model,
+        mongo_data_service_1.MongoDataService])
 ], CatalogMongoService);
+function pointInPolygon(lat, lng, poly) {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const xi = poly[i].lng, yi = poly[i].lat;
+        const xj = poly[j].lng, yj = poly[j].lat;
+        const intersect = (yi > lat) !== (yj > lat) && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
+        if (intersect)
+            inside = !inside;
+    }
+    return inside;
+}
 //# sourceMappingURL=catalog-mongo.service.js.map

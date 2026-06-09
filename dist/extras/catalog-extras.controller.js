@@ -14,8 +14,10 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CatalogExtrasController = void 0;
 const common_1 = require("@nestjs/common");
+const throttler_1 = require("@nestjs/throttler");
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
+const storage_url_1 = require("../common/storage-url");
 let CatalogExtrasController = class CatalogExtrasController {
     prisma;
     mongo;
@@ -407,8 +409,48 @@ let CatalogExtrasController = class CatalogExtrasController {
             reply_at: r.reply_at,
         }));
     }
-    submitProductReview() {
+    async submitProductReview(body = {}) {
+        if (!this.useMongo())
+            return { message: 'review submitted' };
+        const foodId = Number(body.food_id ?? body.product_id ?? 0);
+        const rating = Math.max(1, Math.min(5, Math.round(Number(body.rating ?? 0))));
+        if (!foodId || !rating)
+            return { errors: [{ code: 'input', message: 'food_id and rating are required' }] };
+        const food = await this.mongo.findByMysqlId('foods', foodId);
+        if (!food)
+            return { errors: [{ code: 'food', message: 'not found' }] };
+        const restId = Number(food.mysql_restaurant_id ?? 0);
+        const now = new Date();
+        const nextId = await this.mongo.nextMysqlId('reviews');
+        await this.mongo.insertOne('reviews', {
+            mysql_id: nextId,
+            mysql_food_id: foodId,
+            food_id: foodId,
+            mysql_restaurant_id: restId || null,
+            mysql_user_id: body.user_id ? Number(body.user_id) : null,
+            order_id: body.order_id ? Number(body.order_id) : null,
+            comment: body.comment ? String(body.comment) : null,
+            rating,
+            created_at: now,
+            updated_at: now,
+        });
+        await this.recomputeRating('foods', foodId, { mysql_food_id: foodId });
+        if (restId)
+            await this.recomputeRating('restaurants', restId, { mysql_restaurant_id: restId });
         return { message: 'review submitted' };
+    }
+    async recomputeRating(collection, mysqlId, match) {
+        const agg = await this.mongo.aggregate('reviews', [
+            { $match: match },
+            { $group: { _id: null, avg: { $avg: '$rating' }, count: { $sum: 1 } } },
+        ]);
+        const avg = agg[0]?.avg ?? 0;
+        const count = agg[0]?.count ?? 0;
+        await this.mongo.updateOne(collection, { mysql_id: mysqlId }, {
+            avg_rating: Math.round(avg * 10) / 10,
+            rating_count: count,
+            updated_at: new Date(),
+        });
     }
     async recommendedMostReviewed() {
         if (this.useMongo()) {
@@ -463,13 +505,37 @@ let CatalogExtrasController = class CatalogExtrasController {
     }
     async advertisementList() {
         if (this.useMongo()) {
-            const rows = await this.mongo.findMany('advertisements', { status: 'approved' }, { sort: { priority: 1 }, limit: 20 });
-            return rows.map((r) => ({
-                ...r,
-                id: Number(r.mysql_id),
-                restaurant_id: Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0),
-                created_by_id: Number(r.mysql_created_by_id ?? r.created_by_id ?? 0),
-            }));
+            const rows = await this.mongo.findMany('advertisements', { status: { $in: ['approved', 'running'] } }, { sort: { priority: 1 }, limit: 20 });
+            const img = (f) => {
+                const s = f && String(f).trim() ? String(f) : '';
+                if (!s)
+                    return null;
+                return /^https?:\/\//i.test(s) ? s : (0, storage_url_1.storageFullUrl)('advertisement', s);
+            };
+            const restIds = Array.from(new Set(rows
+                .map((r) => Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0))
+                .filter((n) => n > 0)));
+            const restaurants = restIds.length
+                ? await this.mongo.findMany('restaurants', { mysql_id: { $in: restIds } })
+                : [];
+            const restMap = new Map(restaurants.map((r) => [Number(r.mysql_id), r]));
+            return rows
+                .filter((r) => restMap.has(Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0)))
+                .map((r) => {
+                const rid = Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0);
+                const rest = restMap.get(rid);
+                return {
+                    ...r,
+                    id: Number(r.mysql_id),
+                    restaurant_id: rid,
+                    restaurant_name: rest?.name ?? null,
+                    restaurant_logo_full_url: (0, storage_url_1.storageFullUrl)('restaurant', rest?.logo ?? null),
+                    created_by_id: Number(r.mysql_created_by_id ?? r.created_by_id ?? 0),
+                    cover_image_full_url: img(r.cover_image),
+                    profile_image_full_url: img(r.profile_image),
+                    video_attachment_full_url: img(r.video_attachment),
+                };
+            });
         }
         try {
             const rows = await this.prisma.advertisements.findMany({ where: { status: 'approved' }, orderBy: { priority: 'asc' }, take: 20 });
@@ -603,6 +669,7 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], CatalogExtrasController.prototype, "offlinePaymentMethods", null);
 __decorate([
+    (0, throttler_1.SkipThrottle)(),
     (0, common_1.Get)('products/food-or-restaurant-search'),
     __param(0, (0, common_1.Query)('name')),
     __param(1, (0, common_1.Query)('limit')),
@@ -617,6 +684,7 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], CatalogExtrasController.prototype, "setMenu", null);
 __decorate([
+    (0, throttler_1.SkipThrottle)(),
     (0, common_1.Get)('products/search'),
     __param(0, (0, common_1.Query)('name')),
     __param(1, (0, common_1.Query)('offset')),
@@ -628,6 +696,7 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], CatalogExtrasController.prototype, "productsSearch", null);
 __decorate([
+    (0, throttler_1.SkipThrottle)(),
     (0, common_1.Get)('restaurants/search'),
     __param(0, (0, common_1.Query)('name')),
     __param(1, (0, common_1.Query)('offset')),
@@ -653,9 +722,10 @@ __decorate([
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('products/reviews/submit'),
+    __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
 ], CatalogExtrasController.prototype, "submitProductReview", null);
 __decorate([
     (0, common_1.Get)('products/recommended/most-reviewed'),

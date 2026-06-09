@@ -13,6 +13,7 @@ exports.OrderService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
+const storage_url_1 = require("../common/storage-url");
 let OrderService = class OrderService {
     prisma;
     mongo;
@@ -45,6 +46,22 @@ let OrderService = class OrderService {
             const itemIds = body.cart.map((c) => Number(c.item_id ?? 0));
             const foods = await this.mongo.findMany('foods', { mysql_id: { $in: itemIds } });
             const foodById = new Map(foods.map((f) => [Number(f.mysql_id), f]));
+            for (const c of body.cart) {
+                const f = foodById.get(Number(c.item_id ?? 0));
+                if (!f)
+                    continue;
+                const stockType = String(f.stock_type ?? 'unlimited');
+                if (stockType !== 'unlimited') {
+                    const available = Number(f.item_stock ?? 0);
+                    const wanted = Number(c.quantity ?? 1);
+                    if (available <= 0) {
+                        throw new common_1.BadRequestException({ errors: [{ code: 'stock', message: `${f.name ?? 'This item'} is out of stock` }] });
+                    }
+                    if (wanted > available) {
+                        throw new common_1.BadRequestException({ errors: [{ code: 'stock', message: `Only ${available} left of ${f.name ?? 'this item'}` }] });
+                    }
+                }
+            }
             let orderAmount = 0;
             let totalTax = 0;
             for (const c of body.cart) {
@@ -179,6 +196,33 @@ let OrderService = class OrderService {
                     created_at: now,
                     updated_at: now,
                 });
+            }
+            for (const c of body.cart) {
+                const f = foodById.get(Number(c.item_id ?? 0));
+                if (!f)
+                    continue;
+                const qty = Number(c.quantity ?? 1);
+                const data = { sell_count: Number(f.sell_count ?? 0) + qty, updated_at: now };
+                if (String(f.stock_type ?? 'unlimited') !== 'unlimited') {
+                    data.item_stock = Math.max(0, Number(f.item_stock ?? 0) - qty);
+                }
+                await this.mongo.updateOne('foods', { mysql_id: Number(f.mysql_id) }, data).catch(() => undefined);
+            }
+            try {
+                const notifId = await this.mongo.nextMysqlId('notifications');
+                await this.mongo.insertOne('notifications', {
+                    mysql_id: notifId,
+                    title: 'New order received',
+                    description: `Order #${orderMysqlId} has just been placed.`,
+                    mysql_restaurant_id: Number(body.restaurant_id),
+                    target: 'restaurant',
+                    order_id: orderMysqlId,
+                    status: true,
+                    created_at: now,
+                    updated_at: now,
+                });
+            }
+            catch {
             }
             try {
                 await this.mongo.updateMany('carts', { mysql_user_id: Number(userId), is_guest: false }, {});
@@ -316,6 +360,7 @@ let OrderService = class OrderService {
                     ? this.mongo.findMany('customer_addresses', { $or: [{ user_id: Number(o.mysql_user_id) }, { mysql_user_id: Number(o.mysql_user_id) }] }, { sort: { is_default: -1, mysql_id: -1 }, limit: 1 }).then((rows) => rows[0] ?? null)
                     : Promise.resolve(null),
             ]);
+            const restCover = restaurant?.cover_photo ?? null;
             const restaurantPayload = restaurant ? {
                 id: Number(restaurant.mysql_id),
                 name: restaurant.name ?? 'Restaurant',
@@ -323,6 +368,10 @@ let OrderService = class OrderService {
                 email: restaurant.email ?? null,
                 address: restaurant.address ?? null,
                 logo: restaurant.logo ?? 'default.png',
+                logo_full_url: (0, storage_url_1.storageFullUrl)('restaurant', restaurant.logo ?? null),
+                image_full_url: (0, storage_url_1.storageFullUrl)('restaurant', restaurant.logo ?? null),
+                cover_photo: restCover,
+                cover_photo_full_url: (0, storage_url_1.storageFullUrl)('restaurant/cover', restCover),
                 latitude: restaurant.latitude != null ? String(restaurant.latitude) : null,
                 longitude: restaurant.longitude != null ? String(restaurant.longitude) : null,
             } : null;
@@ -333,13 +382,18 @@ let OrderService = class OrderService {
                 phone: customer.phone ?? null,
                 email: customer.email ?? null,
                 image: customer.image ?? null,
+                image_full_url: (0, storage_url_1.storageFullUrl)('profile', customer.image ?? null),
             } : null;
+            const dmRating = deliveryMan;
             const dmPayload = deliveryMan ? {
                 id: Number(deliveryMan.mysql_id),
                 f_name: deliveryMan.f_name ?? null,
                 l_name: deliveryMan.l_name ?? null,
                 phone: deliveryMan.phone ?? null,
                 image: deliveryMan.image ?? null,
+                image_full_url: (0, storage_url_1.storageFullUrl)('delivery-man', deliveryMan.image ?? null),
+                avg_rating: dmRating.avg_rating != null ? Number(dmRating.avg_rating) : 0,
+                rating_count: dmRating.rating_count != null ? Number(dmRating.rating_count) : 0,
             } : null;
             return {
                 id: o.mysql_id,

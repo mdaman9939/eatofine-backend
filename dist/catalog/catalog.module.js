@@ -16,12 +16,14 @@ const catalog_router_service_1 = require("./catalog-router.service");
 const category_schema_1 = require("../mongo/schemas/category.schema");
 const cuisine_schema_1 = require("../mongo/schemas/cuisine.schema");
 const banner_schema_1 = require("../mongo/schemas/banner.schema");
+const migration_module_1 = require("../mongo/migration.module");
 let CatalogModule = class CatalogModule {
 };
 exports.CatalogModule = CatalogModule;
 exports.CatalogModule = CatalogModule = __decorate([
     (0, common_1.Module)({
         imports: [
+            migration_module_1.MigrationModule,
             mongoose_1.MongooseModule.forFeature([
                 { name: category_schema_1.Category.name, schema: category_schema_1.CategorySchema },
                 { name: cuisine_schema_1.Cuisine.name, schema: cuisine_schema_1.CuisineSchema },

@@ -189,7 +189,7 @@ export declare class CustomerController {
             veg: number;
         } | null;
     }[]>;
-    cartRemoveItem(req: AuthedRequest, cartId: number, guestIdStr?: string): Promise<{
+    cartRemoveItem(req: AuthedRequest, cartIdStr?: string, guestIdStr?: string): Promise<{
         id: number;
         user_id: number;
         item_id: number;

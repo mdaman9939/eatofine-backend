@@ -48,11 +48,13 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.CustomerExtrasController = void 0;
 const common_1 = require("@nestjs/common");
 const platform_express_1 = require("@nestjs/platform-express");
+const image_compress_1 = require("../common/image-compress");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const auth_guard_1 = require("../auth/auth.guard");
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
+const storage_url_1 = require("../common/storage-url");
 const STORAGE_ROOT = (() => {
     if (process.env.STORAGE_ROOT)
         return process.env.STORAGE_ROOT;
@@ -86,14 +88,33 @@ let CustomerExtrasController = class CustomerExtrasController {
         const rows = await this.mongo.findMany('wishlists', { user_id: userId });
         const foodIds = rows.map((r) => r.food_id).filter((x) => x != null);
         const restaurantIds = rows.map((r) => r.restaurant_id).filter((x) => x != null);
-        const [foods, restaurants] = await Promise.all([
+        const [foods, restaurants, restFoods] = await Promise.all([
             foodIds.length
                 ? this.mongo.findMany('foods', { mysql_id: { $in: foodIds } })
                 : Promise.resolve([]),
             restaurantIds.length
                 ? this.mongo.findMany('restaurants', { mysql_id: { $in: restaurantIds } })
                 : Promise.resolve([]),
+            restaurantIds.length
+                ? this.mongo.findMany('foods', { mysql_restaurant_id: { $in: restaurantIds } }, { limit: 200 })
+                : Promise.resolve([]),
         ]);
+        const foodsByRest = new Map();
+        for (const f of restFoods) {
+            const rid = f.mysql_restaurant_id != null ? Number(f.mysql_restaurant_id) : null;
+            if (rid == null)
+                continue;
+            const arr = foodsByRest.get(rid) ?? [];
+            arr.push(f);
+            foodsByRest.set(rid, arr);
+        }
+        const vendorIds = Array.from(new Set(restaurants.filter((r) => !r.logo && r.mysql_vendor_id).map((r) => Number(r.mysql_vendor_id))));
+        const vendorImgMap = new Map();
+        if (vendorIds.length) {
+            const vendors = await this.mongo.findMany('vendors', { mysql_id: { $in: vendorIds } });
+            for (const v of vendors)
+                vendorImgMap.set(Number(v.mysql_id), v.image ?? null);
+        }
         return {
             product: foods.map((f) => ({
                 ...(f.legacy ?? {}),
@@ -104,14 +125,41 @@ let CustomerExtrasController = class CustomerExtrasController {
                 tax: toNum(f.tax),
                 restaurant_id: f.mysql_restaurant_id != null ? Number(f.mysql_restaurant_id) : null,
                 category_id: f.mysql_category_id != null ? Number(f.mysql_category_id) : null,
+                image_full_url: (0, storage_url_1.storageFullUrl)('product', f.image ?? null),
             })),
-            restaurant: restaurants.map((r) => ({
-                id: Number(r.mysql_id),
-                name: r.name ?? null,
-                logo: r.logo ?? null,
-                address: r.address ?? null,
-                avg_rating: r.avg_rating ?? 0,
-            })),
+            restaurant: restaurants.map((r) => {
+                const rid = Number(r.mysql_id);
+                const rFoods = foodsByRest.get(rid) ?? [];
+                const vendorImg = r.logo ? null : (vendorImgMap.get(Number(r.mysql_vendor_id ?? 0)) ?? null);
+                return {
+                    id: rid,
+                    name: r.name ?? null,
+                    logo: r.logo ?? vendorImg ?? null,
+                    logo_full_url: (0, storage_url_1.storageFullUrl)('restaurant', r.logo ?? null) ?? (0, storage_url_1.storageFullUrl)('profile', vendorImg),
+                    cover_photo_full_url: (0, storage_url_1.storageFullUrl)('restaurant/cover', r.cover_photo ?? null),
+                    address: r.address ?? null,
+                    avg_rating: r.avg_rating ?? 0,
+                    rating_count: r.rating_count ?? 0,
+                    delivery_time: r.delivery_time ?? '30-40',
+                    free_delivery: r.free_delivery ? 1 : 0,
+                    slug: r.slug ?? null,
+                    open: r.open ?? 1,
+                    active: r.active !== false,
+                    status: r.status === false ? 0 : 1,
+                    restaurant_status: r.status === false ? 0 : 1,
+                    zone_id: r.mysql_zone_id != null ? Number(r.mysql_zone_id) : null,
+                    foods_count: rFoods.length,
+                    foods: rFoods.slice(0, 6).map((f) => ({
+                        id: Number(f.mysql_id),
+                        name: f.name ?? null,
+                        image: f.image ?? null,
+                        image_full_url: (0, storage_url_1.storageFullUrl)('product', f.image ?? null),
+                        price: toNum(f.price),
+                        avg_rating: f.avg_rating ?? 0,
+                        rating_count: f.rating_count ?? 0,
+                    })),
+                };
+            }),
         };
     }
     async wishAdd(req, body) {
@@ -231,20 +279,106 @@ let CustomerExtrasController = class CustomerExtrasController {
         }
         return { message: 'Profile updated successfully', image: data.image ?? null };
     }
-    walletTx() {
-        return { data: [], total_size: 0, limit: 25, offset: 1 };
+    async walletBalance(userId) {
+        const w = await this.mongo.findOne('wallets', { mysql_user_id: userId });
+        return Number(w?.balance ?? 0);
     }
-    walletBonuses() {
-        return [];
+    async setWalletBalance(userId, balance) {
+        const w = await this.mongo.findOne('wallets', { mysql_user_id: userId });
+        if (w)
+            await this.mongo.updateOne('wallets', { mysql_user_id: userId }, { balance, updated_at: new Date() });
+        else {
+            const id = await this.mongo.nextMysqlId('wallets');
+            await this.mongo.insertOne('wallets', { mysql_id: id, mysql_user_id: userId, balance, created_at: new Date(), updated_at: new Date() });
+        }
     }
-    addFund() {
-        return { message: 'Not available in demo' };
+    async walletTx(req, limitStr, offsetStr) {
+        const limit = parseInt(limitStr ?? '25', 10);
+        const offset = parseInt(offsetStr ?? '1', 10);
+        if (!this.useMongo())
+            return { data: [], total_size: 0, limit, offset };
+        const userId = Number(req.actor.id);
+        const filter = { mysql_user_id: userId };
+        const [rows, total] = await Promise.all([
+            this.mongo.findMany('wallet_transactions', filter, { sort: { mysql_id: -1 }, limit, skip: Math.max(0, (offset - 1) * limit) }),
+            this.mongo.count('wallet_transactions', filter),
+        ]);
+        return {
+            data: rows.map((r) => ({
+                id: Number(r.mysql_id), credit: Number(r.credit ?? 0), debit: Number(r.debit ?? 0),
+                balance: Number(r.balance ?? 0), transaction_type: r.transaction_type ?? null,
+                reference: r.reference ?? null, created_at: r.created_at ?? null,
+            })),
+            total_size: total, limit, offset,
+            balance: await this.walletBalance(userId),
+        };
     }
-    loyaltyTx() {
-        return { data: [], total_size: 0, limit: 25, offset: 1 };
+    async walletBonuses() {
+        if (!this.useMongo())
+            return [];
+        const rows = await this.mongo.findMany('wallet_bonuses', { $or: [{ status: true }, { status: 1 }] }, { sort: { mysql_id: -1 } });
+        return rows.map((r) => ({ ...r, id: Number(r.mysql_id) }));
     }
-    pointTransfer() {
-        return { message: 'Not available in demo' };
+    async addFund(req, body = {}) {
+        if (!this.useMongo())
+            return { message: 'Not available in demo' };
+        const userId = Number(req.actor.id);
+        const amount = Number(body.amount ?? 0);
+        if (!Number.isFinite(amount) || amount <= 0)
+            return { errors: [{ code: 'amount', message: 'Enter a valid amount' }] };
+        const newBalance = (await this.walletBalance(userId)) + amount;
+        await this.setWalletBalance(userId, newBalance);
+        const txId = await this.mongo.nextMysqlId('wallet_transactions');
+        await this.mongo.insertOne('wallet_transactions', {
+            mysql_id: txId, mysql_user_id: userId, credit: amount, debit: 0, balance: newBalance,
+            transaction_type: 'add_fund', reference: String(body.payment_method ?? 'payment'), created_at: new Date(),
+        });
+        return { message: 'Fund added to wallet', balance: newBalance };
+    }
+    async loyaltyTx(req, limitStr, offsetStr) {
+        const limit = parseInt(limitStr ?? '25', 10);
+        const offset = parseInt(offsetStr ?? '1', 10);
+        if (!this.useMongo())
+            return { data: [], total_size: 0, limit, offset };
+        const userId = Number(req.actor.id);
+        const filter = { mysql_user_id: userId };
+        const [rows, total] = await Promise.all([
+            this.mongo.findMany('loyalty_point_transactions', filter, { sort: { mysql_id: -1 }, limit, skip: Math.max(0, (offset - 1) * limit) }),
+            this.mongo.count('loyalty_point_transactions', filter),
+        ]);
+        return {
+            data: rows.map((r) => ({
+                id: Number(r.mysql_id), credit: Number(r.credit ?? 0), debit: Number(r.debit ?? 0),
+                balance: Number(r.balance ?? 0), transaction_type: r.transaction_type ?? null, created_at: r.created_at ?? null,
+            })),
+            total_size: total, limit, offset,
+        };
+    }
+    async pointTransfer(req, body = {}) {
+        if (!this.useMongo())
+            return { message: 'Not available in demo' };
+        const userId = Number(req.actor.id);
+        const points = Number(body.point ?? body.points ?? 0);
+        if (!Number.isFinite(points) || points <= 0)
+            return { errors: [{ code: 'point', message: 'Enter a valid point amount' }] };
+        const last = await this.mongo.findMany('loyalty_point_transactions', { mysql_user_id: userId }, { sort: { mysql_id: -1 }, limit: 1 });
+        const loyaltyBalance = Number(last[0]?.balance ?? 0);
+        if (points > loyaltyBalance)
+            return { errors: [{ code: 'point', message: 'Not enough loyalty points' }] };
+        const now = new Date();
+        const lpId = await this.mongo.nextMysqlId('loyalty_point_transactions');
+        await this.mongo.insertOne('loyalty_point_transactions', {
+            mysql_id: lpId, mysql_user_id: userId, credit: 0, debit: points, balance: loyaltyBalance - points,
+            transaction_type: 'point_to_wallet', transaction_id: `LP${lpId}`, created_at: now,
+        });
+        const newBalance = (await this.walletBalance(userId)) + points;
+        await this.setWalletBalance(userId, newBalance);
+        const wtId = await this.mongo.nextMysqlId('wallet_transactions');
+        await this.mongo.insertOne('wallet_transactions', {
+            mysql_id: wtId, mysql_user_id: userId, credit: points, debit: 0, balance: newBalance,
+            transaction_type: 'loyalty_point', reference: 'point_transfer', created_at: now,
+        });
+        return { message: 'Points transferred to wallet', wallet_balance: newBalance, loyalty_balance: loyaltyBalance - points };
     }
     async messageList(req, type) {
         const userId = Number(req.actor.id);
@@ -273,9 +407,15 @@ let CustomerExtrasController = class CustomerExtrasController {
         return {
             messages: rows.map((m) => ({
                 id: Number(m.mysql_id),
+                conversation_id: Number(m.conversation_id),
                 sender_type: m.sender_type,
                 sender_id: Number(m.sender_id),
-                body: m.body,
+                message: m.message ?? m.body ?? '',
+                body: m.message ?? m.body ?? '',
+                file_full_url: Array.isArray(m.files)
+                    ? m.files.map((f) => (0, storage_url_1.storageFullUrl)('conversation', f)).filter((u) => !!u)
+                    : [],
+                is_seen: m.is_seen ?? 1,
                 sent_by_me: m.sender_type === 'user' && Number(m.sender_id) === Number(req.actor.id),
                 created_at: m.created_at ?? null,
             })),
@@ -295,17 +435,23 @@ let CustomerExtrasController = class CustomerExtrasController {
         }, { limit: 25 });
         return { conversations: rows.map((c) => ({ id: Number(c.mysql_id), name: c.counterpart_name, type: c.counterpart_type })) };
     }
-    async messageSend(req, body) {
+    async messageSend(req, files, rawBody) {
         const userId = Number(req.actor.id);
-        if (!body.body || !body.body.trim()) {
+        const body = rawBody ?? {};
+        const text = (body.message ?? body.body ?? '').toString();
+        const images = await this.saveChatImages(files);
+        if (!text.trim() && images.length === 0) {
             return { message: 'message body required' };
         }
-        let convId = body.conversation_id;
-        if (!convId && body.counterpart_type && body.counterpart_id) {
+        const counterpartType = body.counterpart_type ?? body.receiver_type ?? null;
+        const counterpartIdRaw = body.counterpart_id ?? body.receiver_id ?? null;
+        const counterpartId = counterpartIdRaw != null ? Number(counterpartIdRaw) : null;
+        let convId = body.conversation_id != null ? Number(body.conversation_id) : undefined;
+        if (!convId && counterpartType && counterpartId) {
             const existing = await this.mongo.findOne('conversations', {
                 user_id: userId,
-                counterpart_type: body.counterpart_type,
-                counterpart_id: Number(body.counterpart_id),
+                counterpart_type: counterpartType,
+                counterpart_id: counterpartId,
             });
             if (existing) {
                 convId = Number(existing.mysql_id);
@@ -315,10 +461,10 @@ let CustomerExtrasController = class CustomerExtrasController {
                 await this.mongo.insertOne('conversations', {
                     mysql_id: convId,
                     user_id: userId,
-                    counterpart_type: body.counterpart_type,
-                    counterpart_id: Number(body.counterpart_id),
+                    counterpart_type: counterpartType,
+                    counterpart_id: counterpartId,
                     counterpart_name: null,
-                    last_message: body.body,
+                    last_message: text,
                     last_message_at: new Date(),
                     unread: 0,
                 });
@@ -332,14 +478,54 @@ let CustomerExtrasController = class CustomerExtrasController {
             conversation_id: convId,
             sender_type: 'user',
             sender_id: userId,
-            body: body.body,
+            message: text,
+            body: text,
+            files: images,
             created_at: new Date(),
         });
         await this.mongo.updateOne('conversations', { mysql_id: convId }, {
-            last_message: body.body,
+            last_message: text || (images.length ? 'Photo' : ''),
             last_message_at: new Date(),
         });
-        return { message: 'sent', conversation_id: convId, id: msgId };
+        return { message: 'sent', conversation_id: convId, id: msgId, files: images };
+    }
+    async saveChatImages(files) {
+        if (!files || files.length === 0)
+            return [];
+        const saved = [];
+        for (const file of files) {
+            if (!file?.buffer || file.buffer.length === 0)
+                continue;
+            const ext = (path.extname(file.originalname) || '.jpg').toLowerCase();
+            if (!/^\.(png|jpe?g|webp|gif)$/i.test(ext))
+                continue;
+            const compressed = await (0, image_compress_1.compressImage)(file.buffer).catch(() => null);
+            const buffer = compressed ? compressed.buffer : file.buffer;
+            const outExt = compressed ? compressed.ext : ext;
+            const contentType = compressed ? compressed.contentType : `image/${ext.replace('.', '').replace('jpg', 'jpeg')}`;
+            const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${outExt}`;
+            const relPath = `conversation/${filename}`;
+            try {
+                const dir = path.join(STORAGE_ROOT, 'conversation');
+                fs.mkdirSync(dir, { recursive: true });
+                fs.writeFileSync(path.join(dir, filename), buffer);
+            }
+            catch {
+            }
+            try {
+                await this.mongo.insertOne('uploads', {
+                    path: relPath,
+                    content_type: contentType,
+                    data: buffer,
+                    size: buffer.length,
+                    created_at: new Date(),
+                });
+            }
+            catch {
+            }
+            saved.push(filename);
+        }
+        return saved;
     }
     async subscription(req) {
         const userId = Number(req.actor.id);
@@ -745,35 +931,45 @@ __decorate([
 ], CustomerExtrasController.prototype, "updateProfile", null);
 __decorate([
     (0, common_1.Get)('wallet/transactions'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('limit')),
+    __param(2, (0, common_1.Query)('offset')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, String, String]),
+    __metadata("design:returntype", Promise)
 ], CustomerExtrasController.prototype, "walletTx", null);
 __decorate([
     (0, common_1.Get)('wallet/bonuses'),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:returntype", Promise)
 ], CustomerExtrasController.prototype, "walletBonuses", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('wallet/add-fund'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], CustomerExtrasController.prototype, "addFund", null);
 __decorate([
     (0, common_1.Get)('loyalty-point/transactions'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('limit')),
+    __param(2, (0, common_1.Query)('offset')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, String, String]),
+    __metadata("design:returntype", Promise)
 ], CustomerExtrasController.prototype, "loyaltyTx", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('loyalty-point/point-transfer'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], CustomerExtrasController.prototype, "pointTransfer", null);
 __decorate([
     (0, common_1.Get)('message/list'),
@@ -809,11 +1005,14 @@ __decorate([
 ], CustomerExtrasController.prototype, "messageSearch", null);
 __decorate([
     (0, common_1.HttpCode)(200),
+    (0, common_1.HttpCode)(200),
     (0, common_1.Post)('message/send'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.AnyFilesInterceptor)({ limits: { fileSize: 10 * 1024 * 1024 } })),
     __param(0, (0, common_1.Req)()),
-    __param(1, (0, common_1.Body)()),
+    __param(1, (0, common_1.UploadedFiles)()),
+    __param(2, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:paramtypes", [Object, Object, Object]),
     __metadata("design:returntype", Promise)
 ], CustomerExtrasController.prototype, "messageSend", null);
 __decorate([

@@ -70,16 +70,20 @@ let BrowseController = class BrowseController {
     productsMostReviewed(limit, offset) {
         return this.browse.getProductsMostReviewed(undefined, parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
     }
-    async productDetails(id) {
+    async productDetails(idStr) {
+        const id = parseInt(idStr, 10);
+        if (!Number.isFinite(id))
+            throw new common_1.NotFoundException({ errors: [{ code: 'food_id', message: 'not_found' }] });
         const result = await this.browse.getProductDetails(id);
         if (!result)
             throw new common_1.NotFoundException({ errors: [{ code: 'food_id', message: 'not_found' }] });
         return result;
     }
-    categoryProducts(categoryId, limit, offset) {
-        return this.browse.getCategoryProducts(categoryId, parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
+    categoryProducts(categoryIdStr, limit, offset) {
+        return this.browse.getCategoryProducts(parseInt(categoryIdStr, 10) || 0, parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
     }
-    categoryRestaurants(categoryId, limit, offset) {
+    categoryRestaurants(categoryIdStr, limit, offset) {
+        const categoryId = parseInt(categoryIdStr, 10) || 0;
         return this.browse.getCategoryRestaurants(categoryId, parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
     }
 };
@@ -111,9 +115,9 @@ __decorate([
 ], BrowseController.prototype, "restaurantsPopular", null);
 __decorate([
     (0, common_1.Get)('restaurants/details/:id'),
-    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(0, (0, common_1.Param)('id')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Number]),
+    __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", Promise)
 ], BrowseController.prototype, "restaurantDetails", null);
 __decorate([
@@ -150,27 +154,27 @@ __decorate([
 ], BrowseController.prototype, "productsMostReviewed", null);
 __decorate([
     (0, common_1.Get)('products/details/:id'),
-    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(0, (0, common_1.Param)('id')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Number]),
+    __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", Promise)
 ], BrowseController.prototype, "productDetails", null);
 __decorate([
     (0, common_1.Get)('categories/products/:categoryId'),
-    __param(0, (0, common_1.Param)('categoryId', common_1.ParseIntPipe)),
+    __param(0, (0, common_1.Param)('categoryId')),
     __param(1, (0, common_1.Query)('limit')),
     __param(2, (0, common_1.Query)('offset')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Number, String, String]),
+    __metadata("design:paramtypes", [String, String, String]),
     __metadata("design:returntype", void 0)
 ], BrowseController.prototype, "categoryProducts", null);
 __decorate([
     (0, common_1.Get)('categories/restaurants/:categoryId'),
-    __param(0, (0, common_1.Param)('categoryId', common_1.ParseIntPipe)),
+    __param(0, (0, common_1.Param)('categoryId')),
     __param(1, (0, common_1.Query)('limit')),
     __param(2, (0, common_1.Query)('offset')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Number, String, String]),
+    __metadata("design:paramtypes", [String, String, String]),
     __metadata("design:returntype", void 0)
 ], BrowseController.prototype, "categoryRestaurants", null);
 exports.BrowseController = BrowseController = __decorate([

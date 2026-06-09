@@ -4,15 +4,23 @@ export declare class CatalogController {
     constructor(catalog: CatalogRouterService);
     zones(): Promise<{
         id: number;
+        name: string | null;
+        coordinates: {
+            lat: number;
+            lng: number;
+        }[] | null;
+        status: number;
+    }[]> | Promise<{
+        id: number;
         name: string;
         coordinates: any;
         status: number;
     }[]>;
-    checkZone(lat: number, lng: number): Promise<{
+    checkZone(latStr?: string, lngStr?: string): Promise<{
         zone_id: number[];
         zone_data: {
             id: number;
-            name: string;
+            name: string | null;
         }[];
     }>;
     categories(): Promise<{
@@ -37,7 +45,7 @@ export declare class CatalogController {
         childes_count: number;
         products_count: number;
     }[]>;
-    childCategories(parentId: number): Promise<{
+    childCategories(parentIdStr: string): Promise<{
         id: number | undefined;
         name: string | undefined;
         image: string | undefined;
@@ -95,6 +103,12 @@ export declare class CatalogController {
         status: number;
     }[]>;
     currencies(): Promise<{
+        id: number;
+        country: string | null;
+        currency_code: string | null;
+        currency_symbol: string | null;
+        exchange_rate: string | number | null;
+    }[]> | Promise<{
         id: bigint;
         country: string | null;
         currency_code: string | null;
@@ -102,6 +116,11 @@ export declare class CatalogController {
         exchange_rate: import("@prisma/client/runtime/library").Decimal | null;
     }[]>;
     ads(): Promise<{
+        id: number;
+        title: string | null;
+        description: string | null;
+        status: string | null;
+    }[]> | Promise<{
         id: bigint;
         title: string | null;
         description: string | null;

@@ -52,6 +52,8 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const auth_guard_1 = require("../auth/auth.guard");
 const admin_service_1 = require("./admin.service");
+const mongo_data_service_1 = require("../mongo/mongo-data.service");
+const image_compress_1 = require("../common/image-compress");
 const STORAGE_ROOT = (() => {
     if (process.env.STORAGE_ROOT)
         return process.env.STORAGE_ROOT;
@@ -74,8 +76,10 @@ const ALLOWED_UPLOAD_DIRS = new Set([
 ]);
 let AdminController = class AdminController {
     admin;
-    constructor(admin) {
+    mongo;
+    constructor(admin, mongo) {
         this.admin = admin;
+        this.mongo = mongo;
     }
     me(req) {
         return this.admin.getMe(req.actor.id);
@@ -89,11 +93,14 @@ let AdminController = class AdminController {
     stats() {
         return this.admin.dashboardStats();
     }
-    orders(limit, offset, status, q) {
-        return this.admin.listOrders(toInt(limit, 50), toInt(offset, 0), status || undefined, q || undefined);
+    orders(limit, offset, status, q, orderType) {
+        return this.admin.listOrders(toInt(limit, 50), toInt(offset, 0), status || undefined, q || undefined, orderType || undefined);
     }
     orderDetail(id) {
         return this.admin.getOrder(id);
+    }
+    placePosOrder(body) {
+        return this.admin.createPosOrder(body);
     }
     updateOrderStatus(id, body) {
         return this.admin.updateOrderStatus(id, body.status, body.reason);
@@ -122,6 +129,9 @@ let AdminController = class AdminController {
     restaurantDetail(id) {
         return this.admin.getRestaurant(id);
     }
+    restaurantTabs(id, limit) {
+        return this.admin.getRestaurantTabs(id, toInt(limit, 50));
+    }
     updateRestaurant(id, body) {
         return this.admin.updateRestaurant(id, body);
     }
@@ -149,6 +159,9 @@ let AdminController = class AdminController {
     deliveryMenPending() {
         return this.admin.listPendingDeliveryMen();
     }
+    deliveryManDetail(id) {
+        return this.admin.getDeliveryMan(id);
+    }
     approveDeliveryMan(id) {
         return this.admin.updateDeliveryManApproval(id, 'approved');
     }
@@ -158,8 +171,14 @@ let AdminController = class AdminController {
     updateDMStatus(id, body) {
         return this.admin.updateDeliveryManStatus(id, body.status);
     }
+    updateDeliveryMan(id, body) {
+        return this.admin.updateDeliveryMan(id, body);
+    }
     updateDMApproval(id, body) {
         return this.admin.approveDeliveryMan(id, body.approval);
+    }
+    deleteDeliveryMan(id) {
+        return this.admin.deleteDeliveryMan(id);
     }
     food(limit, offset, q, restaurantId) {
         return this.admin.listFood(toInt(limit, 50), toInt(offset, 0), q || undefined, restaurantId ? parseInt(restaurantId, 10) : undefined);
@@ -176,11 +195,17 @@ let AdminController = class AdminController {
     foodDetail(id) {
         return this.admin.getFood(id);
     }
+    updateFood(id, body) {
+        return this.admin.updateFood(id, body);
+    }
     updateFoodStatus(id, body) {
         return this.admin.updateFoodStatus(id, body.status);
     }
     updateFoodRecommended(id, body) {
         return this.admin.updateFoodRecommended(id, body.recommended);
+    }
+    deleteFood(id) {
+        return this.admin.deleteFood(id);
     }
     categories(parentId) {
         return this.admin.listCategories(parentId !== undefined ? parseInt(parentId, 10) : undefined);
@@ -215,6 +240,9 @@ let AdminController = class AdminController {
     updateCouponStatus(id, body) {
         return this.admin.updateCouponStatus(id, body.status);
     }
+    updateCoupon(id, body) {
+        return this.admin.updateCoupon(id, body);
+    }
     deleteCoupon(id) {
         return this.admin.deleteCoupon(id);
     }
@@ -227,17 +255,26 @@ let AdminController = class AdminController {
     updateBannerStatus(id, body) {
         return this.admin.updateBannerStatus(id, body.status);
     }
+    updateBanner(id, body) {
+        return this.admin.updateBanner(id, body);
+    }
     deleteBanner(id) {
         return this.admin.deleteBanner(id);
     }
-    zones() {
-        return this.admin.listZones();
+    zones(zoneFor) {
+        return this.admin.listZones(zoneFor || undefined);
     }
     createZone(body) {
         return this.admin.createZone(body);
     }
     updateZoneStatus(id, body) {
         return this.admin.updateZoneStatus(id, body.status);
+    }
+    zoneDetail(id) {
+        return this.admin.getZone(id);
+    }
+    updateZone(id, body) {
+        return this.admin.updateZone(id, body);
     }
     deleteZone(id) {
         return this.admin.deleteZone(id);
@@ -329,20 +366,53 @@ let AdminController = class AdminController {
     upsertBusinessSettings(body) {
         return this.admin.upsertBusinessSettings(body);
     }
-    salesSummary(days) {
-        return this.admin.salesSummary(toInt(days, 30));
+    salesSummary(days, from, to, zoneId, restaurantId) {
+        return this.admin.salesSummary(toInt(days, 30), {
+            from: from || undefined,
+            to: to || undefined,
+            zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
+            restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
+        });
     }
-    restaurantEarnings(limit) {
-        return this.admin.restaurantEarnings(toInt(limit, 10));
+    restaurantEarnings(limit, from, to, zoneId, restaurantId) {
+        return this.admin.restaurantEarnings(toInt(limit, 10), {
+            from: from || undefined,
+            to: to || undefined,
+            zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
+            restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
+        });
     }
-    adminEarningReport(days) {
-        return this.admin.adminEarningReport(toInt(days, 30));
+    adminEarningReport(days, from, to, zoneId, restaurantId) {
+        return this.admin.adminEarningReport(toInt(days, 30), {
+            from: from || undefined,
+            to: to || undefined,
+            zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
+            restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
+        });
     }
-    customerReport(limit) {
-        return this.admin.customerReport(toInt(limit, 10));
+    customerReport(limit, from, to, zoneId, restaurantId) {
+        return this.admin.customerReport(toInt(limit, 10), {
+            from: from || undefined,
+            to: to || undefined,
+            zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
+            restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
+        });
     }
-    deliverymanEarningReport(limit) {
-        return this.admin.deliverymanEarningReport(toInt(limit, 10));
+    topFoods(limit, from, to, zoneId, restaurantId) {
+        return this.admin.topFoods(toInt(limit, 50), {
+            from: from || undefined,
+            to: to || undefined,
+            zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
+            restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
+        });
+    }
+    deliverymanEarningReport(limit, from, to, zoneId, restaurantId) {
+        return this.admin.deliverymanEarningReport(toInt(limit, 10), {
+            from: from || undefined,
+            to: to || undefined,
+            zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
+            restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
+        });
     }
     addOns(limit, offset, q, restaurantId) {
         return this.admin.listAddOns({
@@ -358,6 +428,9 @@ let AdminController = class AdminController {
     updateAddOnStatus(id, body) {
         return this.admin.updateAddOnStatus(id, body.status);
     }
+    updateAddOn(id, body) {
+        return this.admin.updateAddOn(id, body);
+    }
     deleteAddOn(id) {
         return this.admin.deleteAddOn(id);
     }
@@ -370,6 +443,9 @@ let AdminController = class AdminController {
     updateAddonCategoryStatus(id, body) {
         return this.admin.updateAddonCategoryStatus(id, body.status);
     }
+    updateAddonCategory(id, body) {
+        return this.admin.updateAddonCategory(id, body);
+    }
     deleteAddonCategory(id) {
         return this.admin.deleteAddonCategory(id);
     }
@@ -379,11 +455,14 @@ let AdminController = class AdminController {
     createAttribute(body) {
         return this.admin.createAttribute(body);
     }
+    updateAttribute(id, body) {
+        return this.admin.updateAttribute(id, body);
+    }
     deleteAttribute(id) {
         return this.admin.deleteAttribute(id);
     }
-    campaigns(limit, offset, q) {
-        return this.admin.listCampaigns({ limit: toInt(limit, 50), offset: toInt(offset, 0), q: q || undefined });
+    campaigns(limit, offset, q, type) {
+        return this.admin.listCampaigns({ limit: toInt(limit, 50), offset: toInt(offset, 0), q: q || undefined, type: type || undefined });
     }
     createCampaign(body) {
         return this.admin.createCampaign(body);
@@ -391,17 +470,35 @@ let AdminController = class AdminController {
     updateCampaignStatus(id, body) {
         return this.admin.updateCampaignStatus(id, body.status);
     }
+    updateCampaign(id, body) {
+        return this.admin.updateCampaign(id, body);
+    }
     deleteCampaign(id) {
         return this.admin.deleteCampaign(id);
     }
     advertisements(limit, offset) {
         return this.admin.listAdvertisements({ limit: toInt(limit, 50), offset: toInt(offset, 0) });
     }
+    createAdvertisement(body) {
+        return this.admin.createAdvertisement(body);
+    }
+    deleteAdvertisement(id) {
+        return this.admin.deleteAdvertisement(id);
+    }
     updateAdvertisementStatus(id, body) {
         return this.admin.updateAdvertisementStatus(id, body.status);
     }
     cashBacks() {
         return this.admin.listCashBacks();
+    }
+    createCashBack(body) {
+        return this.admin.createCashBack(body);
+    }
+    updateCashBackStatus(id, body) {
+        return this.admin.updateCashBackStatus(id, body.status);
+    }
+    deleteCashBack(id) {
+        return this.admin.deleteCashBack(id);
     }
     walletBonuses() {
         return this.admin.listWalletBonuses();
@@ -427,8 +524,11 @@ let AdminController = class AdminController {
     cashbackHistories(limit, offset) {
         return this.admin.listCashbackHistories({ limit: toInt(limit, 50), offset: toInt(offset, 0) });
     }
-    disbursements(limit, offset) {
-        return this.admin.listDisbursements({ limit: toInt(limit, 50), offset: toInt(offset, 0) });
+    disbursements(limit, offset, type) {
+        return this.admin.listDisbursements({ limit: toInt(limit, 50), offset: toInt(offset, 0), type: type || undefined });
+    }
+    updateDisbursementStatus(id, body) {
+        return this.admin.updateDisbursementStatus(id, body.status);
     }
     withdrawRequests(limit, offset, type, approved) {
         return this.admin.listWithdrawRequests({
@@ -447,8 +547,17 @@ let AdminController = class AdminController {
     offlinePaymentMethods() {
         return this.admin.listOfflinePaymentMethods();
     }
+    createOfflinePaymentMethod(body) {
+        return this.admin.createOfflinePaymentMethod(body);
+    }
+    updateOfflinePaymentMethod(id, body) {
+        return this.admin.updateOfflinePaymentMethod(id, body);
+    }
     updateOfflinePaymentMethodStatus(id, body) {
         return this.admin.updateOfflinePaymentMethodStatus(id, body.status);
+    }
+    deleteOfflinePaymentMethod(id) {
+        return this.admin.deleteOfflinePaymentMethod(id);
     }
     provideDmEarnings(limit, offset) {
         return this.admin.listProvideDMEarnings({ limit: toInt(limit, 50), offset: toInt(offset, 0) });
@@ -464,6 +573,9 @@ let AdminController = class AdminController {
     }
     createNotification(body) {
         return this.admin.createNotification(body);
+    }
+    updateNotification(id, body) {
+        return this.admin.updateNotification(id, body);
     }
     deleteNotification(id) {
         return this.admin.deleteNotification(id);
@@ -510,11 +622,26 @@ let AdminController = class AdminController {
     employees(limit, offset, q) {
         return this.admin.listEmployees({ limit: toInt(limit, 50), offset: toInt(offset, 0), q: q || undefined });
     }
+    createEmployee(body) {
+        return this.admin.createEmployee(body);
+    }
+    employeeDetail(id) {
+        return this.admin.getEmployee(id);
+    }
+    updateEmployee(id, body) {
+        return this.admin.updateEmployee(id, body);
+    }
+    deleteEmployee(id) {
+        return this.admin.deleteEmployee(id);
+    }
     adminRoles() {
         return this.admin.listAdminRoles();
     }
     createAdminRole(body) {
         return this.admin.createAdminRole(body);
+    }
+    updateAdminRole(id, body) {
+        return this.admin.updateAdminRole(id, body);
     }
     deleteAdminRole(id) {
         return this.admin.deleteAdminRole(id);
@@ -591,7 +718,7 @@ let AdminController = class AdminController {
     translations(limit, offset) {
         return this.admin.listTranslations({ limit: toInt(limit, 200), offset: toInt(offset, 0) });
     }
-    uploadImage(file, dir) {
+    async uploadImage(file, dir) {
         if (!file)
             throw new common_1.BadRequestException({ errors: [{ code: 'file', message: 'file is required' }] });
         if (!dir || !ALLOWED_UPLOAD_DIRS.has(dir)) {
@@ -599,15 +726,40 @@ let AdminController = class AdminController {
                 errors: [{ code: 'dir', message: `dir must be one of: ${[...ALLOWED_UPLOAD_DIRS].join(', ')}` }],
             });
         }
-        const ext = (path.extname(file.originalname) || '.bin').toLowerCase();
+        let ext = (path.extname(file.originalname) || '.bin').toLowerCase();
         if (!/^\.(png|jpe?g|webp|gif)$/i.test(ext)) {
             throw new common_1.BadRequestException({ errors: [{ code: 'ext', message: 'only png/jpg/jpeg/webp/gif allowed' }] });
         }
-        const safeDir = path.join(STORAGE_ROOT, dir);
-        fs.mkdirSync(safeDir, { recursive: true });
+        let data = file.buffer;
+        let contentType = file.mimetype || 'image/png';
+        try {
+            const compressed = await (0, image_compress_1.compressImage)(file.buffer);
+            if (compressed) {
+                data = compressed.buffer;
+                ext = compressed.ext;
+                contentType = compressed.contentType;
+            }
+        }
+        catch { }
         const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
-        const targetPath = path.join(safeDir, filename);
-        fs.writeFileSync(targetPath, file.buffer);
+        try {
+            const safeDir = path.join(STORAGE_ROOT, dir);
+            fs.mkdirSync(safeDir, { recursive: true });
+            fs.writeFileSync(path.join(safeDir, filename), data);
+        }
+        catch { }
+        try {
+            await this.mongo.insertOne('uploads', {
+                path: `${dir}/${filename}`,
+                content_type: contentType,
+                data,
+                size: data.length,
+                created_at: new Date(),
+            });
+        }
+        catch {
+            throw new common_1.BadRequestException({ errors: [{ code: 'upload', message: 'Could not store the image. Try a smaller file.' }] });
+        }
         return { ok: true, filename, path: `${dir}/${filename}`, url: `/storage/${dir}/${filename}` };
     }
 };
@@ -647,8 +799,9 @@ __decorate([
     __param(1, (0, common_1.Query)('offset')),
     __param(2, (0, common_1.Query)('status')),
     __param(3, (0, common_1.Query)('q')),
+    __param(4, (0, common_1.Query)('order_type')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, String, String, String]),
+    __metadata("design:paramtypes", [String, String, String, String, String]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "orders", null);
 __decorate([
@@ -658,6 +811,14 @@ __decorate([
     __metadata("design:paramtypes", [Number]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "orderDetail", null);
+__decorate([
+    (0, common_1.Post)('pos/place-order'),
+    (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "placePosOrder", null);
 __decorate([
     (0, common_1.Patch)('orders/:id/status'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
@@ -725,6 +886,14 @@ __decorate([
     __metadata("design:paramtypes", [Number]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "restaurantDetail", null);
+__decorate([
+    (0, common_1.Get)('restaurants/:id/tabs'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Query)('limit')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "restaurantTabs", null);
 __decorate([
     (0, common_1.Patch)('restaurants/:id'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
@@ -798,6 +967,13 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "deliveryMenPending", null);
 __decorate([
+    (0, common_1.Get)('delivery-men/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "deliveryManDetail", null);
+__decorate([
     (0, common_1.Patch)('delivery-men/:id/approve'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __metadata("design:type", Function),
@@ -821,6 +997,14 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "updateDMStatus", null);
 __decorate([
+    (0, common_1.Patch)('delivery-men/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateDeliveryMan", null);
+__decorate([
     (0, common_1.Patch)('delivery-men/:id/approval'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __param(1, (0, common_1.Body)()),
@@ -828,6 +1012,13 @@ __decorate([
     __metadata("design:paramtypes", [Number, Object]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "updateDMApproval", null);
+__decorate([
+    (0, common_1.Delete)('delivery-men/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "deleteDeliveryMan", null);
 __decorate([
     (0, common_1.Get)('food'),
     __param(0, (0, common_1.Query)('limit')),
@@ -868,6 +1059,14 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "foodDetail", null);
 __decorate([
+    (0, common_1.Patch)('food/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateFood", null);
+__decorate([
     (0, common_1.Patch)('food/:id/status'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __param(1, (0, common_1.Body)()),
@@ -883,6 +1082,13 @@ __decorate([
     __metadata("design:paramtypes", [Number, Object]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "updateFoodRecommended", null);
+__decorate([
+    (0, common_1.Delete)('food/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "deleteFood", null);
 __decorate([
     (0, common_1.Get)('categories'),
     __param(0, (0, common_1.Query)('parent_id')),
@@ -962,6 +1168,14 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "updateCouponStatus", null);
 __decorate([
+    (0, common_1.Patch)('coupons/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateCoupon", null);
+__decorate([
     (0, common_1.Delete)('coupons/:id'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __metadata("design:type", Function),
@@ -990,6 +1204,14 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "updateBannerStatus", null);
 __decorate([
+    (0, common_1.Patch)('banners/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateBanner", null);
+__decorate([
     (0, common_1.Delete)('banners/:id'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __metadata("design:type", Function),
@@ -998,8 +1220,9 @@ __decorate([
 ], AdminController.prototype, "deleteBanner", null);
 __decorate([
     (0, common_1.Get)('zones'),
+    __param(0, (0, common_1.Query)('zone_for')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
+    __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "zones", null);
 __decorate([
@@ -1018,6 +1241,21 @@ __decorate([
     __metadata("design:paramtypes", [Number, Object]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "updateZoneStatus", null);
+__decorate([
+    (0, common_1.Get)('zones/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "zoneDetail", null);
+__decorate([
+    (0, common_1.Patch)('zones/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateZone", null);
 __decorate([
     (0, common_1.Delete)('zones/:id'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
@@ -1238,36 +1476,67 @@ __decorate([
 __decorate([
     (0, common_1.Get)('reports/sales-summary'),
     __param(0, (0, common_1.Query)('days')),
+    __param(1, (0, common_1.Query)('from')),
+    __param(2, (0, common_1.Query)('to')),
+    __param(3, (0, common_1.Query)('zone_id')),
+    __param(4, (0, common_1.Query)('restaurant_id')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String]),
+    __metadata("design:paramtypes", [String, String, String, String, String]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "salesSummary", null);
 __decorate([
     (0, common_1.Get)('reports/restaurant-earnings'),
     __param(0, (0, common_1.Query)('limit')),
+    __param(1, (0, common_1.Query)('from')),
+    __param(2, (0, common_1.Query)('to')),
+    __param(3, (0, common_1.Query)('zone_id')),
+    __param(4, (0, common_1.Query)('restaurant_id')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String]),
+    __metadata("design:paramtypes", [String, String, String, String, String]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "restaurantEarnings", null);
 __decorate([
     (0, common_1.Get)('reports/admin-earnings'),
     __param(0, (0, common_1.Query)('days')),
+    __param(1, (0, common_1.Query)('from')),
+    __param(2, (0, common_1.Query)('to')),
+    __param(3, (0, common_1.Query)('zone_id')),
+    __param(4, (0, common_1.Query)('restaurant_id')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String]),
+    __metadata("design:paramtypes", [String, String, String, String, String]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "adminEarningReport", null);
 __decorate([
     (0, common_1.Get)('reports/top-customers'),
     __param(0, (0, common_1.Query)('limit')),
+    __param(1, (0, common_1.Query)('from')),
+    __param(2, (0, common_1.Query)('to')),
+    __param(3, (0, common_1.Query)('zone_id')),
+    __param(4, (0, common_1.Query)('restaurant_id')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String]),
+    __metadata("design:paramtypes", [String, String, String, String, String]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "customerReport", null);
 __decorate([
+    (0, common_1.Get)('reports/top-foods'),
+    __param(0, (0, common_1.Query)('limit')),
+    __param(1, (0, common_1.Query)('from')),
+    __param(2, (0, common_1.Query)('to')),
+    __param(3, (0, common_1.Query)('zone_id')),
+    __param(4, (0, common_1.Query)('restaurant_id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, String, String, String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "topFoods", null);
+__decorate([
     (0, common_1.Get)('reports/top-deliverymen'),
     __param(0, (0, common_1.Query)('limit')),
+    __param(1, (0, common_1.Query)('from')),
+    __param(2, (0, common_1.Query)('to')),
+    __param(3, (0, common_1.Query)('zone_id')),
+    __param(4, (0, common_1.Query)('restaurant_id')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String]),
+    __metadata("design:paramtypes", [String, String, String, String, String]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "deliverymanEarningReport", null);
 __decorate([
@@ -1295,6 +1564,14 @@ __decorate([
     __metadata("design:paramtypes", [Number, Object]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "updateAddOnStatus", null);
+__decorate([
+    (0, common_1.Patch)('add-ons/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateAddOn", null);
 __decorate([
     (0, common_1.Delete)('add-ons/:id'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
@@ -1327,6 +1604,14 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "updateAddonCategoryStatus", null);
 __decorate([
+    (0, common_1.Patch)('addon-categories/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateAddonCategory", null);
+__decorate([
     (0, common_1.Delete)('addon-categories/:id'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __metadata("design:type", Function),
@@ -1347,6 +1632,14 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "createAttribute", null);
 __decorate([
+    (0, common_1.Patch)('attributes/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateAttribute", null);
+__decorate([
     (0, common_1.Delete)('attributes/:id'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __metadata("design:type", Function),
@@ -1358,8 +1651,9 @@ __decorate([
     __param(0, (0, common_1.Query)('limit')),
     __param(1, (0, common_1.Query)('offset')),
     __param(2, (0, common_1.Query)('q')),
+    __param(3, (0, common_1.Query)('type')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, String, String]),
+    __metadata("design:paramtypes", [String, String, String, String]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "campaigns", null);
 __decorate([
@@ -1378,6 +1672,14 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "updateCampaignStatus", null);
 __decorate([
+    (0, common_1.Patch)('campaigns/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateCampaign", null);
+__decorate([
     (0, common_1.Delete)('campaigns/:id'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __metadata("design:type", Function),
@@ -1393,6 +1695,20 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "advertisements", null);
 __decorate([
+    (0, common_1.Post)('advertisements'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "createAdvertisement", null);
+__decorate([
+    (0, common_1.Delete)('advertisements/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "deleteAdvertisement", null);
+__decorate([
     (0, common_1.Patch)('advertisements/:id/status'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __param(1, (0, common_1.Body)()),
@@ -1406,6 +1722,28 @@ __decorate([
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "cashBacks", null);
+__decorate([
+    (0, common_1.Post)('cash-backs'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "createCashBack", null);
+__decorate([
+    (0, common_1.Patch)('cash-backs/:id/status'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateCashBackStatus", null);
+__decorate([
+    (0, common_1.Delete)('cash-backs/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "deleteCashBack", null);
 __decorate([
     (0, common_1.Get)('wallet-bonuses'),
     __metadata("design:type", Function),
@@ -1470,10 +1808,19 @@ __decorate([
     (0, common_1.Get)('disbursements'),
     __param(0, (0, common_1.Query)('limit')),
     __param(1, (0, common_1.Query)('offset')),
+    __param(2, (0, common_1.Query)('type')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, String]),
+    __metadata("design:paramtypes", [String, String, String]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "disbursements", null);
+__decorate([
+    (0, common_1.Patch)('disbursements/:id/status'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateDisbursementStatus", null);
 __decorate([
     (0, common_1.Get)('withdraw-requests'),
     __param(0, (0, common_1.Query)('limit')),
@@ -1505,6 +1852,21 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "offlinePaymentMethods", null);
 __decorate([
+    (0, common_1.Post)('offline-payment-methods'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "createOfflinePaymentMethod", null);
+__decorate([
+    (0, common_1.Patch)('offline-payment-methods/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateOfflinePaymentMethod", null);
+__decorate([
     (0, common_1.Patch)('offline-payment-methods/:id/status'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __param(1, (0, common_1.Body)()),
@@ -1512,6 +1874,13 @@ __decorate([
     __metadata("design:paramtypes", [Number, Object]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "updateOfflinePaymentMethodStatus", null);
+__decorate([
+    (0, common_1.Delete)('offline-payment-methods/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "deleteOfflinePaymentMethod", null);
 __decorate([
     (0, common_1.Get)('dm-earnings'),
     __param(0, (0, common_1.Query)('limit')),
@@ -1551,6 +1920,14 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "createNotification", null);
+__decorate([
+    (0, common_1.Patch)('notifications/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateNotification", null);
 __decorate([
     (0, common_1.Delete)('notifications/:id'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
@@ -1661,6 +2038,35 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "employees", null);
 __decorate([
+    (0, common_1.Post)('employees'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "createEmployee", null);
+__decorate([
+    (0, common_1.Get)('employees/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "employeeDetail", null);
+__decorate([
+    (0, common_1.Patch)('employees/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateEmployee", null);
+__decorate([
+    (0, common_1.Delete)('employees/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "deleteEmployee", null);
+__decorate([
     (0, common_1.Get)('admin-roles'),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
@@ -1673,6 +2079,14 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "createAdminRole", null);
+__decorate([
+    (0, common_1.Patch)('admin-roles/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateAdminRole", null);
 __decorate([
     (0, common_1.Delete)('admin-roles/:id'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
@@ -1855,12 +2269,13 @@ __decorate([
     __param(1, (0, common_1.Query)('dir')),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object, String]),
-    __metadata("design:returntype", void 0)
+    __metadata("design:returntype", Promise)
 ], AdminController.prototype, "uploadImage", null);
 exports.AdminController = AdminController = __decorate([
     (0, common_1.Controller)('admin'),
     (0, auth_guard_1.RequireAuth)('admin'),
-    __metadata("design:paramtypes", [admin_service_1.AdminService])
+    __metadata("design:paramtypes", [admin_service_1.AdminService,
+        mongo_data_service_1.MongoDataService])
 ], AdminController);
 function toInt(v, fallback) {
     const n = parseInt(v ?? '', 10);

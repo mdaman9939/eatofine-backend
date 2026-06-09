@@ -1,10 +1,43 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
 var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
     var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
     if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
     else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
@@ -14,9 +47,14 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DeliveryExtrasController = void 0;
 const common_1 = require("@nestjs/common");
+const platform_express_1 = require("@nestjs/platform-express");
+const fs = __importStar(require("fs"));
+const path = __importStar(require("path"));
 const auth_guard_1 = require("../auth/auth.guard");
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
+const storage_url_1 = require("../common/storage-url");
+const image_compress_1 = require("../common/image-compress");
 let DeliveryExtrasController = class DeliveryExtrasController {
     prisma;
     mongo;
@@ -28,9 +66,12 @@ let DeliveryExtrasController = class DeliveryExtrasController {
         const v = (process.env.USE_MONGO_EXTRAS ?? '1').toLowerCase();
         return v === '1' || v === 'true' || v === 'yes';
     }
-    shapeDmOrder(r, detailsCount) {
+    shapeDmOrder(r, detailsCount, restaurant, user) {
         const created = r.created_at;
         const updated = r.updated_at;
+        const rest = restaurant ?? null;
+        const restLogo = rest ? rest.logo : null;
+        const u = user ?? null;
         return {
             ...r,
             id: Number(r.mysql_id),
@@ -50,7 +91,39 @@ let DeliveryExtrasController = class DeliveryExtrasController {
             delivery_address: r.delivery_address ?? null,
             created_at: created ? new Date(created).toISOString() : new Date().toISOString(),
             updated_at: updated ? new Date(updated).toISOString() : new Date().toISOString(),
+            restaurant_name: rest ? (rest.name ?? null) : null,
+            restaurant_address: rest ? (rest.address ?? null) : null,
+            restaurant_phone: rest ? (rest.phone ?? null) : null,
+            restaurant_lat: rest && rest.latitude != null ? String(rest.latitude) : null,
+            restaurant_lng: rest && rest.longitude != null ? String(rest.longitude) : null,
+            restaurant_logo_full_url: (0, storage_url_1.storageFullUrl)('restaurant', restLogo ?? null),
+            restaurant_delivery_time: rest ? (rest.delivery_time ?? '30-40') : '30-40',
+            restaurant_model: rest ? (rest.restaurant_model ?? null) : null,
+            customer: u
+                ? {
+                    id: Number(u.mysql_id),
+                    f_name: u.f_name ?? null,
+                    l_name: u.l_name ?? null,
+                    phone: u.phone ?? null,
+                    email: u.email ?? null,
+                    image_full_url: (0, storage_url_1.storageFullUrl)('profile', u.image ?? null),
+                }
+                : null,
         };
+    }
+    async dmUserMap(orders) {
+        const ids = Array.from(new Set(orders.map((o) => Number(o.mysql_user_id ?? o.user_id ?? 0)).filter((n) => n > 0)));
+        if (ids.length === 0)
+            return new Map();
+        const rows = await this.mongo.findMany('users', { mysql_id: { $in: ids } });
+        return new Map(rows.map((u) => [Number(u.mysql_id), u]));
+    }
+    async dmRestaurantMap(orders) {
+        const ids = Array.from(new Set(orders.map((o) => Number(o.mysql_restaurant_id ?? o.restaurant_id ?? 0)).filter((n) => n > 0)));
+        if (ids.length === 0)
+            return new Map();
+        const rows = await this.mongo.findMany('restaurants', { mysql_id: { $in: ids } });
+        return new Map(rows.map((r) => [Number(r.mysql_id), r]));
     }
     async dmDetailsCountMap(orderIds) {
         if (orderIds.length === 0)
@@ -60,6 +133,39 @@ let DeliveryExtrasController = class DeliveryExtrasController {
             { $group: { _id: '$order_id', count: { $sum: 1 } } },
         ]);
         return new Map(rows.map((r) => [Number(r._id), r.count]));
+    }
+    async shapeDmOrderList(rows) {
+        const counts = await this.dmDetailsCountMap(rows.map((r) => Number(r.mysql_id)));
+        const restMap = await this.dmRestaurantMap(rows);
+        const userMap = await this.dmUserMap(rows);
+        return rows.map((r) => this.shapeDmOrder(r, counts.get(Number(r.mysql_id)) ?? 1, restMap.get(Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0)), userMap.get(Number(r.mysql_user_id ?? r.user_id ?? 0))));
+    }
+    async dmOrderCount(actorId) {
+        const rows = await this.mongo.aggregate('orders', [
+            { $match: { mysql_delivery_man_id: actorId } },
+            { $group: { _id: '$order_status', count: { $sum: 1 } } },
+        ]);
+        const by = {};
+        let all = 0;
+        for (const r of rows) {
+            by[String(r._id)] = r.count;
+            all += r.count;
+        }
+        return {
+            all,
+            pending: by.pending ?? 0,
+            confirmed: by.confirmed ?? 0,
+            accepted: by.accepted ?? 0,
+            processing: by.processing ?? 0,
+            handover: by.handover ?? 0,
+            picked_up: by.picked_up ?? 0,
+            delivered: by.delivered ?? 0,
+            canceled: by.canceled ?? 0,
+            refund_requested: by.refund_requested ?? 0,
+            refunded: by.refunded ?? 0,
+            refund_request_canceled: by.refund_request_canceled ?? 0,
+            failed: by.failed ?? 0,
+        };
     }
     async profile(req) {
         const actorId = Number(req.actor.id);
@@ -104,7 +210,9 @@ let DeliveryExtrasController = class DeliveryExtrasController {
                 email: d.email ?? null,
                 phone: d.phone ?? null,
                 image: d.image ?? null,
+                image_full_url: (0, storage_url_1.storageFullUrl)('delivery-man', d.image ?? null),
                 status: d.status ?? null,
+                active: Number(d.active ?? 0) ? 1 : 0,
                 application_status: d.application_status ?? null,
                 zone_id: d.mysql_zone_id !== undefined && d.mysql_zone_id !== null
                     ? Number(d.mysql_zone_id)
@@ -150,44 +258,116 @@ let DeliveryExtrasController = class DeliveryExtrasController {
             pending_withdraw: 0,
         };
     }
-    async updateProfile(req, body) {
-        const data = {};
-        for (const [k, v] of Object.entries(body))
-            if (v !== undefined)
-                data[k] = v;
-        if (Object.keys(data).length) {
-            if (this.useMongo()) {
-                await this.mongo.updateOne('delivery_men', { mysql_id: Number(req.actor.id) }, { ...data, updated_at: new Date() });
-                return { message: 'Profile updated' };
+    async saveImage(file, folder) {
+        if (!file || !file.buffer || file.buffer.length === 0)
+            return null;
+        let data = file.buffer;
+        let ext = path.extname(file.originalname || '').toLowerCase() || '.png';
+        let contentType = file.mimetype || 'image/png';
+        if (/^image\//i.test(contentType) && !/svg/i.test(contentType)) {
+            try {
+                const c = await (0, image_compress_1.compressImage)(file.buffer);
+                if (c) {
+                    data = c.buffer;
+                    ext = c.ext;
+                    contentType = c.contentType;
+                }
             }
-            await this.prisma.delivery_men.update({ where: { id: req.actor.id }, data });
+            catch { }
         }
+        const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+        try {
+            const root = process.env.STORAGE_ROOT ?? path.resolve(__dirname, '../../storage/app/public');
+            const dir = path.join(root, folder);
+            fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(path.join(dir, filename), data);
+        }
+        catch { }
+        if (data.length < 15 * 1024 * 1024) {
+            await this.mongo.insertOne('uploads', { path: `${folder}/${filename}`, content_type: contentType, data, size: data.length, created_at: new Date() }).catch(() => undefined);
+        }
+        return filename;
+    }
+    async updateProfile(req, body = {}, files = {}) {
+        const b = body ?? {};
+        const data = {};
+        if (b.f_name !== undefined)
+            data.f_name = String(b.f_name);
+        if (b.l_name !== undefined)
+            data.l_name = String(b.l_name);
+        if (b.email !== undefined)
+            data.email = String(b.email);
+        if (typeof b.password === 'string' && b.password.length > 1) {
+            const bcrypt = await import('bcrypt');
+            data.password = (await bcrypt.hash(b.password, 10)).replace(/^\$2b\$/, '$2y$');
+        }
+        const imageName = await this.saveImage(files?.image?.[0], 'delivery-man');
+        if (imageName)
+            data.image = imageName;
+        if (Object.keys(data).length === 0)
+            return { message: 'nothing to update' };
+        data.updated_at = new Date();
+        if (this.useMongo()) {
+            await this.mongo.updateOne('delivery_men', { mysql_id: Number(req.actor.id) }, data);
+            return { message: 'Profile updated', image: imageName ?? undefined };
+        }
+        await this.prisma.delivery_men.update({ where: { id: req.actor.id }, data: data });
         return { message: 'Profile updated' };
     }
-    toggleActive() { return { message: 'updated' }; }
+    async toggleActive(req, body = {}) {
+        if (this.useMongo()) {
+            const actorId = Number(req.actor.id);
+            const dm = await this.mongo.findByMysqlId('delivery_men', actorId);
+            if (dm) {
+                const raw = body.active ?? body.status;
+                const next = raw !== undefined ? (Number(raw) ? 1 : 0) : (Number(dm.active ?? 0) ? 0 : 1);
+                await this.mongo.updateOne('delivery_men', { mysql_id: actorId }, { active: next, updated_at: new Date() });
+                return { message: 'updated', active: next };
+            }
+        }
+        return { message: 'updated' };
+    }
     fcmToken() { return { message: 'token-updated' }; }
     remove() { return { message: 'Not available in demo' }; }
-    async allOrders(req) {
+    async allOrders(req, offsetQ, limitQ, status) {
         const actorId = Number(req.actor.id);
+        const paginated = offsetQ !== undefined || limitQ !== undefined || status !== undefined;
         if (this.useMongo()) {
-            const rows = await this.mongo.findMany('orders', { mysql_delivery_man_id: actorId }, { sort: { mysql_id: -1 }, limit: 50 });
-            const counts = await this.dmDetailsCountMap(rows.map((r) => Number(r.mysql_id)));
-            return rows.map((r) => this.shapeDmOrder(r, counts.get(Number(r.mysql_id)) ?? 1));
+            const base = { mysql_delivery_man_id: actorId };
+            if (!paginated) {
+                const rows = await this.mongo.findMany('orders', base, { sort: { mysql_id: -1 }, limit: 50 });
+                return this.shapeDmOrderList(rows);
+            }
+            const limit = parseInt(limitQ ?? '10', 10) || 10;
+            const offset = parseInt(offsetQ ?? '1', 10) || 1;
+            const filter = status && status !== 'all' ? { ...base, order_status: status } : base;
+            const total = await this.mongo.count('orders', filter);
+            const rows = await this.mongo.findMany('orders', filter, {
+                sort: { mysql_id: -1 }, limit, skip: Math.max(0, (offset - 1) * limit),
+            });
+            return { total_size: total, limit, offset, order_count: await this.dmOrderCount(actorId), orders: await this.shapeDmOrderList(rows) };
         }
         const rows = await this.prisma.orders.findMany({ where: { delivery_man_id: req.actor.id }, orderBy: { id: 'desc' }, take: 50 });
-        return rows.map((r) => ({ ...r, id: Number(r.id), user_id: r.user_id ? Number(r.user_id) : null, restaurant_id: Number(r.restaurant_id), order_amount: Number(r.order_amount) }));
+        const mapped = rows.map((r) => ({ ...r, id: Number(r.id), user_id: r.user_id ? Number(r.user_id) : null, restaurant_id: Number(r.restaurant_id), order_amount: Number(r.order_amount) }));
+        return paginated ? { total_size: mapped.length, limit: 10, offset: 1, order_count: { all: mapped.length }, orders: mapped } : mapped;
     }
-    async currentOrders(req) {
+    async currentOrders(req, status) {
         const actorId = Number(req.actor.id);
         if (this.useMongo()) {
-            const rows = await this.mongo.findMany('orders', {
-                mysql_delivery_man_id: actorId,
-                order_status: { $in: ['handover', 'picked_up', 'confirmed', 'processing'] },
-            }, { sort: { mysql_id: -1 } });
-            const counts = await this.dmDetailsCountMap(rows.map((r) => Number(r.mysql_id)));
-            return rows.map((r) => this.shapeDmOrder(r, counts.get(Number(r.mysql_id)) ?? 1));
+            const ongoing = ['handover', 'picked_up', 'confirmed', 'processing', 'accepted', 'pending', 'cooking'];
+            const filter = { mysql_delivery_man_id: actorId, order_status: { $in: ongoing } };
+            if (status && status !== 'all')
+                filter.order_status = status;
+            const rows = await this.mongo.findMany('orders', filter, { sort: { mysql_id: -1 } });
+            return {
+                total_size: rows.length,
+                limit: rows.length,
+                offset: 1,
+                order_count: await this.dmOrderCount(actorId),
+                orders: await this.shapeDmOrderList(rows),
+            };
         }
-        return [];
+        return { total_size: 0, limit: 0, offset: 1, order_count: { all: 0 }, orders: [] };
     }
     async latestOrders(req) {
         const actorId = Number(req.actor.id);
@@ -199,10 +379,9 @@ let DeliveryExtrasController = class DeliveryExtrasController {
                 order_status: 'handover',
                 ...(zoneId ? { $or: [{ mysql_zone_id: Number(zoneId) }, { zone_id: Number(zoneId) }] } : {}),
             }, { sort: { mysql_id: -1 }, limit: 20 });
-            const counts = await this.dmDetailsCountMap(rows.map((r) => Number(r.mysql_id)));
-            return rows.map((r) => this.shapeDmOrder(r, counts.get(Number(r.mysql_id)) ?? 1));
+            return { orders: await this.shapeDmOrderList(rows), total_size: rows.length };
         }
-        return [];
+        return { orders: [], total_size: 0 };
     }
     async order(idStr) {
         const id = parseInt(idStr ?? '', 10);
@@ -213,7 +392,11 @@ let DeliveryExtrasController = class DeliveryExtrasController {
             if (!o)
                 return null;
             const counts = await this.dmDetailsCountMap([id]);
-            return this.shapeDmOrder(o, counts.get(id) ?? 1);
+            const restId = Number(o.mysql_restaurant_id ?? o.restaurant_id ?? 0);
+            const rest = restId > 0 ? await this.mongo.findByMysqlId('restaurants', restId) : null;
+            const userId = Number(o.mysql_user_id ?? o.user_id ?? 0);
+            const user = userId > 0 ? await this.mongo.findByMysqlId('users', userId) : null;
+            return this.shapeDmOrder(o, counts.get(id) ?? 1, rest, user);
         }
         const o = await this.prisma.orders.findUnique({ where: { id: BigInt(id) } });
         return o ? { ...o, id: Number(o.id), user_id: o.user_id ? Number(o.user_id) : null, restaurant_id: Number(o.restaurant_id), order_amount: Number(o.order_amount) } : null;
@@ -224,12 +407,26 @@ let DeliveryExtrasController = class DeliveryExtrasController {
             return [];
         if (this.useMongo()) {
             const items = await this.mongo.findMany('order_details', { order_id: id }, { sort: { mysql_id: 1 } });
+            const foodIds = Array.from(new Set(items.map((it) => Number(it.food_id)).filter((n) => n > 0)));
+            const foods = foodIds.length
+                ? await this.mongo.findMany('foods', { mysql_id: { $in: foodIds } })
+                : [];
+            const foodMap = new Map(foods.map((f) => [Number(f.mysql_id), f]));
             return items.map((it) => {
-                let parsed = {};
-                try {
-                    parsed = JSON.parse(it.food_details ?? '{}');
+                let stored = {};
+                const raw = it.food_details;
+                if (typeof raw === 'string') {
+                    try {
+                        stored = JSON.parse(raw);
+                    }
+                    catch { }
                 }
-                catch { }
+                else if (raw && typeof raw === 'object')
+                    stored = raw;
+                const food = foodMap.get(Number(it.food_id));
+                const name = food?.name ?? stored.name ?? `Food #${it.food_id}`;
+                const image = food?.image ?? stored.image ?? null;
+                const imageUrl = (0, storage_url_1.storageFullUrl)('product', image);
                 return {
                     id: Number(it.mysql_id),
                     order_id: id,
@@ -243,18 +440,39 @@ let DeliveryExtrasController = class DeliveryExtrasController {
                     total_add_on_price: Number(it.total_add_on_price ?? 0),
                     variation: it.variation ?? [],
                     variant: it.variant ?? null,
-                    food_details: it.food_details ?? null,
-                    food: {
+                    food_details: {
                         id: it.food_id ?? null,
-                        name: parsed.name ?? 'Item',
-                        image: parsed.image ?? null,
+                        name,
+                        image,
+                        image_full_url: imageUrl,
+                        price: Number(it.price ?? 0),
+                        quantity: Number(it.quantity ?? 1),
                     },
+                    food: { id: it.food_id ?? null, name, image, image_full_url: imageUrl },
                 };
             });
         }
         return [];
     }
-    acceptOrder() { return { message: 'order accepted' }; }
+    async acceptOrder(req, body = {}) {
+        const orderId = Number(body.order_id ?? body.id ?? 0);
+        if (this.useMongo() && orderId > 0) {
+            const o = await this.mongo.findByMysqlId('orders', orderId);
+            if (!o)
+                return { errors: [{ code: 'order', message: 'Order not found' }] };
+            const assigned = Number(o.mysql_delivery_man_id ?? o.delivery_man_id ?? 0);
+            if (assigned > 0 && assigned !== Number(req.actor.id)) {
+                return { errors: [{ code: 'order', message: 'This order has already been taken by another delivery man' }] };
+            }
+            await this.mongo.updateOne('orders', { mysql_id: orderId }, {
+                mysql_delivery_man_id: Number(req.actor.id),
+                delivery_man_id: Number(req.actor.id),
+                updated_at: new Date(),
+            });
+            return { message: 'order accepted' };
+        }
+        return { message: 'order accepted' };
+    }
     updatePayment() { return { message: 'updated' }; }
     sendOtp() { return { otp: '1234' }; }
     recordLocation() { return { ok: true }; }
@@ -329,10 +547,80 @@ let DeliveryExtrasController = class DeliveryExtrasController {
         const rows = await this.prisma.notifications.findMany({ where: { status: true }, orderBy: { id: 'desc' }, take: 50 });
         return rows.map((r) => ({ id: Number(r.id), title: r.title, description: r.description }));
     }
-    messageList() { return { conversations: [], total_size: 0 }; }
-    messageDetails() { return { messages: [] }; }
-    messageSearch() { return { conversations: [] }; }
-    messageSend() { return { message: 'sent' }; }
+    async messageList(req) {
+        if (!this.useMongo())
+            return { conversations: [], total_size: 0 };
+        const dmId = Number(req.actor.id);
+        const rows = await this.mongo.findMany('conversations', { counterpart_type: 'delivery_man', counterpart_id: dmId }, { sort: { last_message_at: -1 }, limit: 50 });
+        return {
+            conversations: rows.map((c) => ({
+                id: Number(c.mysql_id),
+                type: 'user',
+                user_id: c.user_id != null ? Number(c.user_id) : null,
+                name: c.user_name ?? `Customer #${c.user_id}`,
+                last_message: c.last_message ?? null,
+                last_message_at: c.last_message_at ?? null,
+                unread: c.unread ?? 0,
+            })),
+            total_size: rows.length,
+        };
+    }
+    async messageDetails(req, convId) {
+        if (!this.useMongo() || !convId)
+            return { messages: [] };
+        const dmId = Number(req.actor.id);
+        const rows = await this.mongo.findMany('messages', { conversation_id: Number(convId) }, { sort: { mysql_id: 1 }, limit: 100 });
+        return {
+            messages: rows.map((m) => ({
+                id: Number(m.mysql_id),
+                sender_type: m.sender_type,
+                sender_id: m.sender_id != null ? Number(m.sender_id) : null,
+                body: m.body,
+                sent_by_me: m.sender_type === 'delivery_man' && Number(m.sender_id) === dmId,
+                created_at: m.created_at ?? null,
+            })),
+        };
+    }
+    async messageSearch(req, q) {
+        if (!this.useMongo() || !q?.trim())
+            return { conversations: [] };
+        const dmId = Number(req.actor.id);
+        const rows = await this.mongo.findMany('conversations', {
+            counterpart_type: 'delivery_man', counterpart_id: dmId, user_name: { $regex: q, $options: 'i' },
+        }, { limit: 25 });
+        return { conversations: rows.map((c) => ({ id: Number(c.mysql_id), name: c.user_name ?? `Customer #${c.user_id}` })) };
+    }
+    async messageSend(req, body = {}) {
+        if (!this.useMongo())
+            return { message: 'sent' };
+        const dmId = Number(req.actor.id);
+        if (!body.body || !body.body.trim())
+            return { errors: [{ code: 'body', message: 'message body required' }] };
+        let convId = body.conversation_id;
+        if (!convId && body.user_id) {
+            const existing = await this.mongo.findOne('conversations', {
+                user_id: Number(body.user_id), counterpart_type: 'delivery_man', counterpart_id: dmId,
+            });
+            if (existing)
+                convId = Number(existing.mysql_id);
+            else {
+                convId = await this.mongo.nextMysqlId('conversations');
+                await this.mongo.insertOne('conversations', {
+                    mysql_id: convId, user_id: Number(body.user_id), counterpart_type: 'delivery_man', counterpart_id: dmId,
+                    last_message: body.body, last_message_at: new Date(), unread: 0,
+                });
+            }
+        }
+        if (!convId)
+            return { errors: [{ code: 'conversation', message: 'conversation_id or user_id required' }] };
+        const msgId = await this.mongo.nextMysqlId('messages');
+        await this.mongo.insertOne('messages', {
+            mysql_id: msgId, conversation_id: convId, sender_type: 'delivery_man', sender_id: dmId,
+            body: body.body, created_at: new Date(),
+        });
+        await this.mongo.updateOne('conversations', { mysql_id: convId }, { last_message: body.body, last_message_at: new Date() });
+        return { message: 'sent', conversation_id: convId };
+    }
 };
 exports.DeliveryExtrasController = DeliveryExtrasController;
 __decorate([
@@ -345,18 +633,23 @@ __decorate([
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('update-profile'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.FileFieldsInterceptor)([{ name: 'image', maxCount: 1 }], { limits: { fileSize: 10 * 1024 * 1024 } })),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __param(2, (0, common_1.UploadedFiles)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object, Object]),
+    __metadata("design:returntype", Promise)
+], DeliveryExtrasController.prototype, "updateProfile", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Post)('update-active-status'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object, Object]),
     __metadata("design:returntype", Promise)
-], DeliveryExtrasController.prototype, "updateProfile", null);
-__decorate([
-    (0, common_1.HttpCode)(200),
-    (0, common_1.Post)('update-active-status'),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
 ], DeliveryExtrasController.prototype, "toggleActive", null);
 __decorate([
     (0, common_1.HttpCode)(200),
@@ -375,15 +668,19 @@ __decorate([
 __decorate([
     (0, common_1.Get)('all-orders'),
     __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('offset')),
+    __param(2, (0, common_1.Query)('limit')),
+    __param(3, (0, common_1.Query)('status')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
+    __metadata("design:paramtypes", [Object, String, String, String]),
     __metadata("design:returntype", Promise)
 ], DeliveryExtrasController.prototype, "allOrders", null);
 __decorate([
     (0, common_1.Get)('current-orders'),
     __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('status')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
+    __metadata("design:paramtypes", [Object, String]),
     __metadata("design:returntype", Promise)
 ], DeliveryExtrasController.prototype, "currentOrders", null);
 __decorate([
@@ -410,9 +707,11 @@ __decorate([
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('accept-order'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], DeliveryExtrasController.prototype, "acceptOrder", null);
 __decorate([
     (0, common_1.HttpCode)(200),
@@ -536,28 +835,35 @@ __decorate([
 ], DeliveryExtrasController.prototype, "notifications", null);
 __decorate([
     (0, common_1.Get)('message/list'),
+    __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
 ], DeliveryExtrasController.prototype, "messageList", null);
 __decorate([
     (0, common_1.Get)('message/details'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('conversation_id')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
 ], DeliveryExtrasController.prototype, "messageDetails", null);
 __decorate([
     (0, common_1.Get)('message/search-list'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('search')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
 ], DeliveryExtrasController.prototype, "messageSearch", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('message/send'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], DeliveryExtrasController.prototype, "messageSend", null);
 exports.DeliveryExtrasController = DeliveryExtrasController = __decorate([
     (0, common_1.Controller)('delivery-man'),

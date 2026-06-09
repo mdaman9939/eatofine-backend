@@ -16,7 +16,12 @@ exports.AuthController = void 0;
 const common_1 = require("@nestjs/common");
 const throttler_1 = require("@nestjs/throttler");
 const auth_service_1 = require("./auth.service");
-const AUTH_THROTTLE = { auth: {}, default: { limit: 0, ttl: 0 } };
+const AUTH_THROTTLE = {
+    default: {
+        ttl: parseInt(process.env.AUTH_THROTTLE_TTL ?? '300000', 10),
+        limit: parseInt(process.env.AUTH_THROTTLE_LIMIT ?? '30', 10),
+    },
+};
 let AuthController = class AuthController {
     auth;
     constructor(auth) {

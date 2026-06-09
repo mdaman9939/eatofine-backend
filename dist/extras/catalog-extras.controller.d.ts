@@ -198,9 +198,17 @@ export declare class CatalogExtrasController {
         reply: unknown;
         reply_at: unknown;
     }[]>;
-    submitProductReview(): {
+    submitProductReview(body?: Record<string, unknown>): Promise<{
         message: string;
-    };
+        errors?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+    }>;
+    private recomputeRating;
     recommendedMostReviewed(): Promise<{
         products: {
             id: number;
@@ -227,7 +235,35 @@ export declare class CatalogExtrasController {
     advertisementList(): Promise<{
         id: number;
         restaurant_id: number;
+        restaurant_name: string | null;
+        restaurant_logo_full_url: string | null;
         created_by_id: number;
+        cover_image_full_url: string | null;
+        profile_image_full_url: string | null;
+        video_attachment_full_url: string | null;
+    }[] | {
+        id: number;
+        restaurant_id: number;
+        created_by_id: number;
+        created_at: Date | null;
+        updated_at: Date | null;
+        status: import("@prisma/client").$Enums.advertisements_status;
+        description: string | null;
+        priority: number | null;
+        title: string | null;
+        start_date: Date;
+        end_date: Date;
+        add_type: import("@prisma/client").$Enums.advertisements_add_type;
+        pause_note: string | null;
+        cancellation_note: string | null;
+        cover_image: string | null;
+        profile_image: string | null;
+        video_attachment: string | null;
+        is_rating_active: boolean;
+        is_review_active: boolean;
+        is_paid: boolean;
+        is_updated: boolean;
+        created_by_type: string;
     }[]>;
     allergies(): Promise<{
         id: number;

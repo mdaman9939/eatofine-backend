@@ -5,10 +5,10 @@ export declare class BrowseService {
     private readonly mongo;
     constructor(prisma: PrismaService, mongo: MongoDataService);
     private useMongo;
-    private storageBase;
     private fullUrl;
     private mapRestaurant;
     private mapRestaurantMongo;
+    private vendorImageMap;
     private mapFood;
     private mapFoodMongo;
     getRestaurants(opts: {
@@ -239,7 +239,7 @@ export declare class BrowseService {
     }>;
     private queryRestaurantsOrderedMongo;
     private queryRestaurantsOrdered;
-    getRestaurantDetails(id: number): Promise<{
+    getRestaurantDetails(idOrSlug: number | string): Promise<{
         foods: {
             id: number;
             name: string | null;

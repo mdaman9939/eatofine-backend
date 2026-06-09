@@ -23,14 +23,14 @@ let CatalogController = class CatalogController {
     zones() {
         return this.catalog.listZones();
     }
-    checkZone(lat, lng) {
-        return this.catalog.checkZone(lat, lng);
+    checkZone(latStr, lngStr) {
+        return this.catalog.checkZone(Number(latStr), Number(lngStr));
     }
     categories() {
         return this.catalog.listCategories();
     }
-    childCategories(parentId) {
-        return this.catalog.listChildCategories(parentId);
+    childCategories(parentIdStr) {
+        return this.catalog.listChildCategories(parseInt(parentIdStr, 10) || 0);
     }
     banners() {
         return this.catalog.listBanners();
@@ -54,10 +54,10 @@ __decorate([
 ], CatalogController.prototype, "zones", null);
 __decorate([
     (0, common_1.Get)('zone/check'),
-    __param(0, (0, common_1.Query)('lat', common_1.ParseFloatPipe)),
-    __param(1, (0, common_1.Query)('lng', common_1.ParseFloatPipe)),
+    __param(0, (0, common_1.Query)('lat')),
+    __param(1, (0, common_1.Query)('lng')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Number, Number]),
+    __metadata("design:paramtypes", [String, String]),
     __metadata("design:returntype", void 0)
 ], CatalogController.prototype, "checkZone", null);
 __decorate([
@@ -68,9 +68,9 @@ __decorate([
 ], CatalogController.prototype, "categories", null);
 __decorate([
     (0, common_1.Get)('categories/childes/:parentId'),
-    __param(0, (0, common_1.Param)('parentId', common_1.ParseIntPipe)),
+    __param(0, (0, common_1.Param)('parentId')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Number]),
+    __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", void 0)
 ], CatalogController.prototype, "childCategories", null);
 __decorate([

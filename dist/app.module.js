@@ -40,13 +40,8 @@ exports.AppModule = AppModule = __decorate([
             throttler_1.ThrottlerModule.forRoot([
                 {
                     name: 'default',
-                    ttl: 60_000,
-                    limit: 240,
-                },
-                {
-                    name: 'auth',
-                    ttl: parseInt(process.env.AUTH_THROTTLE_TTL ?? '300000', 10),
-                    limit: parseInt(process.env.AUTH_THROTTLE_LIMIT ?? '30', 10),
+                    ttl: parseInt(process.env.THROTTLE_TTL ?? '60000', 10),
+                    limit: parseInt(process.env.THROTTLE_LIMIT ?? '6000', 10),
                 },
             ]),
             prisma_module_1.PrismaModule,

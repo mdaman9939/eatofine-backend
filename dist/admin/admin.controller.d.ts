@@ -6,9 +6,11 @@ interface MulterFile {
     size: number;
 }
 import { AdminService } from './admin.service';
+import { MongoDataService } from '../mongo/mongo-data.service';
 export declare class AdminController {
     private readonly admin;
-    constructor(admin: AdminService);
+    private readonly mongo;
+    constructor(admin: AdminService, mongo: MongoDataService);
     me(req: AuthedRequest): Promise<{
         id: number;
         f_name: string | null;
@@ -68,7 +70,7 @@ export declare class AdminController {
             total: number;
         };
     }>;
-    orders(limit?: string, offset?: string, status?: string, q?: string): Promise<{
+    orders(limit?: string, offset?: string, status?: string, q?: string, orderType?: string): Promise<{
         total: number;
         limit: number;
         offset: number;
@@ -245,6 +247,11 @@ export declare class AdminController {
             food_details: unknown;
         }[];
     }>;
+    placePosOrder(body: Parameters<AdminService['createPosOrder']>[0]): Promise<{
+        ok: boolean;
+        id: number;
+        order_amount: number;
+    }>;
     updateOrderStatus(id: number, body: {
         status: string;
         reason?: string;
@@ -302,20 +309,11 @@ export declare class AdminController {
             restaurant_model: string | null;
         }[];
     }>;
-    createRestaurant(body: {
-        name?: string;
-        email?: string;
-        phone?: string;
-        address?: string;
-        minimum_order?: number;
-        zone_id?: number;
-        vendor_id?: number;
-        delivery?: boolean;
-        take_away?: boolean;
-    }): Promise<{
+    createRestaurant(body: Parameters<AdminService['createRestaurant']>[0]): Promise<{
         ok: boolean;
         id: number;
         name: string;
+        vendor_id: number | null;
     }>;
     restaurantsPending(): Promise<{
         total: number;
@@ -476,6 +474,62 @@ export declare class AdminController {
             revenue: number;
         };
     }>;
+    restaurantTabs(id: number, limit?: string): Promise<{
+        foods: never[];
+        orders: never[];
+        reviews: never[];
+        transactions: never[];
+        wallet: {
+            total_earning: number;
+            commission_paid: number;
+            delivered_count: number;
+            total_orders: number;
+            avg_rating: number;
+            rating_count: number;
+        };
+    } | {
+        foods: {
+            id: number;
+            name: {} | null;
+            price: number;
+            image: {} | null;
+            status: {};
+            veg: {} | null;
+        }[];
+        orders: {
+            id: number;
+            order_amount: number;
+            order_status: {} | null;
+            payment_status: {} | null;
+            order_type: {} | null;
+            created_at: {} | null;
+        }[];
+        reviews: {
+            id: number;
+            rating: number;
+            comment: {} | null;
+            reply: {} | null;
+            food_id: number | null;
+            customer: string | null;
+        }[];
+        transactions: {
+            id: number;
+            order_amount: number;
+            commission: number;
+            restaurant_earning: number;
+            order_status: {} | null;
+            created_at: {} | null;
+        }[];
+        wallet: {
+            total_earning: number;
+            commission_paid: number;
+            restaurant_earning: number;
+            delivered_count: number;
+            total_orders: number;
+            avg_rating: number;
+            rating_count: number;
+        };
+    }>;
     updateRestaurant(id: number, body: Parameters<AdminService['updateRestaurant']>[1]): Promise<{
         ok: boolean;
         id: number;
@@ -523,7 +577,29 @@ export declare class AdminController {
         stats: {
             order_count: number;
             total_spend: number;
+            wallet_balance: number;
+            avg_order_value: number;
+            breakdown: {
+                delivered: number;
+                ongoing: number;
+                canceled: number;
+                refunded: number;
+            };
         };
+        addresses: {
+            id: number;
+            address_type: {} | null;
+            address: {} | null;
+            contact_person_name: {} | null;
+            contact_person_number: {} | null;
+        }[];
+        recent_orders: {
+            id: number;
+            order_amount: number;
+            order_status: {} | null;
+            payment_status: {} | null;
+            created_at: {} | null;
+        }[];
     } | {
         user: {
             id: number;
@@ -540,7 +616,12 @@ export declare class AdminController {
         stats: {
             order_count: number;
             total_spend: number;
+            wallet_balance?: undefined;
+            avg_order_value?: undefined;
+            breakdown?: undefined;
         };
+        addresses?: undefined;
+        recent_orders?: undefined;
     }>;
     updateUserStatus(id: number, body: {
         status: boolean;
@@ -618,15 +699,7 @@ export declare class AdminController {
             application_status: import("@prisma/client").$Enums.delivery_men_application_status;
         }[];
     }>;
-    createDeliveryMan(body: {
-        f_name?: string;
-        l_name?: string;
-        email?: string;
-        phone?: string;
-        password?: string;
-        zone_id?: number;
-        vehicle_id?: number;
-    }): Promise<{
+    createDeliveryMan(body: Parameters<AdminService['createDeliveryMan']>[0]): Promise<{
         ok: boolean;
         id: number;
         name: string;
@@ -643,6 +716,15 @@ export declare class AdminController {
             submitted_at: Date | null;
             status: string;
         }[];
+    }>;
+    deliveryManDetail(id: number): Promise<{
+        delivery_man: {
+            id: number;
+            zone_id: {} | null;
+            vehicle_id: {} | null;
+            shift_id: {} | null;
+            dob: {} | null;
+        };
     }>;
     approveDeliveryMan(id: number): Promise<{
         ok: boolean;
@@ -663,12 +745,20 @@ export declare class AdminController {
         id: number;
         status: boolean;
     }>;
+    updateDeliveryMan(id: number, body: Parameters<AdminService['updateDeliveryMan']>[1]): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
     updateDMApproval(id: number, body: {
         approval: 'approved' | 'denied';
     }): Promise<{
         ok: boolean;
         id: number;
         application_status: "approved" | "denied";
+    }>;
+    deleteDeliveryMan(id: number): Promise<{
+        ok: boolean;
+        id: number;
     }>;
     food(limit?: string, offset?: string, q?: string, restaurantId?: string): Promise<{
         total: number;
@@ -721,16 +811,7 @@ export declare class AdminController {
             stock_type: string;
         }[];
     }>;
-    createFood(body: {
-        name?: string;
-        description?: string;
-        price?: number;
-        restaurant_id?: number;
-        category_id?: number;
-        discount?: number;
-        tax?: number;
-        veg?: boolean;
-    }): Promise<{
+    createFood(body: Parameters<AdminService['createFood']>[0]): Promise<{
         ok: boolean;
         id: number;
         name: string;
@@ -758,6 +839,24 @@ export declare class AdminController {
         }[];
     }>;
     foodDetail(id: number): Promise<{
+        food: {
+            id: number;
+            restaurant_id: number;
+            category_id: number | null;
+            sub_category_id: number | null;
+            price: number;
+            tax: number;
+            discount: number;
+            variations: any[];
+            add_ons: any[];
+            addon_ids: any[];
+            translations: any[];
+        };
+        restaurant: {
+            id: number;
+            name: string | null;
+        } | null;
+    } | {
         food: {
             id: number;
             restaurant_id: number;
@@ -798,6 +897,10 @@ export declare class AdminController {
             name: string;
         } | null;
     }>;
+    updateFood(id: number, body: Parameters<AdminService['updateFood']>[1]): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
     updateFoodStatus(id: number, body: {
         status: boolean;
     }): Promise<{
@@ -811,6 +914,10 @@ export declare class AdminController {
         ok: boolean;
         id: number;
         recommended: boolean;
+    }>;
+    deleteFood(id: number): Promise<{
+        ok: boolean;
+        id: number;
     }>;
     categories(parentId?: string): Promise<{
         categories: {
@@ -830,20 +937,11 @@ export declare class AdminController {
             updated_at: Date | null;
         }[];
     }>;
-    createCategory(body: {
-        name: string;
-        parent_id?: number;
-        position?: number;
-        priority?: number;
-    }): Promise<{
+    createCategory(body: Parameters<AdminService['createCategory']>[0]): Promise<{
         ok: boolean;
         id: number;
     }>;
-    updateCategory(id: number, body: {
-        name?: string;
-        status?: boolean;
-        priority?: number;
-    }): Promise<{
+    updateCategory(id: number, body: Parameters<AdminService['updateCategory']>[1]): Promise<{
         ok: boolean;
         id: number;
     }>;
@@ -918,6 +1016,10 @@ export declare class AdminController {
         id: number;
         status: boolean;
     }>;
+    updateCoupon(id: number, body: Parameters<AdminService['updateCoupon']>[1]): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
     deleteCoupon(id: number): Promise<{
         ok: boolean;
         id: number;
@@ -946,36 +1048,31 @@ export declare class AdminController {
         id: number;
         status: boolean;
     }>;
+    updateBanner(id: number, body: Parameters<AdminService['updateBanner']>[1]): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
     deleteBanner(id: number): Promise<{
         ok: boolean;
         id: number;
     }>;
-    zones(): Promise<{
+    zones(zoneFor?: string): Promise<{
         zones: {
             id: number;
+            restaurant_count: number;
+            created_at: Date | null;
             name: string;
-            display_name: string | null;
             status: boolean;
-            is_default: boolean;
             minimum_shipping_charge: number | null;
             per_km_shipping_charge: number | null;
             maximum_shipping_charge: number | null;
-            minimum_delivery_time: number | null;
+            is_default: boolean;
             max_cod_order_amount: number | null;
-            created_at: Date | null;
-            restaurant_count: number;
+            minimum_delivery_time: number | null;
+            display_name: string | null;
         }[];
     }>;
-    createZone(body: {
-        name?: string;
-        display_name?: string;
-        minimum_shipping_charge?: number;
-        per_km_shipping_charge?: number;
-        maximum_shipping_charge?: number;
-        minimum_delivery_time?: number;
-        max_cod_order_amount?: number;
-        is_default?: boolean;
-    }): Promise<{
+    createZone(body: Parameters<AdminService['createZone']>[0]): Promise<{
         ok: boolean;
         id: number;
         name: string;
@@ -986,6 +1083,26 @@ export declare class AdminController {
         ok: boolean;
         id: number;
         status: boolean;
+    }>;
+    zoneDetail(id: number): Promise<{
+        zone: {
+            id: number;
+            name: string;
+            display_name: string;
+            coordinates: any[];
+            status: boolean;
+            is_default: boolean;
+            zone_for: string;
+            minimum_shipping_charge: number;
+            per_km_shipping_charge: number;
+            maximum_shipping_charge: number;
+            minimum_delivery_time: number;
+            max_cod_order_amount: number;
+        };
+    }>;
+    updateZone(id: number, body: Parameters<AdminService['updateZone']>[1]): Promise<{
+        ok: boolean;
+        id: number;
     }>;
     deleteZone(id: number): Promise<{
         ok: boolean;
@@ -1260,7 +1377,7 @@ export declare class AdminController {
         ok: boolean;
         updated: number;
     }>;
-    salesSummary(days?: string): Promise<{
+    salesSummary(days?: string, from?: string, to?: string, zoneId?: string, restaurantId?: string): Promise<{
         days: number;
         total_revenue: number;
         total_orders: number;
@@ -1272,7 +1389,7 @@ export declare class AdminController {
             delivery: number;
         }[];
     }>;
-    restaurantEarnings(limit?: string): Promise<{
+    restaurantEarnings(limit?: string, from?: string, to?: string, zoneId?: string, restaurantId?: string): Promise<{
         top_earners: {
             restaurant_id: number;
             name: string | null;
@@ -1282,14 +1399,24 @@ export declare class AdminController {
             restaurant_take: number;
         }[];
     }>;
-    adminEarningReport(days?: string): Promise<unknown>;
-    customerReport(limit?: string): Promise<unknown>;
-    deliverymanEarningReport(limit?: string): Promise<unknown>;
+    adminEarningReport(days?: string, from?: string, to?: string, zoneId?: string, restaurantId?: string): Promise<unknown>;
+    customerReport(limit?: string, from?: string, to?: string, zoneId?: string, restaurantId?: string): Promise<unknown>;
+    topFoods(limit?: string, from?: string, to?: string, zoneId?: string, restaurantId?: string): Promise<{
+        top_foods: {
+            food_id: number | null;
+            name: string | null;
+            restaurant_id: number | null;
+            units_sold: number;
+            revenue: number;
+        }[];
+    }>;
+    deliverymanEarningReport(limit?: string, from?: string, to?: string, zoneId?: string, restaurantId?: string): Promise<unknown>;
     addOns(limit?: string, offset?: string, q?: string, restaurantId?: string): Promise<unknown>;
     createAddOn(body: Parameters<AdminService['createAddOn']>[0]): Promise<unknown>;
     updateAddOnStatus(id: number, body: {
         status: boolean;
     }): Promise<unknown>;
+    updateAddOn(id: number, body: Parameters<AdminService['updateAddOn']>[1]): Promise<unknown>;
     deleteAddOn(id: number): Promise<unknown>;
     addonCategories(limit?: string, offset?: string, q?: string): Promise<unknown>;
     createAddonCategory(body: {
@@ -1298,23 +1425,37 @@ export declare class AdminController {
     updateAddonCategoryStatus(id: number, body: {
         status: boolean;
     }): Promise<unknown>;
+    updateAddonCategory(id: number, body: {
+        name?: string;
+    }): Promise<unknown>;
     deleteAddonCategory(id: number): Promise<unknown>;
     attributes(): Promise<unknown>;
     createAttribute(body: {
         name: string;
     }): Promise<unknown>;
+    updateAttribute(id: number, body: {
+        name?: string;
+    }): Promise<unknown>;
     deleteAttribute(id: number): Promise<unknown>;
-    campaigns(limit?: string, offset?: string, q?: string): Promise<unknown>;
+    campaigns(limit?: string, offset?: string, q?: string, type?: string): Promise<unknown>;
     createCampaign(body: Parameters<AdminService['createCampaign']>[0]): Promise<unknown>;
     updateCampaignStatus(id: number, body: {
         status: boolean;
     }): Promise<unknown>;
+    updateCampaign(id: number, body: Parameters<AdminService['updateCampaign']>[1]): Promise<unknown>;
     deleteCampaign(id: number): Promise<unknown>;
     advertisements(limit?: string, offset?: string): Promise<unknown>;
+    createAdvertisement(body: Parameters<AdminService['createAdvertisement']>[0]): Promise<unknown>;
+    deleteAdvertisement(id: number): Promise<unknown>;
     updateAdvertisementStatus(id: number, body: {
         status: 'approved' | 'denied' | 'pending' | 'paused' | 'expired' | 'running';
     }): Promise<unknown>;
     cashBacks(): Promise<unknown>;
+    createCashBack(body: Parameters<AdminService['createCashBack']>[0]): Promise<unknown>;
+    updateCashBackStatus(id: number, body: {
+        status: boolean;
+    }): Promise<unknown>;
+    deleteCashBack(id: number): Promise<unknown>;
     walletBonuses(): Promise<unknown>;
     createWalletBonus(body: Parameters<AdminService['createWalletBonus']>[0]): Promise<unknown>;
     updateWalletBonusStatus(id: number, body: {
@@ -1325,16 +1466,22 @@ export declare class AdminController {
     walletTransactions(limit?: string, offset?: string): Promise<unknown>;
     loyaltyTransactions(limit?: string, offset?: string): Promise<unknown>;
     cashbackHistories(limit?: string, offset?: string): Promise<unknown>;
-    disbursements(limit?: string, offset?: string): Promise<unknown>;
+    disbursements(limit?: string, offset?: string, type?: string): Promise<unknown>;
+    updateDisbursementStatus(id: number, body: {
+        status: string;
+    }): Promise<unknown>;
     withdrawRequests(limit?: string, offset?: string, type?: string, approved?: string): Promise<unknown>;
     approveWithdrawRequest(id: number, body: {
         approved: boolean;
     }): Promise<unknown>;
     withdrawalMethods(): Promise<unknown>;
     offlinePaymentMethods(): Promise<unknown>;
+    createOfflinePaymentMethod(body: Parameters<AdminService['createOfflinePaymentMethod']>[0]): Promise<unknown>;
+    updateOfflinePaymentMethod(id: number, body: Parameters<AdminService['updateOfflinePaymentMethod']>[1]): Promise<unknown>;
     updateOfflinePaymentMethodStatus(id: number, body: {
         status: number;
     }): Promise<unknown>;
+    deleteOfflinePaymentMethod(id: number): Promise<unknown>;
     provideDmEarnings(limit?: string, offset?: string): Promise<unknown>;
     contactMessages(limit?: string, offset?: string): Promise<unknown>;
     replyContactMessage(id: number, body: {
@@ -1342,6 +1489,7 @@ export declare class AdminController {
     }): Promise<unknown>;
     notifications(limit?: string, offset?: string): Promise<unknown>;
     createNotification(body: Parameters<AdminService['createNotification']>[0]): Promise<unknown>;
+    updateNotification(id: number, body: Parameters<AdminService['updateNotification']>[1]): Promise<unknown>;
     deleteNotification(id: number): Promise<unknown>;
     reviews(limit?: string, offset?: string): Promise<unknown>;
     replyReview(id: number, body: {
@@ -1368,10 +1516,19 @@ export declare class AdminController {
     }): Promise<unknown>;
     deleteSocialMedia(id: number): Promise<unknown>;
     employees(limit?: string, offset?: string, q?: string): Promise<unknown>;
+    createEmployee(body: Parameters<AdminService['createEmployee']>[0]): Promise<unknown>;
+    employeeDetail(id: number): Promise<unknown>;
+    updateEmployee(id: number, body: Parameters<AdminService['updateEmployee']>[1]): Promise<unknown>;
+    deleteEmployee(id: number): Promise<unknown>;
     adminRoles(): Promise<unknown>;
     createAdminRole(body: {
         name: string;
         modules?: string;
+    }): Promise<unknown>;
+    updateAdminRole(id: number, body: {
+        name?: string;
+        modules?: string;
+        status?: boolean;
     }): Promise<unknown>;
     deleteAdminRole(id: number): Promise<unknown>;
     subscriptionPackages(): Promise<unknown>;
@@ -1414,11 +1571,11 @@ export declare class AdminController {
     currencies(): Promise<unknown>;
     tags(): Promise<unknown>;
     translations(limit?: string, offset?: string): Promise<unknown>;
-    uploadImage(file: MulterFile | undefined, dir?: string): {
+    uploadImage(file: MulterFile | undefined, dir?: string): Promise<{
         ok: boolean;
         filename: string;
         path: string;
         url: string;
-    };
+    }>;
 }
 export {};

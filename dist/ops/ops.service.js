@@ -13,6 +13,7 @@ exports.OpsService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
+const storage_url_1 = require("../common/storage-url");
 const VENDOR_STATUSES = ['accepted', 'confirmed', 'processing', 'handover'];
 const DM_STATUSES = ['picked_up', 'delivered'];
 let OpsService = class OpsService {
@@ -27,7 +28,7 @@ let OpsService = class OpsService {
         return v === '1' || v === 'true' || v === 'yes';
     }
     storageBase() {
-        return process.env.STORAGE_BASE_URL ?? 'http://127.0.0.1:3000/storage';
+        return (0, storage_url_1.storageBaseUrl)();
     }
     async restaurantForVendor(vendorId) {
         return this.prisma.restaurants.findFirst({ where: { vendor_id: vendorId } });

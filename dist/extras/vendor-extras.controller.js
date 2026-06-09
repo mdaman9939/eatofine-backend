@@ -44,6 +44,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
+var VendorExtrasController_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.VendorExtrasController = void 0;
 const common_1 = require("@nestjs/common");
@@ -53,6 +54,8 @@ const path = __importStar(require("path"));
 const auth_guard_1 = require("../auth/auth.guard");
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
+const storage_url_1 = require("../common/storage-url");
+const image_compress_1 = require("../common/image-compress");
 const toNum = (v) => {
     if (v === null || v === undefined)
         return 0;
@@ -63,6 +66,7 @@ const toNum = (v) => {
     return Number(v) || 0;
 };
 let VendorExtrasController = class VendorExtrasController {
+    static { VendorExtrasController_1 = this; }
     prisma;
     mongo;
     constructor(prisma, mongo) {
@@ -72,6 +76,38 @@ let VendorExtrasController = class VendorExtrasController {
     useMongo() {
         const v = (process.env.USE_MONGO_EXTRAS ?? '1').toLowerCase();
         return v === '1' || v === 'true' || v === 'yes';
+    }
+    async vendorRestaurant(req) {
+        if (!this.useMongo())
+            return null;
+        return this.mongo.findOne('restaurants', { mysql_vendor_id: Number(req.actor.id) });
+    }
+    async vendorRestaurantIds(req) {
+        if (!this.useMongo())
+            return [];
+        const rows = await this.mongo.findMany('restaurants', { mysql_vendor_id: Number(req.actor.id) });
+        return rows.map((r) => Number(r.mysql_id));
+    }
+    static ONGOING_STATUSES = [
+        'pending', 'confirmed', 'accepted', 'processing', 'cooking', 'handover', 'picked_up',
+    ];
+    async hashPassword(raw) {
+        const bcrypt = await import('bcrypt');
+        return (await bcrypt.hash(raw, 10)).replace(/^\$2b\$/, '$2y$');
+    }
+    parseJsonish(input) {
+        if (Array.isArray(input))
+            return input;
+        if (typeof input === 'string' && input.trim()) {
+            try {
+                const parsed = JSON.parse(input);
+                return Array.isArray(parsed) ? parsed : [];
+            }
+            catch {
+                return input.split(',').map((s) => s.trim()).filter(Boolean);
+            }
+        }
+        return [];
     }
     async profile(req) {
         if (this.useMongo()) {
@@ -205,7 +241,7 @@ let VendorExtrasController = class VendorExtrasController {
             if (b[k] !== undefined)
                 data[k] = String(b[k]);
         }
-        const avatarName = this.saveUploaded(files?.image?.[0], 'profile');
+        const avatarName = await this.saveUploaded(files?.image?.[0], 'profile');
         if (avatarName)
             data.image = avatarName;
         if (Object.keys(data).length === 0)
@@ -218,7 +254,13 @@ let VendorExtrasController = class VendorExtrasController {
         await this.prisma.vendors.update({ where: { id: req.actor.id }, data: data });
         return { message: 'Profile updated' };
     }
-    fcmToken() { return { message: 'token-updated' }; }
+    async fcmToken(req, body = {}) {
+        const token = body?.fcm_token ?? body?.cm_firebase_token ?? body?.token;
+        if (this.useMongo() && token !== undefined) {
+            await this.mongo.updateOne('vendors', { mysql_id: Number(req.actor.id) }, { fcm_token: String(token), updated_at: new Date() });
+        }
+        return { message: 'token-updated' };
+    }
     async toggleActive(req, body) {
         if (this.useMongo()) {
             const r = await this.mongo.findOne('restaurants', { mysql_vendor_id: Number(req.actor.id) });
@@ -233,13 +275,51 @@ let VendorExtrasController = class VendorExtrasController {
         }
         return { message: 'updated' };
     }
-    toggleOpen() { return { message: 'updated' }; }
-    announce() { return { message: 'announcement updated' }; }
-    bankInfo() { return { message: 'bank info updated' }; }
+    async toggleOpen(req, body = {}) {
+        if (this.useMongo()) {
+            const r = await this.vendorRestaurant(req);
+            if (r) {
+                const next = body.active !== undefined ? !!Number(body.active)
+                    : body.status !== undefined ? !!Number(body.status)
+                        : !(r.active ?? true);
+                await this.mongo.updateOne('restaurants', { mysql_id: r.mysql_id }, { active: next, updated_at: new Date() });
+                return { message: 'updated', active: next };
+            }
+        }
+        return { message: 'updated' };
+    }
+    async announce(req, body = {}) {
+        if (this.useMongo()) {
+            const r = await this.vendorRestaurant(req);
+            if (r) {
+                await this.mongo.updateOne('restaurants', { mysql_id: r.mysql_id }, {
+                    announcement: !!Number(body.announcement_status ?? body.announcement ?? 0),
+                    announcement_message: body.announcement_message !== undefined ? String(body.announcement_message) : null,
+                    updated_at: new Date(),
+                });
+            }
+        }
+        return { message: 'announcement updated' };
+    }
+    async bankInfo(req, body = {}) {
+        if (this.useMongo()) {
+            const data = {};
+            for (const k of ['bank_name', 'branch', 'holder_name', 'account_no']) {
+                if (body[k] !== undefined)
+                    data[k] = String(body[k]);
+            }
+            if (Object.keys(data).length > 0) {
+                data.updated_at = new Date();
+                await this.mongo.updateOne('vendors', { mysql_id: Number(req.actor.id) }, data);
+            }
+        }
+        return { message: 'bank info updated' };
+    }
     buildStorageUrl(folder, filename) {
-        const base = (process.env.STORAGE_BASE_URL ?? 'http://127.0.0.1:3000/storage').replace(/\/$/, '');
+        if (filename && /^https?:\/\//i.test(String(filename)))
+            return String(filename);
         const safeName = filename && String(filename).trim() ? String(filename) : 'default.png';
-        return `${base}/${folder}/${safeName}`;
+        return `${(0, storage_url_1.storageBaseUrl)()}/${folder}/${safeName}`;
     }
     storageDir(folder) {
         const root = process.env.STORAGE_ROOT
@@ -248,12 +328,34 @@ let VendorExtrasController = class VendorExtrasController {
         fs.mkdirSync(dir, { recursive: true });
         return dir;
     }
-    saveUploaded(file, folder) {
+    async saveUploaded(file, folder) {
         if (!file || !file.buffer || file.buffer.length === 0)
             return null;
-        const ext = path.extname(file.originalname || '').toLowerCase() || '.png';
+        let data = file.buffer;
+        let ext = path.extname(file.originalname || '').toLowerCase() || '.png';
+        let contentType = file.mimetype || 'image/png';
+        if (/^image\//i.test(contentType) && !/svg/i.test(contentType)) {
+            const compressed = await (0, image_compress_1.compressImage)(file.buffer);
+            if (compressed) {
+                data = compressed.buffer;
+                ext = compressed.ext;
+                contentType = compressed.contentType;
+            }
+        }
         const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
-        fs.writeFileSync(path.join(this.storageDir(folder), filename), file.buffer);
+        try {
+            fs.writeFileSync(path.join(this.storageDir(folder), filename), data);
+        }
+        catch { }
+        if (this.useMongo() && data.length < 15 * 1024 * 1024) {
+            this.mongo.insertOne('uploads', {
+                path: `${folder}/${filename}`,
+                content_type: contentType,
+                data,
+                size: data.length,
+                created_at: new Date(),
+            }).catch(() => undefined);
+        }
         return filename;
     }
     async basicInfo(req, body = {}, files = {}) {
@@ -301,9 +403,9 @@ let VendorExtrasController = class VendorExtrasController {
             data.meta_description = String(b.meta_description);
         if (b.meta_keywords !== undefined)
             data.meta_keywords = String(b.meta_keywords);
-        const logoName = this.saveUploaded(files?.logo?.[0], 'restaurant');
-        const coverName = this.saveUploaded(files?.cover_photo?.[0], 'restaurant/cover');
-        const metaName = this.saveUploaded(files?.meta_image?.[0], 'restaurant');
+        const logoName = await this.saveUploaded(files?.logo?.[0], 'restaurant');
+        const coverName = await this.saveUploaded(files?.cover_photo?.[0], 'restaurant/cover');
+        const metaName = await this.saveUploaded(files?.meta_image?.[0], 'restaurant');
         if (logoName)
             data.logo = logoName;
         if (coverName)
@@ -348,12 +450,25 @@ let VendorExtrasController = class VendorExtrasController {
         }
         return { message: 'business setup updated' };
     }
-    addDineInTable() { return { message: 'added' }; }
+    async addDineInTable(req, body = {}) {
+        if (this.useMongo()) {
+            const r = await this.vendorRestaurant(req);
+            const table = body.table_number ?? body.number;
+            if (r && table !== undefined && String(table).trim() !== '') {
+                const existing = Array.isArray(r.dine_in_tables) ? r.dine_in_tables : [];
+                const next = Array.from(new Set([...existing.map(String), String(table)]));
+                await this.mongo.updateOne('restaurants', { mysql_id: r.mysql_id }, { dine_in_tables: next, updated_at: new Date() });
+                return { message: 'added', tables: next };
+            }
+        }
+        return { message: 'added' };
+    }
     remove() { return { message: 'Not available in demo' }; }
-    shapeOrder(rIn, detailsCount) {
+    shapeOrder(rIn, detailsCount, user) {
         const r = rIn;
         const created = r.created_at;
         const updated = r.updated_at;
+        const u = user ?? null;
         return {
             ...(r.legacy ?? {}),
             ...r,
@@ -369,7 +484,24 @@ let VendorExtrasController = class VendorExtrasController {
             delivery_address: r.delivery_address ?? null,
             created_at: created ? new Date(created).toISOString() : new Date().toISOString(),
             updated_at: updated ? new Date(updated).toISOString() : new Date().toISOString(),
+            customer: u
+                ? {
+                    id: Number(u.mysql_id),
+                    f_name: u.f_name ?? null,
+                    l_name: u.l_name ?? null,
+                    phone: u.phone ?? null,
+                    email: u.email ?? null,
+                    image_full_url: (0, storage_url_1.storageFullUrl)('profile', u.image ?? null),
+                }
+                : null,
         };
+    }
+    async vendorUserMap(orders) {
+        const ids = Array.from(new Set(orders.map((o) => Number(o.mysql_user_id ?? 0)).filter((n) => n > 0)));
+        if (ids.length === 0)
+            return new Map();
+        const rows = await this.mongo.findMany('users', { mysql_id: { $in: ids } });
+        return new Map(rows.map((u) => [Number(u.mysql_id), u]));
     }
     async detailsCountMap(orderIds) {
         if (orderIds.length === 0)
@@ -382,31 +514,33 @@ let VendorExtrasController = class VendorExtrasController {
     }
     async currentOrders(req) {
         if (this.useMongo()) {
-            const restaurant = await this.mongo.findOne('restaurants', { mysql_vendor_id: Number(req.actor.id) });
-            if (!restaurant)
+            const restaurantIds = await this.vendorRestaurantIds(req);
+            if (restaurantIds.length === 0)
                 return [];
-            const rows = await this.mongo.findMany('orders', { mysql_restaurant_id: Number(restaurant.mysql_id), order_status: { $in: ['accepted', 'confirmed', 'processing'] } }, { sort: { mysql_id: -1 } });
+            const rows = await this.mongo.findMany('orders', { mysql_restaurant_id: { $in: restaurantIds }, order_status: { $in: VendorExtrasController_1.ONGOING_STATUSES } }, { sort: { mysql_id: -1 } });
             const countsByOrderId = await this.detailsCountMap(rows.map((r) => Number(r.mysql_id)));
-            return rows.map((r) => this.shapeOrder(r, countsByOrderId.get(Number(r.mysql_id)) ?? 1));
+            const userMap = await this.vendorUserMap(rows);
+            return rows.map((r) => this.shapeOrder(r, countsByOrderId.get(Number(r.mysql_id)) ?? 1, userMap.get(Number(r.mysql_user_id ?? 0))));
         }
         const restaurant = await this.prisma.restaurants.findFirst({ where: { vendor_id: req.actor.id }, select: { id: true } });
         if (!restaurant)
             return [];
         const rows = await this.prisma.orders.findMany({
-            where: { restaurant_id: restaurant.id, order_status: { in: ['accepted', 'confirmed', 'processing'] } },
+            where: { restaurant_id: restaurant.id, order_status: { in: VendorExtrasController_1.ONGOING_STATUSES } },
             orderBy: { id: 'desc' },
         });
         return rows.map((r) => ({ ...r, id: Number(r.id), user_id: r.user_id ? Number(r.user_id) : null, restaurant_id: Number(r.restaurant_id), order_amount: Number(r.order_amount) }));
     }
     async completedOrders(req) {
         if (this.useMongo()) {
-            const restaurant = await this.mongo.findOne('restaurants', { mysql_vendor_id: Number(req.actor.id) });
-            if (!restaurant)
+            const restaurantIds = await this.vendorRestaurantIds(req);
+            if (restaurantIds.length === 0)
                 return { orders: [], total_size: 0 };
-            const rows = await this.mongo.findMany('orders', { mysql_restaurant_id: Number(restaurant.mysql_id), order_status: { $in: ['delivered', 'canceled', 'refunded'] } }, { sort: { mysql_id: -1 }, limit: 50 });
+            const rows = await this.mongo.findMany('orders', { mysql_restaurant_id: { $in: restaurantIds }, order_status: { $in: ['delivered', 'canceled', 'refunded', 'failed'] } }, { sort: { mysql_id: -1 }, limit: 50 });
             const countsByOrderId = await this.detailsCountMap(rows.map((r) => Number(r.mysql_id)));
+            const userMap = await this.vendorUserMap(rows);
             return {
-                orders: rows.map((r) => this.shapeOrder(r, countsByOrderId.get(Number(r.mysql_id)) ?? 1)),
+                orders: rows.map((r) => this.shapeOrder(r, countsByOrderId.get(Number(r.mysql_id)) ?? 1, userMap.get(Number(r.mysql_user_id ?? 0)))),
                 total_size: rows.length,
             };
         }
@@ -429,7 +563,9 @@ let VendorExtrasController = class VendorExtrasController {
             if (!o)
                 return null;
             const counts = await this.detailsCountMap([Number(o.mysql_id)]);
-            return this.shapeOrder(o, counts.get(Number(o.mysql_id)) ?? 1);
+            const userId = Number(o.mysql_user_id ?? 0);
+            const user = userId > 0 ? await this.mongo.findByMysqlId('users', userId) : null;
+            return this.shapeOrder(o, counts.get(Number(o.mysql_id)) ?? 1, user);
         }
         const o = await this.prisma.orders.findUnique({ where: { id: BigInt(id) } });
         return o ? { ...o, id: Number(o.id), user_id: o.user_id ? Number(o.user_id) : null, restaurant_id: Number(o.restaurant_id), order_amount: Number(o.order_amount) } : null;
@@ -518,10 +654,73 @@ let VendorExtrasController = class VendorExtrasController {
         const f = await this.prisma.food.findUnique({ where: { id: BigInt(id) } });
         return f ? { ...f, id: Number(f.id), price: Number(f.price), tax: Number(f.tax), discount: Number(f.discount), restaurant_id: Number(f.restaurant_id), category_id: f.category_id ? Number(f.category_id) : null } : null;
     }
-    productSearch() { return { products: [], total_size: 0 }; }
-    productStatus() { return { message: 'updated' }; }
-    productRecommended() { return { message: 'updated' }; }
-    updateStock() { return { message: 'stock updated' }; }
+    async productSearch(req, name) {
+        if (this.useMongo()) {
+            const restaurant = await this.vendorRestaurant(req);
+            if (!restaurant)
+                return { products: [], total_size: 0 };
+            const filter = { mysql_restaurant_id: Number(restaurant.mysql_id) };
+            if (name && name.trim())
+                filter.name = { $regex: name.trim(), $options: 'i' };
+            const rows = await this.mongo.findMany('foods', filter, { sort: { mysql_id: -1 }, limit: 50 });
+            return {
+                products: rows.map((r) => {
+                    const food = r;
+                    return {
+                        ...(food.legacy ?? {}),
+                        ...food,
+                        id: Number(food.mysql_id),
+                        price: toNum(food.price),
+                        tax: toNum(food.tax),
+                        discount: toNum(food.discount),
+                        restaurant_id: food.mysql_restaurant_id ? Number(food.mysql_restaurant_id) : 0,
+                        category_id: food.mysql_category_id ? Number(food.mysql_category_id) : null,
+                        image: food.image ?? 'default.png',
+                        image_full_url: this.buildStorageUrl('product', food.image ?? null),
+                        status: food.status ?? true,
+                    };
+                }),
+                total_size: rows.length,
+            };
+        }
+        return { products: [], total_size: 0 };
+    }
+    productStatusGet(query = {}) {
+        return this.productStatus({}, query);
+    }
+    async productStatus(body = {}, query = {}) {
+        const src = { ...query, ...body };
+        const id = src.id !== undefined && src.id !== '' ? Number(src.id) : null;
+        if (this.useMongo() && id) {
+            await this.mongo.updateOne('foods', { mysql_id: id }, { status: !!Number(src.status ?? 0), updated_at: new Date() });
+        }
+        return { message: 'updated' };
+    }
+    productRecommendedGet(query = {}) {
+        return this.productRecommended({}, query);
+    }
+    async productRecommended(body = {}, query = {}) {
+        const src = { ...query, ...body };
+        const id = src.id !== undefined && src.id !== '' ? Number(src.id) : null;
+        if (this.useMongo() && id) {
+            const value = !!Number(src.is_recommended ?? src.recommended ?? src.status ?? 0);
+            await this.mongo.updateOne('foods', { mysql_id: id }, { recommended: value, updated_at: new Date() });
+        }
+        return { message: 'updated' };
+    }
+    async updateStock(body = {}) {
+        const id = body.id !== undefined && body.id !== '' ? Number(body.id) : null;
+        if (this.useMongo() && id) {
+            const data = { updated_at: new Date() };
+            if (body.stock_type !== undefined)
+                data.stock_type = String(body.stock_type);
+            const stock = body.current_stock ?? body.item_stock ?? body.stock;
+            if (stock !== undefined && stock !== '')
+                data.item_stock = Number(stock);
+            await this.mongo.updateOne('foods', { mysql_id: id }, data);
+        }
+        return { message: 'stock updated' };
+    }
     async productStore(req, body = {}, files = {}) {
         if (!this.useMongo())
             return { message: 'product created' };
@@ -531,8 +730,8 @@ let VendorExtrasController = class VendorExtrasController {
             return { errors: [{ code: 'restaurant', message: 'restaurant not found' }] };
         const { name: trName, description: trDesc, translations } = this.parseProductTranslations(b.translations);
         const nextId = await this.mongo.nextMysqlId('foods');
-        const imageName = this.saveUploaded(files?.image?.[0], 'product') ?? 'default.png';
-        const metaImage = this.saveUploaded(files?.meta_image?.[0], 'product');
+        const imageName = await this.saveUploaded(files?.image?.[0], 'product') ?? 'default.png';
+        const metaImage = await this.saveUploaded(files?.meta_image?.[0], 'product');
         const now = new Date();
         const food = {
             mysql_id: nextId,
@@ -558,11 +757,17 @@ let VendorExtrasController = class VendorExtrasController {
             available_time_ends: b.available_time_ends ? String(b.available_time_ends) : '23:59',
             stock_type: String(b.stock_type ?? 'unlimited'),
             item_stock: Number(b.item_stock ?? 0),
+            maximum_cart_quantity: b.maximum_cart_quantity !== undefined && b.maximum_cart_quantity !== ''
+                ? Number(b.maximum_cart_quantity) : null,
+            is_halal: !!Number(b.is_halal ?? 0),
+            tags: this.parseJsonish(b.tags),
+            tag_ids: this.parseJsonish(b.tag_ids),
             sell_count: 0,
             avg_rating: 0,
             rating_count: 0,
-            addon_ids: b.addon_ids ?? [],
-            variations: b.variations ?? [],
+            addon_ids: this.parseJsonish(b.addon_ids),
+            variations: this.parseJsonish(b.variations),
+            choice_options: this.parseJsonish(b.choice_options),
             created_at: now,
             updated_at: now,
         };
@@ -616,8 +821,8 @@ let VendorExtrasController = class VendorExtrasController {
         }
         if (b.is_halal !== undefined)
             data.is_halal = !!Number(b.is_halal);
-        const imageName = this.saveUploaded(files?.image?.[0], 'product');
-        const metaImage = this.saveUploaded(files?.meta_image?.[0], 'product');
+        const imageName = await this.saveUploaded(files?.image?.[0], 'product');
+        const metaImage = await this.saveUploaded(files?.meta_image?.[0], 'product');
         if (imageName)
             data.image = imageName;
         if (metaImage)
@@ -646,7 +851,13 @@ let VendorExtrasController = class VendorExtrasController {
             ?? null;
         return { name: pick('name'), description: pick('description'), translations };
     }
-    productDelete() { return { message: 'product deleted' }; }
+    async productDelete(body = {}, idQ) {
+        const id = body.id !== undefined && body.id !== '' ? Number(body.id) : (idQ ? Number(idQ) : null);
+        if (this.useMongo() && id) {
+            await this.mongo.deleteOne('foods', { mysql_id: id });
+        }
+        return { message: 'product deleted' };
+    }
     async productReviews(idStr) {
         const id = parseInt(idStr ?? '', 10);
         if (!Number.isFinite(id))
@@ -665,7 +876,13 @@ let VendorExtrasController = class VendorExtrasController {
         const rows = await this.prisma.reviews.findMany({ where: { food_id: BigInt(id) }, orderBy: { id: 'desc' }, take: 50 });
         return rows.map((r) => ({ id: Number(r.id), food_id: Number(r.food_id), user_id: Number(r.user_id), comment: r.comment, rating: r.rating, reply: r.reply }));
     }
-    productReply() { return { message: 'reply saved' }; }
+    async productReply(body = {}) {
+        const id = body.id !== undefined && body.id !== '' ? Number(body.id) : null;
+        if (this.useMongo() && id && body.reply !== undefined) {
+            await this.mongo.updateOne('reviews', { mysql_id: id }, { reply: String(body.reply), updated_at: new Date() });
+        }
+        return { message: 'reply saved' };
+    }
     productLimits() { return { remaining: 'unlimited' }; }
     async categories() {
         if (this.useMongo()) {
@@ -683,7 +900,57 @@ let VendorExtrasController = class VendorExtrasController {
         }
         return this.prisma.categories.findMany({ where: { parent_id: id, status: true } }).then((rows) => rows.map((r) => ({ id: Number(r.id), name: r.name, image: r.image, status: r.status })));
     }
-    categoryProducts() { return { products: [], total_size: 0 }; }
+    async childCategoriesByPath(idStr) {
+        const id = parseInt(idStr ?? '0', 10);
+        if (this.useMongo()) {
+            const rows = await this.mongo.findMany('categories', { parent_id: id, status: true });
+            return rows.map((r) => ({ id: Number(r.mysql_id), name: r.name ?? null, image: r.image ?? null, status: r.status ?? null }));
+        }
+        return this.prisma.categories.findMany({ where: { parent_id: id, status: true } }).then((rows) => rows.map((r) => ({ id: Number(r.id), name: r.name, image: r.image, status: r.status })));
+    }
+    async categoryProducts(req, categoryIdStr, limitStr, offsetStr) {
+        const limit = parseInt(limitStr ?? '25', 10);
+        const offset = parseInt(offsetStr ?? '1', 10);
+        const categoryId = parseInt(categoryIdStr ?? '0', 10);
+        if (!this.useMongo())
+            return { total_size: 0, limit, offset, products: [] };
+        const restaurant = await this.vendorRestaurant(req);
+        if (!restaurant)
+            return { total_size: 0, limit, offset, products: [] };
+        const filter = { mysql_restaurant_id: Number(restaurant.mysql_id) };
+        if (categoryId)
+            filter.mysql_category_id = categoryId;
+        const [rows, total] = await Promise.all([
+            this.mongo.findMany('foods', filter, { sort: { mysql_id: -1 }, limit, skip: Math.max(0, (offset - 1) * limit) }),
+            this.mongo.count('foods', filter),
+        ]);
+        return {
+            total_size: total,
+            limit,
+            offset,
+            products: rows.map((r) => {
+                const food = r;
+                return {
+                    ...(food.legacy ?? {}),
+                    ...food,
+                    id: Number(food.mysql_id),
+                    price: toNum(food.price),
+                    tax: toNum(food.tax),
+                    discount: toNum(food.discount),
+                    restaurant_id: food.mysql_restaurant_id ? Number(food.mysql_restaurant_id) : 0,
+                    category_id: food.mysql_category_id ? Number(food.mysql_category_id) : null,
+                    rating_count: Number(food.rating_count ?? 0),
+                    avg_rating: Number(food.avg_rating ?? 0),
+                    rating: food.rating ?? [],
+                    image: food.image ?? 'default.png',
+                    image_full_url: this.buildStorageUrl('product', food.image ?? null),
+                    stock_type: food.stock_type ?? 'unlimited',
+                    item_stock: Number(food.item_stock ?? 0),
+                    status: food.status ?? true,
+                };
+            }),
+        };
+    }
     async vendorAddons(req) {
         if (this.useMongo()) {
             const restaurant = await this.mongo.findOne('restaurants', { mysql_vendor_id: Number(req.actor.id) });
@@ -705,9 +972,74 @@ let VendorExtrasController = class VendorExtrasController {
         const rows = await this.prisma.add_ons.findMany({ where: { restaurant_id: restaurant.id } });
         return rows.map((r) => ({ ...r, id: Number(r.id), restaurant_id: Number(r.restaurant_id), addon_category_id: r.addon_category_id ? Number(r.addon_category_id) : null, price: Number(r.price) }));
     }
-    addonStore() { return { message: 'addon created' }; }
-    addonUpdate() { return { message: 'addon updated' }; }
-    addonDelete() { return { message: 'addon deleted' }; }
+    async addonStore(req, body = {}) {
+        if (!this.useMongo())
+            return { message: 'addon created' };
+        const restaurant = await this.vendorRestaurant(req);
+        if (!restaurant)
+            return { errors: [{ code: 'restaurant', message: 'restaurant not found' }] };
+        if (!body.name || String(body.name).trim() === '') {
+            return { errors: [{ code: 'name', message: 'addon name is required' }] };
+        }
+        const categoryId = body.addon_category_id ?? body.category_id;
+        const stock = body.addon_stock ?? body.stock;
+        const nextId = await this.mongo.nextMysqlId('add_ons');
+        const now = new Date();
+        await this.mongo.insertOne('add_ons', {
+            mysql_id: nextId,
+            mysql_restaurant_id: Number(restaurant.mysql_id),
+            restaurant_id: Number(restaurant.mysql_id),
+            mysql_addon_category_id: categoryId !== undefined && categoryId !== '' ? Number(categoryId) : null,
+            addon_category_id: categoryId !== undefined && categoryId !== '' ? Number(categoryId) : null,
+            name: String(body.name),
+            price: Number(body.price ?? 0),
+            tax: Number(body.tax ?? 0),
+            stock_type: String(body.stock_type ?? 'unlimited'),
+            addon_stock: Number(stock ?? 0),
+            sell_count: 0,
+            status: true,
+            created_at: now,
+            updated_at: now,
+        });
+        return { message: 'addon created', id: nextId };
+    }
+    addonUpdatePut(body = {}) {
+        return this.addonUpdate(body);
+    }
+    async addonUpdate(body = {}) {
+        if (!this.useMongo())
+            return { message: 'addon updated' };
+        const id = body.id !== undefined && body.id !== '' ? Number(body.id) : null;
+        if (!id)
+            return { errors: [{ code: 'id', message: 'addon id required' }] };
+        const data = {};
+        if (body.name !== undefined)
+            data.name = String(body.name);
+        if (body.price !== undefined && body.price !== '')
+            data.price = Number(body.price);
+        if (body.tax !== undefined && body.tax !== '')
+            data.tax = Number(body.tax);
+        if (body.stock_type !== undefined)
+            data.stock_type = String(body.stock_type);
+        if (body.addon_stock !== undefined && body.addon_stock !== '')
+            data.addon_stock = Number(body.addon_stock);
+        if (body.addon_category_id !== undefined && body.addon_category_id !== '')
+            data.mysql_addon_category_id = Number(body.addon_category_id);
+        if (Object.keys(data).length === 0)
+            return { message: 'nothing to update' };
+        data.updated_at = new Date();
+        await this.mongo.updateOne('add_ons', { mysql_id: id }, data);
+        return { message: 'addon updated' };
+    }
+    addonDeletePost(body = {}, idQ) {
+        return this.addonDelete(body, idQ);
+    }
+    async addonDelete(body = {}, idQ) {
+        const id = body.id !== undefined && body.id !== '' ? Number(body.id) : (idQ ? Number(idQ) : null);
+        if (this.useMongo() && id)
+            await this.mongo.deleteOne('add_ons', { mysql_id: id });
+        return { message: 'addon deleted' };
+    }
     async attributes() {
         if (this.useMongo()) {
             const rows = await this.mongo.findMany('attributes', {});
@@ -740,18 +1072,242 @@ let VendorExtrasController = class VendorExtrasController {
         return rows.map((r) => ({ id: Number(r.id), f_name: r.f_name, l_name: r.l_name, phone: r.phone, status: r.status, application_status: r.application_status }));
     }
     getDmList(req) { return this.vendorDmList(req); }
-    dmPreview() { return null; }
-    dmStore() { return { message: 'delivery man created' }; }
-    dmUpdate() { return { message: 'updated' }; }
-    dmDelete() { return { message: 'deleted' }; }
-    dmStatus() { return { message: 'status updated' }; }
-    dmAssign() { return { message: 'assigned' }; }
-    vendorCouponList() { return { coupons: [], total_size: 0 }; }
-    vendorCouponStore() { return { message: 'coupon created' }; }
-    vendorCouponUpdate() { return { message: 'coupon updated' }; }
-    vendorCouponStatus() { return { message: 'status updated' }; }
-    vendorCouponDelete() { return { message: 'coupon deleted' }; }
-    vendorCouponView() { return {}; }
+    async dmPreview(idStr) {
+        const id = parseInt(idStr ?? '', 10);
+        if (!this.useMongo() || !Number.isFinite(id))
+            return null;
+        const dm = await this.mongo.findByMysqlId('delivery_men', id);
+        if (!dm)
+            return null;
+        return {
+            id: Number(dm.mysql_id),
+            f_name: dm.f_name ?? null,
+            l_name: dm.l_name ?? null,
+            phone: dm.phone ?? null,
+            status: dm.status ?? null,
+            application_status: dm.application_status ?? null,
+        };
+    }
+    async dmStore(req, body = {}, files = {}) {
+        if (!this.useMongo())
+            return { message: 'delivery man created' };
+        const restaurant = await this.vendorRestaurant(req);
+        if (!restaurant)
+            return { errors: [{ code: 'restaurant', message: 'restaurant not found' }] };
+        if (!body.f_name || !body.phone) {
+            return { errors: [{ code: 'input', message: 'first name and phone are required' }] };
+        }
+        const dup = await this.mongo.findOne('delivery_men', { phone: String(body.phone) });
+        if (dup)
+            return { errors: [{ code: 'phone', message: 'phone already in use' }] };
+        const nextId = await this.mongo.nextMysqlId('delivery_men');
+        const imageName = await this.saveUploaded(files?.image?.[0], 'delivery-man') ?? 'def.png';
+        const now = new Date();
+        const zoneId = restaurant.mysql_zone_id ?? restaurant.zone_id ?? 1;
+        await this.mongo.insertOne('delivery_men', {
+            mysql_id: nextId,
+            f_name: String(body.f_name),
+            l_name: String(body.l_name ?? ''),
+            email: body.email ? String(body.email) : null,
+            phone: String(body.phone),
+            identity_number: body.identity_number ? String(body.identity_number) : null,
+            identity_type: body.identity_type ? String(body.identity_type) : null,
+            password: await this.hashPassword(String(body.password ?? '12345678')),
+            image: imageName,
+            mysql_zone_id: Number(zoneId),
+            mysql_restaurant_id: Number(restaurant.mysql_id),
+            restaurant_id: Number(restaurant.mysql_id),
+            type: 'restaurant_wise',
+            earning: false,
+            application_status: 'approved',
+            status: true,
+            active: 0,
+            created_at: now,
+            updated_at: now,
+        });
+        return { message: 'delivery man created', id: nextId };
+    }
+    async dmUpdate(body = {}, files = {}) {
+        if (!this.useMongo())
+            return { message: 'updated' };
+        const id = body.id !== undefined && body.id !== '' ? Number(body.id) : null;
+        if (!id)
+            return { errors: [{ code: 'id', message: 'delivery man id required' }] };
+        const data = {};
+        for (const k of ['f_name', 'l_name', 'email', 'phone', 'identity_number', 'identity_type']) {
+            if (body[k] !== undefined)
+                data[k] = String(body[k]);
+        }
+        if (body.password !== undefined && String(body.password).length > 1) {
+            data.password = await this.hashPassword(String(body.password));
+        }
+        const imageName = await this.saveUploaded(files?.image?.[0], 'delivery-man');
+        if (imageName)
+            data.image = imageName;
+        if (Object.keys(data).length === 0)
+            return { message: 'nothing to update' };
+        data.updated_at = new Date();
+        await this.mongo.updateOne('delivery_men', { mysql_id: id }, data);
+        return { message: 'updated' };
+    }
+    async dmDelete(body = {}, idQ) {
+        const id = body.id !== undefined && body.id !== '' ? Number(body.id) : (idQ ? Number(idQ) : null);
+        if (this.useMongo() && id)
+            await this.mongo.deleteOne('delivery_men', { mysql_id: id });
+        return { message: 'deleted' };
+    }
+    async dmStatus(body = {}) {
+        const id = body.id !== undefined && body.id !== '' ? Number(body.id) : null;
+        if (this.useMongo() && id) {
+            await this.mongo.updateOne('delivery_men', { mysql_id: id }, { status: !!Number(body.status ?? 0), updated_at: new Date() });
+        }
+        return { message: 'status updated' };
+    }
+    async dmAssign(body = {}) {
+        if (!this.useMongo())
+            return { message: 'assigned' };
+        const orderId = body.order_id !== undefined && body.order_id !== '' ? Number(body.order_id) : null;
+        const dmId = body.delivery_man_id !== undefined && body.delivery_man_id !== '' ? Number(body.delivery_man_id) : null;
+        if (orderId && dmId) {
+            await this.mongo.updateOne('orders', { mysql_id: orderId }, {
+                mysql_delivery_man_id: dmId,
+                delivery_man_id: dmId,
+                updated_at: new Date(),
+            });
+        }
+        return { message: 'assigned' };
+    }
+    shapeCoupon(r) {
+        return {
+            id: Number(r.mysql_id),
+            title: r.title ?? null,
+            code: r.code ?? null,
+            coupon_type: r.coupon_type ?? 'restaurant_wise',
+            discount: toNum(r.discount),
+            discount_type: r.discount_type ?? 'amount',
+            min_purchase: toNum(r.min_purchase),
+            max_discount: toNum(r.max_discount),
+            start_date: r.start_date ?? null,
+            expire_date: r.expire_date ?? null,
+            limit: r.limit ?? null,
+            status: r.status ?? true,
+            total_uses: r.total_uses ? Number(r.total_uses) : 0,
+            restaurant_id: r.mysql_restaurant_id ?? r.restaurant_id ?? null,
+        };
+    }
+    async vendorCouponList(req) {
+        if (!this.useMongo())
+            return [];
+        const vendorId = Number(req.actor.id);
+        const restaurant = await this.vendorRestaurant(req);
+        const restaurantIds = restaurant
+            ? (await this.mongo.findMany('restaurants', { mysql_vendor_id: vendorId }))
+                .map((r) => Number(r.mysql_id))
+            : [];
+        const or = [{ mysql_vendor_id: vendorId }];
+        if (restaurantIds.length > 0)
+            or.push({ mysql_restaurant_id: { $in: restaurantIds } });
+        const rows = await this.mongo.findMany('coupons', { $or: or }, { sort: { mysql_id: -1 } });
+        return rows.map((r) => ({
+            ...this.shapeCoupon(r),
+            data: r.data ?? null,
+            customer_id: r.customer_id ?? ['all'],
+            restaurant_name: restaurant?.name ?? null,
+        }));
+    }
+    async vendorCouponStore(req, body = {}) {
+        if (!this.useMongo())
+            return { message: 'coupon created' };
+        const restaurant = await this.vendorRestaurant(req);
+        if (!restaurant)
+            return { errors: [{ code: 'restaurant', message: 'restaurant not found' }] };
+        if (!body.title || !body.code) {
+            return { errors: [{ code: 'input', message: 'title and code are required' }] };
+        }
+        const dup = await this.mongo.findOne('coupons', { code: String(body.code) });
+        if (dup)
+            return { errors: [{ code: 'code', message: 'coupon code already exists' }] };
+        const nextId = await this.mongo.nextMysqlId('coupons');
+        const now = new Date();
+        await this.mongo.insertOne('coupons', {
+            mysql_id: nextId,
+            title: String(body.title),
+            code: String(body.code),
+            coupon_type: body.coupon_type ? String(body.coupon_type) : 'default',
+            mysql_restaurant_id: Number(restaurant.mysql_id),
+            restaurant_id: Number(restaurant.mysql_id),
+            mysql_vendor_id: Number(req.actor.id),
+            discount: Number(body.discount ?? 0),
+            discount_type: String(body.discount_type ?? 'amount'),
+            min_purchase: Number(body.min_purchase ?? 0),
+            max_discount: Number(body.max_discount ?? 0),
+            start_date: body.start_date ? new Date(String(body.start_date)) : null,
+            expire_date: body.expire_date ? new Date(String(body.expire_date)) : (body.end_date ? new Date(String(body.end_date)) : null),
+            limit: body.limit !== undefined && body.limit !== '' ? Number(body.limit) : null,
+            status: true,
+            created_by: 'vendor',
+            total_uses: 0,
+            created_at: now,
+            updated_at: now,
+        });
+        return { message: 'coupon created', id: nextId };
+    }
+    vendorCouponUpdatePut(body = {}) {
+        return this.vendorCouponUpdate(body);
+    }
+    async vendorCouponUpdate(body = {}) {
+        if (!this.useMongo())
+            return { message: 'coupon updated' };
+        const id = body.id !== undefined && body.id !== '' ? Number(body.id) : null;
+        if (!id)
+            return { errors: [{ code: 'id', message: 'coupon id required' }] };
+        const data = {};
+        if (body.title !== undefined)
+            data.title = String(body.title);
+        if (body.discount !== undefined && body.discount !== '')
+            data.discount = Number(body.discount);
+        if (body.discount_type !== undefined)
+            data.discount_type = String(body.discount_type);
+        if (body.min_purchase !== undefined && body.min_purchase !== '')
+            data.min_purchase = Number(body.min_purchase);
+        if (body.max_discount !== undefined && body.max_discount !== '')
+            data.max_discount = Number(body.max_discount);
+        if (body.start_date !== undefined && body.start_date !== '')
+            data.start_date = new Date(String(body.start_date));
+        const expiry = body.expire_date ?? body.end_date;
+        if (expiry !== undefined && expiry !== '')
+            data.expire_date = new Date(String(expiry));
+        if (body.limit !== undefined && body.limit !== '')
+            data.limit = Number(body.limit);
+        if (Object.keys(data).length === 0)
+            return { message: 'nothing to update' };
+        data.updated_at = new Date();
+        await this.mongo.updateOne('coupons', { mysql_id: id }, data);
+        return { message: 'coupon updated' };
+    }
+    async vendorCouponStatus(body = {}) {
+        const id = body.id !== undefined && body.id !== '' ? Number(body.id) : null;
+        if (this.useMongo() && id) {
+            await this.mongo.updateOne('coupons', { mysql_id: id }, { status: !!Number(body.status ?? 0), updated_at: new Date() });
+        }
+        return { message: 'status updated' };
+    }
+    vendorCouponDeletePost(body = {}, idQ) {
+        return this.vendorCouponDelete(body, idQ);
+    }
+    async vendorCouponDelete(body = {}, idQ) {
+        const id = body.id !== undefined && body.id !== '' ? Number(body.id) : (idQ ? Number(idQ) : null);
+        if (this.useMongo() && id)
+            await this.mongo.deleteOne('coupons', { mysql_id: id });
+        return { message: 'coupon deleted' };
+    }
+    async vendorCouponView(idStr) {
+        const id = parseInt(idStr ?? '', 10);
+        if (!this.useMongo() || !Number.isFinite(id))
+            return {};
+        const c = await this.mongo.findByMysqlId('coupons', id);
+        return c ? this.shapeCoupon(c) : {};
+    }
     walletPaymentList() { return { data: [], total_size: 0 }; }
     collectedCash() { return { message: 'recorded' }; }
     walletAdjustment() { return { message: 'recorded' }; }
@@ -772,8 +1328,43 @@ let VendorExtrasController = class VendorExtrasController {
     withdrawDefault() { return { message: 'default set' }; }
     withdrawDelete() { return { message: 'deleted' }; }
     getWithdrawMethods() { return this.withdrawMethods(); }
-    getWithdrawList() { return { data: [], total_size: 0 }; }
-    requestWithdraw() { return { message: 'withdraw requested' }; }
+    async getWithdrawList(req) {
+        if (!this.useMongo())
+            return { data: [], total_size: 0 };
+        const filter = { mysql_vendor_id: Number(req.actor.id) };
+        const rows = await this.mongo.findMany('withdraw_requests', filter, { sort: { mysql_id: -1 }, limit: 100 });
+        return {
+            data: rows.map((r) => ({
+                id: Number(r.mysql_id),
+                amount: toNum(r.amount),
+                approved: r.approved ?? 0,
+                withdraw_method_id: r.mysql_withdraw_method_id ?? r.withdraw_method_id ?? null,
+                created_at: r.created_at ?? null,
+            })),
+            total_size: rows.length,
+        };
+    }
+    async requestWithdraw(req, body = {}) {
+        if (!this.useMongo())
+            return { message: 'withdraw requested' };
+        const amount = Number(body.amount ?? 0);
+        if (!Number.isFinite(amount) || amount <= 0) {
+            return { errors: [{ code: 'amount', message: 'enter a valid amount' }] };
+        }
+        const nextId = await this.mongo.nextMysqlId('withdraw_requests');
+        const now = new Date();
+        await this.mongo.insertOne('withdraw_requests', {
+            mysql_id: nextId,
+            mysql_vendor_id: Number(req.actor.id),
+            vendor_id: Number(req.actor.id),
+            amount,
+            mysql_withdraw_method_id: body.withdraw_method_id !== undefined && body.withdraw_method_id !== '' ? Number(body.withdraw_method_id) : null,
+            approved: 0,
+            created_at: now,
+            updated_at: now,
+        });
+        return { message: 'withdraw requested', id: nextId };
+    }
     async vendorOrdersForReports(req) {
         if (!this.useMongo())
             return [];
@@ -848,22 +1439,45 @@ let VendorExtrasController = class VendorExtrasController {
         return { data: sorted, total_data: sorted };
     }
     campaignReport() { return { data: [], total_amount: 0, total_orders: 0 }; }
-    async taxReport(req) {
-        const orders = await this.vendorOrdersForReports(req);
-        let total = 0;
-        const data = orders
-            .filter((o) => o.order_status === 'delivered')
-            .map((o) => {
-            const tax = Number(o.total_tax_amount ?? 0);
-            total += tax;
-            return {
-                order_id: Number(o.mysql_id),
-                order_amount: Number(o.order_amount ?? 0),
-                tax_amount: tax,
-                created_at: o.created_at ?? null,
-            };
-        });
-        return { data, total };
+    async taxReport(req, limitStr, offsetStr) {
+        const limit = parseInt(limitStr ?? '25', 10);
+        const offset = parseInt(offsetStr ?? '1', 10);
+        const restaurant = this.useMongo() ? await this.vendorRestaurant(req) : null;
+        const taxableStatuses = ['delivered', 'refund_requested', 'refund_request_canceled'];
+        const orders = (await this.vendorOrdersForReports(req)).filter((o) => taxableStatuses.includes(String(o.order_status)));
+        let totalOrderAmount = 0;
+        let totalTax = 0;
+        for (const o of orders) {
+            totalOrderAmount += Number(o.order_amount ?? 0);
+            totalTax += Number(o.total_tax_amount ?? 0);
+        }
+        const restaurantDoc = (restaurant ?? {});
+        const taxRate = Number(restaurantDoc.tax ?? 0);
+        const taxSummary = totalTax > 0
+            ? [{ tax_name: 'GST', tax_label: String(taxRate), total_tax: totalTax }]
+            : [];
+        const ordersOut = orders
+            .sort((a, b) => Number(b.mysql_id) - Number(a.mysql_id))
+            .slice(Math.max(0, (offset - 1) * limit), Math.max(0, (offset - 1) * limit) + limit)
+            .map((o) => ({
+            id: Number(o.mysql_id),
+            order_amount: Number(o.order_amount ?? 0),
+            total_tax_amount: Number(o.total_tax_amount ?? 0),
+            order_status: o.order_status ?? null,
+            payment_status: o.payment_status ?? null,
+            created_at: o.created_at ?? null,
+            orderTaxes: [],
+        }));
+        return {
+            total_size: orders.length,
+            limit,
+            offset,
+            taxSummary,
+            totalOrders: orders.length,
+            totalOrderAmount,
+            totalTax,
+            orders: ordersOut,
+        };
     }
     disbursementReport() { return { data: [], total: 0 }; }
     async expenseReport(req) {
@@ -902,9 +1516,17 @@ let VendorExtrasController = class VendorExtrasController {
     }
     generateStatement() { return { message: 'not available in demo' }; }
     searchedFood() { return { products: [] }; }
-    async vendorNotifications() {
+    async vendorNotifications(req) {
         if (this.useMongo()) {
-            const rows = await this.mongo.findMany('notifications', { status: true }, { sort: { mysql_id: -1 }, limit: 50 });
+            const restaurantIds = await this.vendorRestaurantIds(req);
+            const rows = await this.mongo.findMany('notifications', {
+                status: true,
+                $or: [
+                    ...(restaurantIds.length > 0 ? [{ mysql_restaurant_id: { $in: restaurantIds } }] : []),
+                    { mysql_restaurant_id: { $exists: false } },
+                    { mysql_restaurant_id: null },
+                ],
+            }, { sort: { mysql_id: -1 }, limit: 50 });
             return rows.map((r) => ({ id: Number(r.mysql_id), title: r.title ?? null, description: r.description ?? null }));
         }
         const rows = await this.prisma.notifications.findMany({ where: { status: true }, orderBy: { id: 'desc' }, take: 50 });
@@ -917,32 +1539,199 @@ let VendorExtrasController = class VendorExtrasController {
     basicCampaigns() { return []; }
     campaignJoin() { return { message: 'joined' }; }
     campaignLeave() { return { message: 'left' }; }
-    async ads(req) {
-        if (this.useMongo()) {
-            const r = await this.mongo.findOne('restaurants', { mysql_vendor_id: Number(req.actor.id) });
-            if (!r)
-                return [];
-            const rows = await this.mongo.findMany('advertisements', { mysql_restaurant_id: Number(r.mysql_id) });
-            return rows.map((row) => ({
-                ...(row.legacy ?? {}),
-                ...row,
-                id: Number(row.mysql_id),
-                restaurant_id: row.mysql_restaurant_id !== null && row.mysql_restaurant_id !== undefined ? Number(row.mysql_restaurant_id) : 0,
-                created_by_id: row.mysql_created_by_id !== null && row.mysql_created_by_id !== undefined ? Number(row.mysql_created_by_id) : 0,
-            }));
-        }
-        const r = await this.prisma.restaurants.findFirst({ where: { vendor_id: req.actor.id }, select: { id: true } });
-        if (!r)
-            return [];
-        const rows = await this.prisma.advertisements.findMany({ where: { restaurant_id: r.id } });
-        return rows.map((row) => ({ ...row, id: Number(row.id), restaurant_id: Number(row.restaurant_id), created_by_id: Number(row.created_by_id) }));
+    shapeAd(row) {
+        const r = row;
+        const img = (f) => {
+            const s = f && String(f).trim() ? String(f) : '';
+            if (!s)
+                return null;
+            if (/^https?:\/\//i.test(s))
+                return s;
+            return `${(0, storage_url_1.storageBaseUrl)()}/advertisement/${s}`;
+        };
+        return {
+            id: Number(r.mysql_id),
+            restaurant_id: r.mysql_restaurant_id != null ? Number(r.mysql_restaurant_id) : 0,
+            add_type: r.add_type ?? 'restaurant_promotion',
+            title: r.title ?? null,
+            description: r.description ?? null,
+            start_date: r.start_date ?? null,
+            end_date: r.end_date ?? null,
+            pause_note: r.pause_note ?? null,
+            cancellation_note: r.cancellation_note ?? null,
+            cover_image: r.cover_image ?? null,
+            profile_image: r.profile_image ?? null,
+            video_attachment: r.video_attachment ?? null,
+            priority: Number(r.priority ?? 0),
+            is_rating_active: Number(r.is_rating_active ?? 0),
+            is_review_active: Number(r.is_review_active ?? 0),
+            is_paid: Number(r.is_paid ?? 0),
+            is_updated: Number(r.is_updated ?? 0),
+            created_by_id: r.mysql_created_by_id != null ? Number(r.mysql_created_by_id) : 0,
+            created_by_type: r.created_by_type ?? 'vendor',
+            status: r.status ?? 'pending',
+            active: Number(r.active ?? 1),
+            created_at: r.created_at ?? null,
+            updated_at: r.updated_at ?? null,
+            cover_image_full_url: img(r.cover_image),
+            profile_image_full_url: img(r.profile_image),
+            video_attachment_full_url: img(r.video_attachment),
+            translations: Array.isArray(r.translations) ? r.translations : [],
+            storage: [],
+        };
     }
-    adDetails() { return null; }
-    adStore() { return { message: 'ad created' }; }
-    adUpdate() { return { message: 'updated' }; }
-    adStatus() { return { message: 'status updated' }; }
-    adCopy() { return { message: 'copied' }; }
-    adDelete() { return { message: 'deleted' }; }
+    parseAdTranslations(raw) {
+        let translations = [];
+        if (typeof raw === 'string') {
+            try {
+                translations = JSON.parse(raw) ?? [];
+            }
+            catch {
+                translations = [];
+            }
+        }
+        else if (Array.isArray(raw))
+            translations = raw;
+        const pick = (key) => translations.find((t) => t?.locale === 'en' && t?.key === key)?.value
+            ?? translations.find((t) => t?.key === key)?.value ?? null;
+        return { title: pick('title'), description: pick('description'), translations };
+    }
+    async createAdvertisement(req, body, files) {
+        if (!this.useMongo())
+            return { message: 'ad created' };
+        const restaurant = await this.vendorRestaurant(req);
+        if (!restaurant)
+            return { errors: [{ code: 'restaurant', message: 'restaurant not found' }] };
+        const { title, description, translations } = this.parseAdTranslations(body.translations);
+        let startDate = null;
+        let endDate = null;
+        if (typeof body.dates === 'string' && body.dates.includes(' - ')) {
+            const [s, e] = body.dates.split(' - ');
+            startDate = s.trim() || null;
+            endDate = e.trim() || null;
+        }
+        const cover = await this.saveUploaded(files?.cover_image?.[0], 'advertisement');
+        const profile = await this.saveUploaded(files?.profile_image?.[0], 'advertisement');
+        const video = await this.saveUploaded(files?.video_attachment?.[0], 'advertisement');
+        const nextId = await this.mongo.nextMysqlId('advertisements');
+        const now = new Date();
+        await this.mongo.insertOne('advertisements', {
+            mysql_id: nextId,
+            mysql_restaurant_id: Number(restaurant.mysql_id),
+            restaurant_id: Number(restaurant.mysql_id),
+            add_type: String(body.advertisement_type ?? 'restaurant_promotion'),
+            title: title ?? String(body.title ?? 'Advertisement'),
+            description: description ?? String(body.description ?? ''),
+            translations,
+            start_date: startDate,
+            end_date: endDate,
+            cover_image: cover,
+            profile_image: profile,
+            video_attachment: video,
+            is_rating_active: Number(body.is_rating_active ?? 0),
+            is_review_active: Number(body.is_review_active ?? 0),
+            is_paid: 0,
+            is_updated: 0,
+            priority: 0,
+            mysql_created_by_id: Number(req.actor.id),
+            created_by_type: 'vendor',
+            status: 'pending',
+            active: 1,
+            created_at: now,
+            updated_at: now,
+        });
+        return { message: 'Advertisement created successfully', id: nextId };
+    }
+    async ads(req, offsetQ, limitQ, adsType) {
+        const limit = parseInt(limitQ ?? '10', 10) || 10;
+        const offset = parseInt(offsetQ ?? '1', 10) || 1;
+        const empty = { total_size: 0, limit, offset, all: 0, running: 0, pending: 0, denied: 0, approved: 0, expired: 0, paused: 0, adds: [] };
+        if (!this.useMongo())
+            return empty;
+        const restaurantIds = await this.vendorRestaurantIds(req);
+        if (restaurantIds.length === 0)
+            return empty;
+        const base = { mysql_restaurant_id: { $in: restaurantIds } };
+        const countFor = (s) => this.mongo.count('advertisements', { ...base, status: s });
+        const [all, pending, running, approved, denied, expired, paused] = await Promise.all([
+            this.mongo.count('advertisements', base),
+            countFor('pending'), countFor('running'), countFor('approved'),
+            countFor('denied'), countFor('expired'), countFor('paused'),
+        ]);
+        const filter = adsType && adsType !== 'all' ? { ...base, status: adsType } : base;
+        const total = adsType && adsType !== 'all' ? await this.mongo.count('advertisements', filter) : all;
+        const rows = await this.mongo.findMany('advertisements', filter, {
+            sort: { mysql_id: -1 }, limit, skip: Math.max(0, (offset - 1) * limit),
+        });
+        return { total_size: total, limit, offset, all, running, pending, denied, approved, expired, paused, adds: rows.map((r) => this.shapeAd(r)) };
+    }
+    async adDetails(idStr) {
+        const id = parseInt(idStr, 10);
+        if (!this.useMongo() || !Number.isFinite(id))
+            return null;
+        const doc = await this.mongo.findByMysqlId('advertisements', id);
+        return doc ? this.shapeAd(doc) : null;
+    }
+    adStore(req, body = {}, files = {}) {
+        return this.createAdvertisement(req, body, files);
+    }
+    adCopy(req, body = {}, files = {}) {
+        return this.createAdvertisement(req, body, files);
+    }
+    async adUpdate(idStr, body = {}, files = {}) {
+        const id = parseInt(idStr, 10);
+        if (!this.useMongo() || !Number.isFinite(id))
+            return { message: 'updated' };
+        const data = { updated_at: new Date(), is_updated: 1 };
+        if (body.translations !== undefined) {
+            const { title, description, translations } = this.parseAdTranslations(body.translations);
+            data.translations = translations;
+            if (title)
+                data.title = title;
+            if (description)
+                data.description = description;
+        }
+        if (typeof body.dates === 'string' && body.dates.includes(' - ')) {
+            const [s, e] = body.dates.split(' - ');
+            data.start_date = s.trim() || null;
+            data.end_date = e.trim() || null;
+        }
+        if (body.advertisement_type !== undefined)
+            data.add_type = String(body.advertisement_type);
+        if (body.is_rating_active !== undefined)
+            data.is_rating_active = Number(body.is_rating_active);
+        if (body.is_review_active !== undefined)
+            data.is_review_active = Number(body.is_review_active);
+        const cover = await this.saveUploaded(files?.cover_image?.[0], 'advertisement');
+        const profile = await this.saveUploaded(files?.profile_image?.[0], 'advertisement');
+        const video = await this.saveUploaded(files?.video_attachment?.[0], 'advertisement');
+        if (cover)
+            data.cover_image = cover;
+        if (profile)
+            data.profile_image = profile;
+        if (video)
+            data.video_attachment = video;
+        await this.mongo.updateOne('advertisements', { mysql_id: id }, data);
+        return { message: 'Advertisement updated successfully' };
+    }
+    async adStatus(body = {}) {
+        const id = body.id !== undefined && body.id !== '' ? Number(body.id) : null;
+        if (this.useMongo() && id) {
+            const data = { updated_at: new Date() };
+            if (body.status !== undefined)
+                data.status = String(body.status);
+            if (body.pause_note !== undefined)
+                data.pause_note = String(body.pause_note);
+            await this.mongo.updateOne('advertisements', { mysql_id: id }, data);
+        }
+        return { message: 'status updated' };
+    }
+    async adDelete(idStr) {
+        const id = parseInt(idStr, 10);
+        if (this.useMongo() && Number.isFinite(id))
+            await this.mongo.deleteOne('advertisements', { mysql_id: id });
+        return { message: 'advertisement deleted' };
+    }
     async businessPlan(req) {
         const r = this.useMongo()
             ? await this.mongo.findOne('restaurants', { mysql_vendor_id: Number(req.actor.id) })
@@ -955,16 +1744,25 @@ let VendorExtrasController = class VendorExtrasController {
             restaurant_name: r?.name ?? null,
         };
     }
-    packageView() {
-        return {
-            package: {
-                id: 1, package_name: 'Commission-base Plan',
-                commission_status: 1, commission: 0,
-                package_type: 'commission', validity: 0,
-                price: 0, plan_type: 'free',
-            },
-            transactions: [],
-        };
+    async packageView() {
+        let packages = [];
+        if (this.useMongo()) {
+            const rows = await this.mongo.findMany('subscription_packages', { $or: [{ status: true }, { status: 1 }] }, { sort: { mysql_id: -1 } });
+            packages = rows.map((r) => ({
+                ...r,
+                id: Number(r.mysql_id),
+                price: Number(r.price ?? 0),
+                validity: Number(r.validity ?? 0),
+            }));
+        }
+        if (packages.length === 0) {
+            packages = [
+                { id: 1, package_name: 'Starter', price: 499, validity: 30, max_order: 100, max_product: 50, pos: 1, mobile_app: 0, self_delivery: 0, reviews: 1, chat: 1 },
+                { id: 2, package_name: 'Growth', price: 999, validity: 30, max_order: 500, max_product: 200, pos: 1, mobile_app: 1, self_delivery: 1, reviews: 1, chat: 1 },
+                { id: 3, package_name: 'Pro', price: 1999, validity: 30, max_order: 0, max_product: 0, pos: 1, mobile_app: 1, self_delivery: 1, reviews: 1, chat: 1 },
+            ];
+        }
+        return { packages };
     }
     subscriptionTransactionsList() {
         return { transactions: [], total_size: 0, limit: 10, offset: 1 };
@@ -1021,9 +1819,11 @@ __decorate([
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('update-fcm-token'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "fcmToken", null);
 __decorate([
     (0, common_1.HttpCode)(200),
@@ -1037,23 +1837,29 @@ __decorate([
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('opening-closing-status'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "toggleOpen", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('update-announcment'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "announce", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('update-bank-info'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "bankInfo", null);
 __decorate([
     (0, common_1.HttpCode)(200),
@@ -1086,9 +1892,11 @@ __decorate([
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('add-dine-in-table-number'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "addDineInTable", null);
 __decorate([
     (0, common_1.HttpCode)(200),
@@ -1157,30 +1965,53 @@ __decorate([
 ], VendorExtrasController.prototype, "productDetails", null);
 __decorate([
     (0, common_1.Get)('product/search'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('name')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "productSearch", null);
 __decorate([
     (0, common_1.HttpCode)(200),
-    (0, common_1.Post)('product/status'),
+    (0, common_1.Get)('product/status'),
+    __param(0, (0, common_1.Query)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
+], VendorExtrasController.prototype, "productStatusGet", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Post)('product/status'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Query)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "productStatus", null);
 __decorate([
     (0, common_1.HttpCode)(200),
-    (0, common_1.Post)('product/recommended'),
+    (0, common_1.Get)('product/recommended'),
+    __param(0, (0, common_1.Query)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
+], VendorExtrasController.prototype, "productRecommendedGet", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Post)('product/recommended'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Query)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "productRecommended", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('product/update-stock'),
+    __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "updateStock", null);
 __decorate([
     (0, common_1.HttpCode)(200),
@@ -1212,9 +2043,11 @@ __decorate([
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Delete)('product/delete'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Query)('id')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "productDelete", null);
 __decorate([
     (0, common_1.Get)('product/reviews'),
@@ -1226,9 +2059,10 @@ __decorate([
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('product/reply-update'),
+    __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "productReply", null);
 __decorate([
     (0, common_1.Get)('check-product-limits'),
@@ -1250,10 +2084,21 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "childCategories", null);
 __decorate([
-    (0, common_1.Get)('categories/category-wise-products'),
+    (0, common_1.Get)('categories/childes/:parentId'),
+    __param(0, (0, common_1.Param)('parentId')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
+], VendorExtrasController.prototype, "childCategoriesByPath", null);
+__decorate([
+    (0, common_1.Get)('categories/category-wise-products'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('category_id')),
+    __param(2, (0, common_1.Query)('limit')),
+    __param(3, (0, common_1.Query)('offset')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, String, String]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "categoryProducts", null);
 __decorate([
     (0, common_1.Get)('addon'),
@@ -1265,23 +2110,45 @@ __decorate([
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('addon/store'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "addonStore", null);
 __decorate([
     (0, common_1.HttpCode)(200),
-    (0, common_1.Post)('addon/update'),
+    (0, common_1.Put)('addon/update'),
+    __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
+], VendorExtrasController.prototype, "addonUpdatePut", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Post)('addon/update'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "addonUpdate", null);
 __decorate([
     (0, common_1.HttpCode)(200),
-    (0, common_1.Delete)('addon/delete'),
+    (0, common_1.Post)('addon/delete'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Query)('id')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
+    __metadata("design:paramtypes", [Object, String]),
     __metadata("design:returntype", void 0)
+], VendorExtrasController.prototype, "addonDeletePost", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Delete)('addon/delete'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Query)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "addonDelete", null);
 __decorate([
     (0, common_1.Get)('attributes'),
@@ -1305,84 +2172,126 @@ __decorate([
 ], VendorExtrasController.prototype, "getDmList", null);
 __decorate([
     (0, common_1.Get)('delivery-man/preview'),
+    __param(0, (0, common_1.Query)('delivery_man_id')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "dmPreview", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('delivery-man/store'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.FileFieldsInterceptor)([
+        { name: 'image', maxCount: 1 },
+        { name: 'identity_image', maxCount: 5 },
+    ], { limits: { fileSize: 5 * 1024 * 1024 } })),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __param(2, (0, common_1.UploadedFiles)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object, Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "dmStore", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('delivery-man/update'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.FileFieldsInterceptor)([
+        { name: 'image', maxCount: 1 },
+    ], { limits: { fileSize: 5 * 1024 * 1024 } })),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.UploadedFiles)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "dmUpdate", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Delete)('delivery-man/delete'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Query)('id')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "dmDelete", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('delivery-man/status'),
+    __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "dmStatus", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('delivery-man/assign-deliveryman'),
+    __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "dmAssign", null);
 __decorate([
     (0, common_1.Get)('coupon-list'),
+    __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "vendorCouponList", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('coupon-store'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "vendorCouponStore", null);
 __decorate([
     (0, common_1.HttpCode)(200),
-    (0, common_1.Post)('coupon-update'),
+    (0, common_1.Put)('coupon-update'),
+    __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
+], VendorExtrasController.prototype, "vendorCouponUpdatePut", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Post)('coupon-update'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "vendorCouponUpdate", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('coupon-status'),
+    __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "vendorCouponStatus", null);
 __decorate([
     (0, common_1.HttpCode)(200),
-    (0, common_1.Delete)('coupon-delete'),
+    (0, common_1.Post)('coupon-delete'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Query)('id')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
+    __metadata("design:paramtypes", [Object, String]),
     __metadata("design:returntype", void 0)
+], VendorExtrasController.prototype, "vendorCouponDeletePost", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Delete)('coupon-delete'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Query)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "vendorCouponDelete", null);
 __decorate([
     (0, common_1.Get)('coupon/view-without-translate'),
+    __param(0, (0, common_1.Query)('coupon_id')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "vendorCouponView", null);
 __decorate([
     (0, common_1.Get)('wallet-payment-list'),
@@ -1439,16 +2348,19 @@ __decorate([
 ], VendorExtrasController.prototype, "getWithdrawMethods", null);
 __decorate([
     (0, common_1.Get)('get-withdraw-list'),
+    __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "getWithdrawList", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('request-withdraw'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "requestWithdraw", null);
 __decorate([
     (0, common_1.Get)('earning-report'),
@@ -1480,8 +2392,10 @@ __decorate([
 __decorate([
     (0, common_1.Get)('get-tax-report'),
     __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('limit')),
+    __param(2, (0, common_1.Query)('offset')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
+    __metadata("design:paramtypes", [Object, String, String]),
     __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "taxReport", null);
 __decorate([
@@ -1519,8 +2433,9 @@ __decorate([
 ], VendorExtrasController.prototype, "searchedFood", null);
 __decorate([
     (0, common_1.Get)('notifications'),
+    __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "vendorNotifications", null);
 __decorate([
@@ -1571,50 +2486,80 @@ __decorate([
 __decorate([
     (0, common_1.Get)('advertisement'),
     __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('offset')),
+    __param(2, (0, common_1.Query)('limit')),
+    __param(3, (0, common_1.Query)('ads_type')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
+    __metadata("design:paramtypes", [Object, String, String, String]),
     __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "ads", null);
 __decorate([
-    (0, common_1.Get)('advertisement/details'),
+    (0, common_1.Get)('advertisement/details/:id'),
+    __param(0, (0, common_1.Param)('id')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "adDetails", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('advertisement/store'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.FileFieldsInterceptor)([
+        { name: 'cover_image', maxCount: 1 },
+        { name: 'profile_image', maxCount: 1 },
+        { name: 'video_attachment', maxCount: 1 },
+    ], { limits: { fileSize: 30 * 1024 * 1024 } })),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __param(2, (0, common_1.UploadedFiles)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
+    __metadata("design:paramtypes", [Object, Object, Object]),
     __metadata("design:returntype", void 0)
 ], VendorExtrasController.prototype, "adStore", null);
 __decorate([
     (0, common_1.HttpCode)(200),
-    (0, common_1.Post)('advertisement/update'),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
-], VendorExtrasController.prototype, "adUpdate", null);
-__decorate([
-    (0, common_1.HttpCode)(200),
-    (0, common_1.Post)('advertisement/status'),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
-], VendorExtrasController.prototype, "adStatus", null);
-__decorate([
-    (0, common_1.HttpCode)(200),
     (0, common_1.Post)('advertisement/copy-add-post'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.FileFieldsInterceptor)([
+        { name: 'cover_image', maxCount: 1 },
+        { name: 'profile_image', maxCount: 1 },
+        { name: 'video_attachment', maxCount: 1 },
+    ], { limits: { fileSize: 30 * 1024 * 1024 } })),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __param(2, (0, common_1.UploadedFiles)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
+    __metadata("design:paramtypes", [Object, Object, Object]),
     __metadata("design:returntype", void 0)
 ], VendorExtrasController.prototype, "adCopy", null);
 __decorate([
     (0, common_1.HttpCode)(200),
-    (0, common_1.Delete)('advertisement/delete'),
+    (0, common_1.Post)('advertisement/update/:id'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.FileFieldsInterceptor)([
+        { name: 'cover_image', maxCount: 1 },
+        { name: 'profile_image', maxCount: 1 },
+        { name: 'video_attachment', maxCount: 1 },
+    ], { limits: { fileSize: 30 * 1024 * 1024 } })),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, common_1.Body)()),
+    __param(2, (0, common_1.UploadedFiles)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [String, Object, Object]),
+    __metadata("design:returntype", Promise)
+], VendorExtrasController.prototype, "adUpdate", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Post)('advertisement/status'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], VendorExtrasController.prototype, "adStatus", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Delete)('advertisement/delete/:id'),
+    __param(0, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "adDelete", null);
 __decorate([
     (0, common_1.Get)('business_plan'),
@@ -1627,7 +2572,7 @@ __decorate([
     (0, common_1.Get)('package-view'),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "packageView", null);
 __decorate([
     (0, common_1.Get)('subscription-transaction'),
@@ -1694,7 +2639,7 @@ __decorate([
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", void 0)
 ], VendorExtrasController.prototype, "characteristicSuggestions", null);
-exports.VendorExtrasController = VendorExtrasController = __decorate([
+exports.VendorExtrasController = VendorExtrasController = VendorExtrasController_1 = __decorate([
     (0, common_1.Controller)('vendor'),
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
     (0, auth_guard_1.RequireAuth)('vendor'),

@@ -20,6 +20,7 @@ export declare class CustomerExtrasController {
             tax: number;
             restaurant_id: number | null;
             category_id: number | null;
+            image_full_url: string | null;
             mysql_id: number;
             name?: string | null;
             description?: string | null;
@@ -34,8 +35,29 @@ export declare class CustomerExtrasController {
             id: number;
             name: string | null;
             logo: string | null;
+            logo_full_url: string | null;
+            cover_photo_full_url: string | null;
             address: string | null;
             avg_rating: number;
+            rating_count: number;
+            delivery_time: string;
+            free_delivery: number;
+            slug: string | null;
+            open: number;
+            active: boolean;
+            status: number;
+            restaurant_status: number;
+            zone_id: number | null;
+            foods_count: number;
+            foods: {
+                id: number;
+                name: string | null;
+                image: string | null;
+                image_full_url: string | null;
+                price: number;
+                avg_rating: number;
+                rating_count: number;
+            }[];
         }[];
     }>;
     wishAdd(req: AuthedRequest, body: {
@@ -84,25 +106,80 @@ export declare class CustomerExtrasController {
         image: {} | null;
         errors?: undefined;
     }>;
-    walletTx(): {
+    private walletBalance;
+    private setWalletBalance;
+    walletTx(req: AuthedRequest, limitStr?: string, offsetStr?: string): Promise<{
         data: never[];
         total_size: number;
         limit: number;
         offset: number;
-    };
-    walletBonuses(): never[];
-    addFund(): {
-        message: string;
-    };
-    loyaltyTx(): {
-        data: never[];
+        balance?: undefined;
+    } | {
+        data: {
+            id: number;
+            credit: number;
+            debit: number;
+            balance: number;
+            transaction_type: {} | null;
+            reference: {} | null;
+            created_at: {} | null;
+        }[];
         total_size: number;
         limit: number;
         offset: number;
-    };
-    pointTransfer(): {
+        balance: number;
+    }>;
+    walletBonuses(): Promise<{
+        id: number;
+    }[]>;
+    addFund(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
         message: string;
-    };
+        errors?: undefined;
+        balance?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+        balance?: undefined;
+    } | {
+        message: string;
+        balance: number;
+        errors?: undefined;
+    }>;
+    loyaltyTx(req: AuthedRequest, limitStr?: string, offsetStr?: string): Promise<{
+        data: {
+            id: number;
+            credit: number;
+            debit: number;
+            balance: number;
+            transaction_type: {} | null;
+            created_at: {} | null;
+        }[];
+        total_size: number;
+        limit: number;
+        offset: number;
+    }>;
+    pointTransfer(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
+        message: string;
+        errors?: undefined;
+        wallet_balance?: undefined;
+        loyalty_balance?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+        wallet_balance?: undefined;
+        loyalty_balance?: undefined;
+    } | {
+        message: string;
+        wallet_balance: number;
+        loyalty_balance: number;
+        errors?: undefined;
+    }>;
     messageList(req: AuthedRequest, type?: string): Promise<{
         conversations: {
             id: number;
@@ -119,9 +196,13 @@ export declare class CustomerExtrasController {
     messageDetails(req: AuthedRequest, convId?: string): Promise<{
         messages: {
             id: number;
+            conversation_id: number;
             sender_type: string;
             sender_id: number;
+            message: string;
             body: string;
+            file_full_url: string[];
+            is_seen: number;
             sent_by_me: boolean;
             created_at: string | Date | null;
         }[];
@@ -129,9 +210,13 @@ export declare class CustomerExtrasController {
     messageGet(req: AuthedRequest, convId?: string): Promise<{
         messages: {
             id: number;
+            conversation_id: number;
             sender_type: string;
             sender_id: number;
+            message: string;
             body: string;
+            file_full_url: string[];
+            is_seen: number;
             sent_by_me: boolean;
             created_at: string | Date | null;
         }[];
@@ -144,20 +229,26 @@ export declare class CustomerExtrasController {
             type: string;
         }[];
     }>;
-    messageSend(req: AuthedRequest, body: {
-        conversation_id?: number;
+    messageSend(req: AuthedRequest, files: MulterFile[] | undefined, rawBody: {
+        conversation_id?: number | string;
         counterpart_type?: string;
-        counterpart_id?: number;
+        counterpart_id?: number | string;
+        receiver_type?: string;
+        receiver_id?: number | string;
+        message?: string;
         body?: string;
-    }): Promise<{
+    } | undefined): Promise<{
         message: string;
         conversation_id?: undefined;
         id?: undefined;
+        files?: undefined;
     } | {
         message: string;
         conversation_id: number;
         id: number;
+        files: string[];
     }>;
+    private saveChatImages;
     subscription(req: AuthedRequest): Promise<{
         data: {
             id: number;

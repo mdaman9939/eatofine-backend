@@ -13,6 +13,7 @@ exports.CustomerService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
+const storage_url_1 = require("../common/storage-url");
 let CustomerService = class CustomerService {
     prisma;
     mongo;
@@ -25,7 +26,7 @@ let CustomerService = class CustomerService {
         return v === '1' || v === 'true' || v === 'yes';
     }
     storageBase() {
-        return process.env.STORAGE_BASE_URL ?? 'http://127.0.0.1:3000/storage';
+        return (0, storage_url_1.storageBaseUrl)();
     }
     async info(userId) {
         if (this.useMongo()) {
@@ -45,6 +46,26 @@ let CustomerService = class CustomerService {
                 }
                 return Number(v) || 0;
             };
+            const uid = Number(u.mysql_id);
+            const sumPipeline = (match) => [
+                { $match: match },
+                { $group: {
+                        _id: null,
+                        credit: { $sum: { $toDouble: { $ifNull: ['$credit', 0] } } },
+                        debit: { $sum: { $toDouble: { $ifNull: ['$debit', 0] } } },
+                    } },
+            ];
+            const [orderCount, walletAgg, loyaltyAgg] = await Promise.all([
+                this.mongo.count('orders', { mysql_user_id: uid }),
+                this.mongo.aggregate('wallet_transactions', sumPipeline({ mysql_user_id: uid })),
+                this.mongo.aggregate('loyalty_point_transactions', sumPipeline({ user_id: uid })),
+            ]);
+            const walletBalance = walletAgg[0]
+                ? Math.max(0, Number((walletAgg[0].credit - walletAgg[0].debit).toFixed(2)))
+                : num(legacy.wallet_balance);
+            const loyaltyPoint = loyaltyAgg[0]
+                ? Math.max(0, Math.round(loyaltyAgg[0].credit - loyaltyAgg[0].debit))
+                : num(legacy.loyalty_point);
             return {
                 id: Number(u.mysql_id),
                 f_name: u.f_name ?? null,
@@ -52,7 +73,7 @@ let CustomerService = class CustomerService {
                 phone: u.phone ?? null,
                 email: u.email ?? null,
                 image: u.image ?? null,
-                image_full_url: u.image ? `${this.storageBase()}/profile/${u.image}` : null,
+                image_full_url: (0, storage_url_1.storageFullUrl)('profile', u.image ?? null),
                 is_phone_verified: u.is_phone_verified ? 1 : 0,
                 is_email_verified: u.is_email_verified ? 1 : 0,
                 email_verified_at: legacy.email_verified_at ?? null,
@@ -60,10 +81,10 @@ let CustomerService = class CustomerService {
                 created_at: legacy.created_at ?? null,
                 updated_at: legacy.updated_at ?? null,
                 status: u.status ? 1 : 0,
-                order_count: num(legacy.order_count),
+                order_count: orderCount,
                 login_medium: legacy.login_medium ?? null,
-                wallet_balance: num(legacy.wallet_balance),
-                loyalty_point: num(legacy.loyalty_point),
+                wallet_balance: walletBalance,
+                loyalty_point: loyaltyPoint,
                 ref_code: u.ref_code ?? null,
                 current_language_key: legacy.current_language_key ?? null,
                 userinfo: null,
@@ -84,7 +105,7 @@ let CustomerService = class CustomerService {
             phone: u.phone,
             email: u.email,
             image: u.image,
-            image_full_url: u.image ? `${this.storageBase()}/profile/${u.image}` : null,
+            image_full_url: (0, storage_url_1.storageFullUrl)('profile', u.image ?? null),
             is_phone_verified: u.is_phone_verified ? 1 : 0,
             is_email_verified: u.is_email_verified ? 1 : 0,
             email_verified_at: u.email_verified_at,
@@ -254,7 +275,7 @@ let CustomerService = class CustomerService {
                     name: f.name ?? null,
                     description: f.description ?? null,
                     image: f.image ?? null,
-                    image_full_url: f.image ? `${this.storageBase()}/product/${f.image}` : null,
+                    image_full_url: (0, storage_url_1.storageFullUrl)('product', f.image ?? null),
                     restaurant_id: Number(f.mysql_restaurant_id ?? 0),
                     price: Number(f.price ?? 0),
                     veg: f.veg ? 1 : 0,
@@ -284,7 +305,7 @@ let CustomerService = class CustomerService {
                     name: f.name,
                     description: f.description,
                     image: f.image,
-                    image_full_url: f.image ? `${this.storageBase()}/product/${f.image}` : null,
+                    image_full_url: (0, storage_url_1.storageFullUrl)('product', f.image ?? null),
                     restaurant_id: Number(f.restaurant_id),
                     price: Number(f.price),
                     veg: f.veg ? 1 : 0,
@@ -311,6 +332,9 @@ let CustomerService = class CustomerService {
             const food = await this.mongo.findByMysqlId('foods', itemIdNum);
             if (!food)
                 throw new common_1.NotFoundException({ errors: [{ code: 'item_id', message: 'not_found' }] });
+            if (String(food.stock_type ?? 'unlimited') !== 'unlimited' && Number(food.item_stock ?? 0) <= 0) {
+                return { errors: [{ code: 'stock', message: `${food.name ?? 'This item'} is out of stock` }] };
+            }
             const existing = await this.mongo.findOne('carts', {
                 user_id: Number(identity.id),
                 item_id: itemIdNum,

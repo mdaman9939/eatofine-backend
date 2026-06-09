@@ -54,6 +54,10 @@ export declare class OrderService {
             email: string | null;
             address: string | null;
             logo: string;
+            logo_full_url: string | null;
+            image_full_url: string | null;
+            cover_photo: string | null;
+            cover_photo_full_url: string | null;
             latitude: string | null;
             longitude: string | null;
         } | null;
@@ -64,6 +68,7 @@ export declare class OrderService {
             phone: string | null;
             email: string | null;
             image: string | null;
+            image_full_url: string | null;
         } | null;
         delivery_man: {
             id: number;
@@ -71,6 +76,9 @@ export declare class OrderService {
             l_name: string | null;
             phone: string | null;
             image: string | null;
+            image_full_url: string | null;
+            avg_rating: number;
+            rating_count: number;
         } | null;
         deliveryMan: {
             id: number;
@@ -78,6 +86,9 @@ export declare class OrderService {
             l_name: string | null;
             phone: string | null;
             image: string | null;
+            image_full_url: string | null;
+            avg_rating: number;
+            rating_count: number;
         } | null;
         delivery_address: Record<string, unknown>;
         cutlery: boolean;

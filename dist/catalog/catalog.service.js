@@ -12,16 +12,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.CatalogService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
+const storage_url_1 = require("../common/storage-url");
 let CatalogService = class CatalogService {
     prisma;
     constructor(prisma) {
         this.prisma = prisma;
     }
-    storageBase() {
-        return process.env.STORAGE_BASE_URL ?? 'http://127.0.0.1:3000/storage';
-    }
     fullUrl(folder, file) {
-        return file ? `${this.storageBase()}/${folder}/${file}` : null;
+        return (0, storage_url_1.storageFullUrl)(folder, file);
     }
     async listZones() {
         const rows = await this.prisma.$queryRawUnsafe(`SELECT id, name, status, ST_AsGeoJSON(coordinates) AS coords_geojson FROM zones WHERE status = 1`);

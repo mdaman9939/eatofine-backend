@@ -87,6 +87,14 @@ export declare class CatalogRouterService {
     }[]>;
     listZones(): Promise<{
         id: number;
+        name: string | null;
+        coordinates: {
+            lat: number;
+            lng: number;
+        }[] | null;
+        status: number;
+    }[]> | Promise<{
+        id: number;
         name: string;
         coordinates: any;
         status: number;
@@ -95,10 +103,16 @@ export declare class CatalogRouterService {
         zone_id: number[];
         zone_data: {
             id: number;
-            name: string;
+            name: string | null;
         }[];
     }>;
     listCurrencies(): Promise<{
+        id: number;
+        country: string | null;
+        currency_code: string | null;
+        currency_symbol: string | null;
+        exchange_rate: string | number | null;
+    }[]> | Promise<{
         id: bigint;
         country: string | null;
         currency_code: string | null;
@@ -106,6 +120,11 @@ export declare class CatalogRouterService {
         exchange_rate: import("@prisma/client/runtime/library").Decimal | null;
     }[]>;
     listAdvertisements(): Promise<{
+        id: number;
+        title: string | null;
+        description: string | null;
+        status: string | null;
+    }[]> | Promise<{
         id: bigint;
         title: string | null;
         description: string | null;

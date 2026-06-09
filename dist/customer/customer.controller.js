@@ -45,9 +45,9 @@ let CustomerController = class CustomerController {
         const id = await this.resolveCartIdentity(req, guestIdStr);
         return this.customer.updateCart(id, body.cart_id ?? 0, body.quantity ?? 1);
     }
-    async cartRemoveItem(req, cartId, guestIdStr) {
+    async cartRemoveItem(req, cartIdStr, guestIdStr) {
         const id = await this.resolveCartIdentity(req, guestIdStr);
-        return this.customer.removeCartItem(id, cartId);
+        return this.customer.removeCartItem(id, parseInt(cartIdStr ?? '', 10) || 0);
     }
     async cartClear(req, guestIdStr) {
         const id = await this.resolveCartIdentity(req, guestIdStr);
@@ -132,10 +132,10 @@ __decorate([
     (0, common_1.HttpCode)(200),
     (0, auth_guard_1.RequireAuth)(),
     __param(0, (0, common_1.Req)()),
-    __param(1, (0, common_1.Query)('cart_id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Query)('cart_id')),
     __param(2, (0, common_1.Query)('guest_id')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, Number, String]),
+    __metadata("design:paramtypes", [Object, String, String]),
     __metadata("design:returntype", Promise)
 ], CustomerController.prototype, "cartRemoveItem", null);
 __decorate([

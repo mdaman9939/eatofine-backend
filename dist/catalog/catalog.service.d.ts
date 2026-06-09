@@ -2,7 +2,6 @@ import { PrismaService } from '../prisma/prisma.service';
 export declare class CatalogService {
     private readonly prisma;
     constructor(prisma: PrismaService);
-    private storageBase;
     fullUrl(folder: string, file?: string | null): string | null;
     listZones(): Promise<{
         id: number;

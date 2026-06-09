@@ -39,6 +39,8 @@ const path = __importStar(require("path"));
 const app_module_1 = require("./app.module");
 const env_validation_1 = require("./common/env.validation");
 const all_exceptions_filter_1 = require("./common/all-exceptions.filter");
+const storage_url_1 = require("./common/storage-url");
+const mongo_data_service_1 = require("./mongo/mongo-data.service");
 BigInt.prototype.toJSON = function () {
     return Number(this);
 };
@@ -74,6 +76,13 @@ async function bootstrap() {
         });
         next();
     });
+    app.use((req, res, next) => {
+        const pick = (v) => (Array.isArray(v) ? v[0] : v);
+        const host = pick(req.headers['x-forwarded-host']) || pick(req.headers['host']);
+        const proto = (pick(req.headers['x-forwarded-proto']) || req.protocol || 'http').split(',')[0];
+        const baseUrl = host ? `${proto}://${host}/storage` : undefined;
+        storage_url_1.storageContext.run({ baseUrl }, () => next());
+    });
     const fs = require('fs');
     const repoLocalStorage = path.resolve(__dirname, '../storage/app/public');
     const monorepoStorage = path.resolve(__dirname, '../../../storage/app/public');
@@ -82,6 +91,30 @@ async function bootstrap() {
         storageRoot = fs.existsSync(repoLocalStorage) ? repoLocalStorage : monorepoStorage;
     }
     app.useStaticAssets(storageRoot, { prefix: '/storage/' });
+    const mongoData = app.get(mongo_data_service_1.MongoDataService, { strict: false });
+    app.use('/storage', async (req, res, next) => {
+        if (res.headersSent || req.method !== 'GET')
+            return next();
+        try {
+            const key = decodeURIComponent(req.path.replace(/^\/+/, ''));
+            if (!key)
+                return next();
+            const doc = await mongoData.findOne('uploads', { path: key });
+            const raw = doc?.data;
+            if (raw) {
+                const buf = Buffer.isBuffer(raw) ? raw : raw.buffer ? Buffer.from(raw.buffer) : Buffer.from(raw);
+                res
+                    .status(200)
+                    .set('content-type', doc?.content_type || 'image/png')
+                    .set('cache-control', 'public, max-age=86400')
+                    .send(buf);
+                return;
+            }
+        }
+        catch {
+        }
+        next();
+    });
     app.use('/storage', (req, res, next) => {
         if (res.headersSent)
             return next();

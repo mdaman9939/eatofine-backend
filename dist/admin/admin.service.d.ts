@@ -1,5 +1,41 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+export interface FoodWriteBody {
+    name?: string;
+    description?: string;
+    price?: number;
+    restaurant_id?: number;
+    category_id?: number;
+    sub_category_id?: number | null;
+    discount?: number;
+    discount_type?: string;
+    tax?: number;
+    tax_type?: string;
+    veg?: boolean | string | number;
+    is_halal?: boolean;
+    recommended?: boolean;
+    stock_type?: string;
+    item_stock?: number;
+    maximum_cart_quantity?: number | null;
+    available_time_starts?: string;
+    available_time_ends?: string;
+    addon_ids?: number[] | string;
+    variations?: unknown[];
+    image?: string;
+    meta_title?: string | null;
+    meta_description?: string | null;
+    meta_image?: string | null;
+    translations?: Array<{
+        locale?: string;
+        key?: string;
+        value?: string;
+    }>;
+    description_translations?: Array<{
+        locale?: string;
+        key?: string;
+        value?: string;
+    }>;
+}
 export declare class AdminService {
     private readonly prisma;
     private readonly mongo;
@@ -73,7 +109,7 @@ export declare class AdminService {
             total: number;
         };
     }>;
-    listOrders(limit?: number, offset?: number, status?: string, q?: string): Promise<{
+    listOrders(limit?: number, offset?: number, status?: string, q?: string, orderType?: string): Promise<{
         total: number;
         limit: number;
         offset: number;
@@ -426,9 +462,84 @@ export declare class AdminService {
         minimum_order?: number;
         status?: boolean;
         active?: boolean;
+        latitude?: string | number;
+        longitude?: string | number;
+        password?: string;
+        zone_id?: number;
+        cuisine_ids?: number[] | string;
+        tax?: number;
+        minimum_delivery_time?: number;
+        maximum_delivery_time?: number;
+        delivery_time_type?: string;
+        logo?: string;
+        cover_photo?: string;
+        veg?: boolean;
+        non_veg?: boolean;
+        delivery?: boolean;
+        take_away?: boolean;
+        restaurant_model?: string;
+        identity_number?: string;
+        state?: string;
+        license_document?: string;
     }): Promise<{
         ok: boolean;
         id: number;
+    }>;
+    getRestaurantTabs(id: number, limit?: number): Promise<{
+        foods: never[];
+        orders: never[];
+        reviews: never[];
+        transactions: never[];
+        wallet: {
+            total_earning: number;
+            commission_paid: number;
+            delivered_count: number;
+            total_orders: number;
+            avg_rating: number;
+            rating_count: number;
+        };
+    } | {
+        foods: {
+            id: number;
+            name: {} | null;
+            price: number;
+            image: {} | null;
+            status: {};
+            veg: {} | null;
+        }[];
+        orders: {
+            id: number;
+            order_amount: number;
+            order_status: {} | null;
+            payment_status: {} | null;
+            order_type: {} | null;
+            created_at: {} | null;
+        }[];
+        reviews: {
+            id: number;
+            rating: number;
+            comment: {} | null;
+            reply: {} | null;
+            food_id: number | null;
+            customer: string | null;
+        }[];
+        transactions: {
+            id: number;
+            order_amount: number;
+            commission: number;
+            restaurant_earning: number;
+            order_status: {} | null;
+            created_at: {} | null;
+        }[];
+        wallet: {
+            total_earning: number;
+            commission_paid: number;
+            restaurant_earning: number;
+            delivered_count: number;
+            total_orders: number;
+            avg_rating: number;
+            rating_count: number;
+        };
     }>;
     listUsers(limit?: number, offset?: number, q?: string): Promise<{
         total: number;
@@ -474,7 +585,29 @@ export declare class AdminService {
         stats: {
             order_count: number;
             total_spend: number;
+            wallet_balance: number;
+            avg_order_value: number;
+            breakdown: {
+                delivered: number;
+                ongoing: number;
+                canceled: number;
+                refunded: number;
+            };
         };
+        addresses: {
+            id: number;
+            address_type: {} | null;
+            address: {} | null;
+            contact_person_name: {} | null;
+            contact_person_number: {} | null;
+        }[];
+        recent_orders: {
+            id: number;
+            order_amount: number;
+            order_status: {} | null;
+            payment_status: {} | null;
+            created_at: {} | null;
+        }[];
     } | {
         user: {
             id: number;
@@ -491,7 +624,12 @@ export declare class AdminService {
         stats: {
             order_count: number;
             total_spend: number;
+            wallet_balance?: undefined;
+            avg_order_value?: undefined;
+            breakdown?: undefined;
         };
+        addresses?: undefined;
+        recent_orders?: undefined;
     }>;
     updateUserStatus(id: number, status: boolean): Promise<{
         ok: boolean;
@@ -565,10 +703,44 @@ export declare class AdminService {
             application_status: import("@prisma/client").$Enums.delivery_men_application_status;
         }[];
     }>;
+    getDeliveryMan(id: number): Promise<{
+        delivery_man: {
+            id: number;
+            zone_id: {} | null;
+            vehicle_id: {} | null;
+            shift_id: {} | null;
+            dob: {} | null;
+        };
+    }>;
+    updateDeliveryMan(id: number, body: {
+        f_name?: string;
+        l_name?: string;
+        email?: string;
+        phone?: string;
+        password?: string;
+        zone_id?: number;
+        vehicle_id?: number;
+        dm_type?: string;
+        shift_id?: number | null;
+        age?: number;
+        dob?: string;
+        identity_type?: string;
+        identity_number?: string;
+        image?: string;
+        license_image?: string;
+        status?: boolean;
+    }): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
     updateDeliveryManStatus(id: number, status: boolean): Promise<{
         ok: boolean;
         id: number;
         status: boolean;
+    }>;
+    deleteDeliveryMan(id: number): Promise<{
+        ok: boolean;
+        id: number;
     }>;
     approveDeliveryMan(id: number, approval: 'approved' | 'denied'): Promise<{
         ok: boolean;
@@ -631,6 +803,24 @@ export declare class AdminService {
             id: number;
             restaurant_id: number;
             category_id: number | null;
+            sub_category_id: number | null;
+            price: number;
+            tax: number;
+            discount: number;
+            variations: any[];
+            add_ons: any[];
+            addon_ids: any[];
+            translations: any[];
+        };
+        restaurant: {
+            id: number;
+            name: string | null;
+        } | null;
+    } | {
+        food: {
+            id: number;
+            restaurant_id: number;
+            category_id: number | null;
             price: number;
             tax: number;
             discount: number;
@@ -677,6 +867,10 @@ export declare class AdminService {
         id: number;
         recommended: boolean;
     }>;
+    deleteFood(id: number): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
     listCategories(parentId?: number): Promise<{
         categories: {
             id: number;
@@ -701,6 +895,11 @@ export declare class AdminService {
         position?: number;
         priority?: number;
         image?: string | null;
+        translations?: Array<{
+            locale?: string;
+            key?: string;
+            value?: string;
+        }>;
     }): Promise<{
         ok: boolean;
         id: number;
@@ -709,6 +908,11 @@ export declare class AdminService {
         name?: string;
         status?: boolean;
         priority?: number;
+        translations?: Array<{
+            locale?: string;
+            key?: string;
+            value?: string;
+        }>;
     }): Promise<{
         ok: boolean;
         id: number;
@@ -785,6 +989,26 @@ export declare class AdminService {
         expire_date?: string;
         limit?: number;
         coupon_type?: string;
+        restaurant_id?: number | null;
+        zone_id?: number | null;
+        customer_id?: number | string | null;
+    }): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
+    updateCoupon(id: number, body: {
+        title?: string;
+        discount?: number;
+        discount_type?: string;
+        min_purchase?: number;
+        max_discount?: number;
+        start_date?: string;
+        expire_date?: string;
+        limit?: number;
+        coupon_type?: string;
+        restaurant_id?: number | null;
+        zone_id?: number | null;
+        status?: boolean;
     }): Promise<{
         ok: boolean;
         id: number;
@@ -821,6 +1045,17 @@ export declare class AdminService {
         ok: boolean;
         id: number;
     }>;
+    updateBanner(id: number, body: {
+        title?: string;
+        type?: string;
+        zone_id?: number;
+        data?: string;
+        image?: string | null;
+        status?: boolean;
+    }): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
     updateBannerStatus(id: number, status: boolean): Promise<{
         ok: boolean;
         id: number;
@@ -830,20 +1065,20 @@ export declare class AdminService {
         ok: boolean;
         id: number;
     }>;
-    listZones(): Promise<{
+    listZones(zoneFor?: string): Promise<{
         zones: {
             id: number;
+            restaurant_count: number;
+            created_at: Date | null;
             name: string;
-            display_name: string | null;
             status: boolean;
-            is_default: boolean;
             minimum_shipping_charge: number | null;
             per_km_shipping_charge: number | null;
             maximum_shipping_charge: number | null;
-            minimum_delivery_time: number | null;
+            is_default: boolean;
             max_cod_order_amount: number | null;
-            created_at: Date | null;
-            restaurant_count: number;
+            minimum_delivery_time: number | null;
+            display_name: string | null;
         }[];
     }>;
     updateZoneStatus(id: number, status: boolean): Promise<{
@@ -860,10 +1095,49 @@ export declare class AdminService {
         minimum_delivery_time?: number;
         max_cod_order_amount?: number;
         is_default?: boolean;
+        coordinates?: Array<{
+            lat: number;
+            lng: number;
+        }>;
+        zone_for?: string;
     }): Promise<{
         ok: boolean;
         id: number;
         name: string;
+    }>;
+    getZone(id: number): Promise<{
+        zone: {
+            id: number;
+            name: string;
+            display_name: string;
+            coordinates: any[];
+            status: boolean;
+            is_default: boolean;
+            zone_for: string;
+            minimum_shipping_charge: number;
+            per_km_shipping_charge: number;
+            maximum_shipping_charge: number;
+            minimum_delivery_time: number;
+            max_cod_order_amount: number;
+        };
+    }>;
+    updateZone(id: number, body: {
+        name?: string;
+        display_name?: string;
+        minimum_shipping_charge?: number;
+        per_km_shipping_charge?: number;
+        maximum_shipping_charge?: number;
+        minimum_delivery_time?: number;
+        max_cod_order_amount?: number;
+        is_default?: boolean;
+        coordinates?: Array<{
+            lat: number;
+            lng: number;
+        }>;
+        zone_for?: string;
+    }): Promise<{
+        ok: boolean;
+        id: number;
     }>;
     createRestaurant(body: {
         name?: string;
@@ -875,10 +1149,41 @@ export declare class AdminService {
         vendor_id?: number;
         delivery?: boolean;
         take_away?: boolean;
+        f_name?: string;
+        l_name?: string;
+        password?: string;
+        latitude?: string | number;
+        longitude?: string | number;
+        minimum_delivery_time?: number;
+        maximum_delivery_time?: number;
+        delivery_time_type?: string;
+        tax?: number;
+        comission?: number;
+        logo?: string;
+        cover_photo?: string;
+        cuisine_ids?: number[] | string;
+        restaurant_model?: string;
+        veg?: boolean;
+        non_veg?: boolean;
+        documents?: string[];
+        translations?: Array<{
+            locale?: string;
+            key?: string;
+            value?: string;
+        }>;
+        address_translations?: Array<{
+            locale?: string;
+            key?: string;
+            value?: string;
+        }>;
+        identity_number?: string;
+        state?: string;
+        license_document?: string;
     }): Promise<{
         ok: boolean;
         id: number;
         name: string;
+        vendor_id: number | null;
     }>;
     createDeliveryMan(body: {
         f_name?: string;
@@ -888,24 +1193,51 @@ export declare class AdminService {
         password?: string;
         zone_id?: number;
         vehicle_id?: number;
+        image?: string;
+        dm_type?: string;
+        shift_id?: number | null;
+        age?: number;
+        dob?: string;
+        identity_type?: string;
+        identity_number?: string;
+        identity_image?: string[] | string;
+        license_image?: string;
     }): Promise<{
         ok: boolean;
         id: number;
         name: string;
     }>;
-    createFood(body: {
-        name?: string;
-        description?: string;
-        price?: number;
-        restaurant_id?: number;
-        category_id?: number;
-        discount?: number;
-        tax?: number;
-        veg?: boolean;
-    }): Promise<{
+    createFood(body: FoodWriteBody): Promise<{
         ok: boolean;
         id: number;
         name: string;
+    }>;
+    updateFood(id: number, body: FoodWriteBody): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
+    private normaliseIdArray;
+    createPosOrder(body: {
+        restaurant_id?: number;
+        items?: Array<{
+            food_id?: number;
+            name?: string;
+            price?: number;
+            quantity?: number;
+        }>;
+        customer_name?: string;
+        customer_phone?: string;
+        address?: string;
+        order_type?: string;
+        payment_method?: string;
+        discount?: number;
+        tax_percent?: number;
+        delivery_charge?: number;
+        order_note?: string;
+    }): Promise<{
+        ok: boolean;
+        id: number;
+        order_amount: number;
     }>;
     bulkImportRestaurants(rows: Array<Record<string, unknown>>): Promise<{
         ok: boolean;
@@ -1244,7 +1576,12 @@ export declare class AdminService {
         ok: boolean;
         updated: number;
     }>;
-    salesSummary(days?: number): Promise<{
+    salesSummary(days?: number, opts?: {
+        from?: string;
+        to?: string;
+        zoneId?: number;
+        restaurantId?: number;
+    }): Promise<{
         days: number;
         total_revenue: number;
         total_orders: number;
@@ -1256,7 +1593,7 @@ export declare class AdminService {
             delivery: number;
         }[];
     }>;
-    restaurantEarnings(limit?: number): Promise<{
+    restaurantEarnings(limit?: number, opts?: ReportFilterOpts): Promise<{
         top_earners: {
             restaurant_id: number;
             name: string | null;
@@ -1264,6 +1601,15 @@ export declare class AdminService {
             revenue: number;
             admin_commission: number;
             restaurant_take: number;
+        }[];
+    }>;
+    topFoods(limit?: number, opts?: ReportFilterOpts): Promise<{
+        top_foods: {
+            food_id: number | null;
+            name: string | null;
+            restaurant_id: number | null;
+            units_sold: number;
+            revenue: number;
         }[];
     }>;
 }
@@ -1278,11 +1624,21 @@ declare module './admin.service' {
             restaurant_id: number;
             addon_category_id?: number;
         }): Promise<unknown>;
+        updateAddOn(id: number, body: {
+            name?: string;
+            price?: number;
+            addon_category_id?: number;
+            stock_type?: string;
+            addon_stock?: number;
+        }): Promise<unknown>;
         updateAddOnStatus(id: number, status: boolean): Promise<unknown>;
         deleteAddOn(id: number): Promise<unknown>;
         listAddonCategories(opts: ListOpts): Promise<unknown>;
         createAddonCategory(body: {
             name: string;
+        }): Promise<unknown>;
+        updateAddonCategory(id: number, body: {
+            name?: string;
         }): Promise<unknown>;
         updateAddonCategoryStatus(id: number, status: boolean): Promise<unknown>;
         deleteAddonCategory(id: number): Promise<unknown>;
@@ -1290,19 +1646,70 @@ declare module './admin.service' {
         createAttribute(body: {
             name: string;
         }): Promise<unknown>;
+        updateAttribute(id: number, body: {
+            name?: string;
+        }): Promise<unknown>;
         deleteAttribute(id: number): Promise<unknown>;
-        listCampaigns(opts: ListOpts): Promise<unknown>;
+        listCampaigns(opts: ListOpts & {
+            type?: string;
+        }): Promise<unknown>;
         createCampaign(body: {
             title: string;
             description?: string;
             start_date?: string;
             end_date?: string;
+            start_time?: string;
+            end_time?: string;
+            image?: string | null;
+            zone_id?: number | null;
+            campaign_type?: string;
+            food_id?: number | null;
+            restaurant_id?: number | null;
+            price?: number | null;
+            discount?: number | null;
+            discount_type?: string;
+        }): Promise<unknown>;
+        updateCampaign(id: number, body: {
+            title?: string;
+            description?: string;
+            start_date?: string;
+            end_date?: string;
+            start_time?: string;
+            end_time?: string;
+            image?: string | null;
+            zone_id?: number | null;
+            status?: boolean;
         }): Promise<unknown>;
         updateCampaignStatus(id: number, status: boolean): Promise<unknown>;
         deleteCampaign(id: number): Promise<unknown>;
         listAdvertisements(opts: ListOpts): Promise<unknown>;
+        createAdvertisement(body: {
+            title?: string;
+            description?: string;
+            add_type?: string;
+            restaurant_id?: number | null;
+            priority?: number;
+            start_date?: string;
+            end_date?: string;
+            image?: string | null;
+            cover_image?: string | null;
+        }): Promise<unknown>;
         updateAdvertisementStatus(id: number, status: 'approved' | 'denied' | 'pending' | 'paused' | 'expired' | 'running'): Promise<unknown>;
+        deleteAdvertisement(id: number): Promise<unknown>;
         listCashBacks(): Promise<unknown>;
+        createCashBack(body: {
+            title?: string;
+            customer_id?: number | string | null;
+            cashback_type?: string;
+            cashback_amount?: number;
+            min_purchase?: number;
+            max_discount?: number;
+            start_date?: string;
+            end_date?: string;
+            limit?: number;
+        }): Promise<unknown>;
+        updateCashBackStatus(id: number, status: boolean): Promise<unknown>;
+        deleteCashBack(id: number): Promise<unknown>;
         listWalletBonuses(): Promise<unknown>;
         createWalletBonus(body: {
             title: string;
@@ -1319,7 +1726,10 @@ declare module './admin.service' {
         listWalletTransactions(opts: ListOpts): Promise<unknown>;
         listLoyaltyPointTransactions(opts: ListOpts): Promise<unknown>;
         listCashbackHistories(opts: ListOpts): Promise<unknown>;
-        listDisbursements(opts: ListOpts): Promise<unknown>;
+        listDisbursements(opts: ListOpts & {
+            type?: string;
+        }): Promise<unknown>;
+        updateDisbursementStatus(id: number, status: string): Promise<unknown>;
         listWithdrawRequests(opts: ListOpts & {
             type?: string;
             approved?: boolean;
@@ -1327,7 +1737,19 @@ declare module './admin.service' {
         approveWithdrawRequest(id: number, approve: boolean): Promise<unknown>;
         listWithdrawalMethods(): Promise<unknown>;
         listOfflinePaymentMethods(): Promise<unknown>;
+        createOfflinePaymentMethod(body: {
+            method_name?: string;
+            method_fields?: string;
+            method_informations?: string;
+        }): Promise<unknown>;
+        updateOfflinePaymentMethod(id: number, body: {
+            method_name?: string;
+            method_fields?: string;
+            method_informations?: string;
+            status?: number;
+        }): Promise<unknown>;
         updateOfflinePaymentMethodStatus(id: number, status: number): Promise<unknown>;
+        deleteOfflinePaymentMethod(id: number): Promise<unknown>;
         listProvideDMEarnings(opts: ListOpts): Promise<unknown>;
         listContactMessages(opts: ListOpts): Promise<unknown>;
         replyContactMessage(id: number, reply: string): Promise<unknown>;
@@ -1337,6 +1759,14 @@ declare module './admin.service' {
             description?: string;
             tergat?: string;
             zone_id?: number | null;
+            image?: string | null;
+        }): Promise<unknown>;
+        updateNotification(id: number, body: {
+            title?: string;
+            description?: string;
+            tergat?: string;
+            zone_id?: number | null;
+            image?: string | null;
         }): Promise<unknown>;
         deleteNotification(id: number): Promise<unknown>;
         listReviews(opts: ListOpts): Promise<unknown>;
@@ -1370,10 +1800,37 @@ declare module './admin.service' {
         updateSocialMediaStatus(id: number, status: boolean): Promise<unknown>;
         deleteSocialMedia(id: number): Promise<unknown>;
         listEmployees(opts: ListOpts): Promise<unknown>;
+        getEmployee(id: number): Promise<unknown>;
+        createEmployee(body: {
+            f_name?: string;
+            l_name?: string;
+            email?: string;
+            phone?: string;
+            password?: string;
+            role_id?: number;
+            zone_id?: number | null;
+            image?: string;
+        }): Promise<unknown>;
+        updateEmployee(id: number, body: {
+            f_name?: string;
+            l_name?: string;
+            email?: string;
+            phone?: string;
+            password?: string;
+            role_id?: number;
+            zone_id?: number | null;
+            image?: string;
+        }): Promise<unknown>;
+        deleteEmployee(id: number): Promise<unknown>;
         listAdminRoles(): Promise<unknown>;
         createAdminRole(body: {
             name: string;
             modules?: string;
+        }): Promise<unknown>;
+        updateAdminRole(id: number, body: {
+            name?: string;
+            modules?: string;
+            status?: boolean;
         }): Promise<unknown>;
         deleteAdminRole(id: number): Promise<unknown>;
         listSubscriptionPackages(): Promise<unknown>;
@@ -1421,13 +1878,19 @@ declare module './admin.service' {
         listCurrencies(): Promise<unknown>;
         listTags(): Promise<unknown>;
         listTranslations(opts: ListOpts): Promise<unknown>;
-        adminEarningReport(days: number): Promise<unknown>;
-        customerReport(limit: number): Promise<unknown>;
-        deliverymanEarningReport(limit: number): Promise<unknown>;
+        adminEarningReport(days: number, opts?: ReportFilterOpts): Promise<unknown>;
+        customerReport(limit: number, opts?: ReportFilterOpts): Promise<unknown>;
+        deliverymanEarningReport(limit: number, opts?: ReportFilterOpts): Promise<unknown>;
     }
 }
 export interface ListOpts {
     limit?: number;
     offset?: number;
     q?: string;
+}
+export interface ReportFilterOpts {
+    from?: string;
+    to?: string;
+    zoneId?: number;
+    restaurantId?: number;
 }

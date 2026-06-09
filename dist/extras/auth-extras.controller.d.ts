@@ -5,16 +5,47 @@ export declare class AuthExtrasController {
     private readonly mongo;
     constructor(prisma: PrismaService, mongo: MongoDataService);
     private useMongo;
-    forgot(): {
+    private identifier;
+    private findAccount;
+    private requestOtp;
+    private verifyOtp;
+    private resetPassword;
+    forgot(body?: Record<string, unknown>): Promise<{
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+        demo_otp?: undefined;
+    } | {
         message: string;
-    };
-    reset(): {
+        errors?: undefined;
+        demo_otp?: undefined;
+    } | {
         message: string;
-    };
-    verifyToken(): {
+        demo_otp: string;
+        errors?: undefined;
+    }>;
+    reset(body?: Record<string, unknown>): Promise<{
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+    } | {
         message: string;
-        otp: string;
-    };
+        errors?: undefined;
+    }>;
+    verifyToken(body?: Record<string, unknown>): Promise<{
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+    } | {
+        message: string;
+        errors?: undefined;
+    }>;
     verifyEmail(): {
         message: string;
     };
@@ -33,15 +64,42 @@ export declare class AuthExtrasController {
     firebaseReset(): {
         message: string;
     };
-    vendorForgot(): {
+    vendorForgot(body?: Record<string, unknown>): Promise<{
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+        demo_otp?: undefined;
+    } | {
         message: string;
-    };
-    vendorReset(): {
+        errors?: undefined;
+        demo_otp?: undefined;
+    } | {
         message: string;
-    };
-    vendorVerifyToken(): {
+        demo_otp: string;
+        errors?: undefined;
+    }>;
+    vendorReset(body?: Record<string, unknown>): Promise<{
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+    } | {
         message: string;
-    };
+        errors?: undefined;
+    }>;
+    vendorVerifyToken(body?: Record<string, unknown>): Promise<{
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+    } | {
+        message: string;
+        errors?: undefined;
+    }>;
     vendorRegister(_body: unknown): {
         message: string;
     };
@@ -51,15 +109,42 @@ export declare class AuthExtrasController {
     subscriptionPayment(): {
         redirect_url: null;
     };
-    dmForgot(): {
+    dmForgot(body?: Record<string, unknown>): Promise<{
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+        demo_otp?: undefined;
+    } | {
         message: string;
-    };
-    dmReset(): {
+        errors?: undefined;
+        demo_otp?: undefined;
+    } | {
         message: string;
-    };
-    dmVerifyToken(): {
+        demo_otp: string;
+        errors?: undefined;
+    }>;
+    dmReset(body?: Record<string, unknown>): Promise<{
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+    } | {
         message: string;
-    };
+        errors?: undefined;
+    }>;
+    dmVerifyToken(body?: Record<string, unknown>): Promise<{
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+    } | {
+        message: string;
+        errors?: undefined;
+    }>;
     dmFirebaseVerify(): {
         message: string;
     };

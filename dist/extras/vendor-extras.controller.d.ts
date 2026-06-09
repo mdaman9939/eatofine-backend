@@ -6,6 +6,11 @@ export declare class VendorExtrasController {
     private readonly mongo;
     constructor(prisma: PrismaService, mongo: MongoDataService);
     private useMongo;
+    private vendorRestaurant;
+    private vendorRestaurantIds;
+    private static readonly ONGOING_STATUSES;
+    private hashPassword;
+    private parseJsonish;
     profile(req: AuthedRequest): Promise<{
         id?: undefined;
         f_name?: undefined;
@@ -153,23 +158,27 @@ export declare class VendorExtrasController {
     }): Promise<{
         message: string;
     }>;
-    fcmToken(): {
+    fcmToken(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
         message: string;
-    };
+    }>;
     toggleActive(req: AuthedRequest, body: {
         status?: boolean;
     }): Promise<{
         message: string;
     }>;
-    toggleOpen(): {
+    toggleOpen(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
         message: string;
-    };
-    announce(): {
+        active: boolean;
+    } | {
         message: string;
-    };
-    bankInfo(): {
+        active?: undefined;
+    }>;
+    announce(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
         message: string;
-    };
+    }>;
+    bankInfo(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
+        message: string;
+    }>;
     private buildStorageUrl;
     private storageDir;
     private saveUploaded;
@@ -183,13 +192,18 @@ export declare class VendorExtrasController {
     businessSetup(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
         message: string;
     }>;
-    addDineInTable(): {
+    addDineInTable(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
         message: string;
-    };
+        tables: string[];
+    } | {
+        message: string;
+        tables?: undefined;
+    }>;
     remove(): {
         message: string;
     };
     private shapeOrder;
+    private vendorUserMap;
     private detailsCountMap;
     currentOrders(req: AuthedRequest): Promise<{
         id: number;
@@ -204,6 +218,14 @@ export declare class VendorExtrasController {
         delivery_address: {} | null;
         created_at: string;
         updated_at: string;
+        customer: {
+            id: number;
+            f_name: {} | null;
+            l_name: {} | null;
+            phone: {} | null;
+            email: {} | null;
+            image_full_url: string | null;
+        } | null;
         mysql_id: number;
         mysql_user_id?: number | null;
         mysql_restaurant_id?: number | null;
@@ -294,6 +316,14 @@ export declare class VendorExtrasController {
             delivery_address: {} | null;
             created_at: string;
             updated_at: string;
+            customer: {
+                id: number;
+                f_name: {} | null;
+                l_name: {} | null;
+                phone: {} | null;
+                email: {} | null;
+                image_full_url: string | null;
+            } | null;
             mysql_id: number;
             mysql_user_id?: number | null;
             mysql_restaurant_id?: number | null;
@@ -388,6 +418,14 @@ export declare class VendorExtrasController {
         delivery_address: {} | null;
         created_at: string;
         updated_at: string;
+        customer: {
+            id: number;
+            f_name: {} | null;
+            l_name: {} | null;
+            phone: {} | null;
+            email: {} | null;
+            image_full_url: string | null;
+        } | null;
         mysql_id: number;
         mysql_user_id?: number | null;
         mysql_restaurant_id?: number | null;
@@ -598,19 +636,41 @@ export declare class VendorExtrasController {
         is_halal: boolean;
         sell_count: number;
     } | null>;
-    productSearch(): {
-        products: never[];
+    productSearch(req: AuthedRequest, name?: string): Promise<{
+        products: {
+            id: number;
+            price: number;
+            tax: number;
+            discount: number;
+            restaurant_id: number;
+            category_id: number | null;
+            image: string;
+            image_full_url: string;
+            status: {};
+            mysql_id: number;
+            name?: string | null;
+            description?: string | null;
+            mysql_restaurant_id?: number | null;
+            mysql_category_id?: number | null;
+            legacy?: Record<string, unknown>;
+        }[];
         total_size: number;
-    };
-    productStatus(): {
+    }>;
+    productStatusGet(query?: Record<string, unknown>): Promise<{
         message: string;
-    };
-    productRecommended(): {
+    }>;
+    productStatus(body?: Record<string, unknown>, query?: Record<string, unknown>): Promise<{
         message: string;
-    };
-    updateStock(): {
+    }>;
+    productRecommendedGet(query?: Record<string, unknown>): Promise<{
         message: string;
-    };
+    }>;
+    productRecommended(body?: Record<string, unknown>, query?: Record<string, unknown>): Promise<{
+        message: string;
+    }>;
+    updateStock(body?: Record<string, unknown>): Promise<{
+        message: string;
+    }>;
     productStore(req: AuthedRequest, body?: Record<string, unknown>, files?: {
         image?: Express.Multer.File[];
         meta_image?: Express.Multer.File[];
@@ -653,9 +713,9 @@ export declare class VendorExtrasController {
         errors?: undefined;
     }>;
     private parseProductTranslations;
-    productDelete(): {
+    productDelete(body?: Record<string, unknown>, idQ?: string): Promise<{
         message: string;
-    };
+    }>;
     productReviews(idStr?: string): Promise<{
         id: number;
         food_id: number;
@@ -664,9 +724,9 @@ export declare class VendorExtrasController {
         rating: number | null;
         reply: string | null;
     }[]>;
-    productReply(): {
+    productReply(body?: Record<string, unknown>): Promise<{
         message: string;
-    };
+    }>;
     productLimits(): {
         remaining: string;
     };
@@ -682,10 +742,39 @@ export declare class VendorExtrasController {
         image: string | null;
         status: boolean | null;
     }[]>;
-    categoryProducts(): {
-        products: never[];
+    childCategoriesByPath(idStr: string): Promise<{
+        id: number;
+        name: string | null;
+        image: string | null;
+        status: boolean | null;
+    }[]>;
+    categoryProducts(req: AuthedRequest, categoryIdStr?: string, limitStr?: string, offsetStr?: string): Promise<{
         total_size: number;
-    };
+        limit: number;
+        offset: number;
+        products: {
+            id: number;
+            price: number;
+            tax: number;
+            discount: number;
+            restaurant_id: number;
+            category_id: number | null;
+            rating_count: number;
+            avg_rating: number;
+            rating: {};
+            image: string;
+            image_full_url: string;
+            stock_type: {};
+            item_stock: number;
+            status: {};
+            mysql_id: number;
+            name?: string | null;
+            description?: string | null;
+            mysql_restaurant_id?: number | null;
+            mysql_category_id?: number | null;
+            legacy?: Record<string, unknown>;
+        }[];
+    }>;
     vendorAddons(req: AuthedRequest): Promise<{
         id: number;
         restaurant_id: number;
@@ -711,15 +800,48 @@ export declare class VendorExtrasController {
     }[] | {
         addons: never[];
     }>;
-    addonStore(): {
+    addonStore(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
         message: string;
-    };
-    addonUpdate(): {
+        errors?: undefined;
+        id?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+        id?: undefined;
+    } | {
         message: string;
-    };
-    addonDelete(): {
+        id: number;
+        errors?: undefined;
+    }>;
+    addonUpdatePut(body?: Record<string, unknown>): Promise<{
         message: string;
-    };
+        errors?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+    }>;
+    addonUpdate(body?: Record<string, unknown>): Promise<{
+        message: string;
+        errors?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+    }>;
+    addonDeletePost(body?: Record<string, unknown>, idQ?: string): Promise<{
+        message: string;
+    }>;
+    addonDelete(body?: Record<string, unknown>, idQ?: string): Promise<{
+        message: string;
+    }>;
     attributes(): Promise<{
         id: number;
         name: string | null;
@@ -746,39 +868,119 @@ export declare class VendorExtrasController {
         delivery_men: never[];
         total_size: number;
     }>;
-    dmPreview(): null;
-    dmStore(): {
+    dmPreview(idStr?: string): Promise<{
+        id: number;
+        f_name: string | null;
+        l_name: string | null;
+        phone: string | null;
+        status: boolean | null;
+        application_status: string | null;
+    } | null>;
+    dmStore(req: AuthedRequest, body?: Record<string, unknown>, files?: {
+        image?: Express.Multer.File[];
+    }): Promise<{
         message: string;
-    };
-    dmUpdate(): {
+        errors?: undefined;
+        id?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+        id?: undefined;
+    } | {
         message: string;
-    };
-    dmDelete(): {
+        id: number;
+        errors?: undefined;
+    }>;
+    dmUpdate(body?: Record<string, unknown>, files?: {
+        image?: Express.Multer.File[];
+    }): Promise<{
         message: string;
-    };
-    dmStatus(): {
+        errors?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+    }>;
+    dmDelete(body?: Record<string, unknown>, idQ?: string): Promise<{
         message: string;
-    };
-    dmAssign(): {
+    }>;
+    dmStatus(body?: Record<string, unknown>): Promise<{
         message: string;
-    };
-    vendorCouponList(): {
-        coupons: never[];
-        total_size: number;
-    };
-    vendorCouponStore(): {
+    }>;
+    dmAssign(body?: Record<string, unknown>): Promise<{
         message: string;
-    };
-    vendorCouponUpdate(): {
+    }>;
+    private shapeCoupon;
+    vendorCouponList(req: AuthedRequest): Promise<{
+        data: {} | null;
+        customer_id: {};
+        restaurant_name: string | null;
+        id: number;
+        title: {} | null;
+        code: {} | null;
+        coupon_type: {};
+        discount: number;
+        discount_type: {};
+        min_purchase: number;
+        max_discount: number;
+        start_date: {} | null;
+        expire_date: {} | null;
+        limit: {} | null;
+        status: {};
+        total_uses: number;
+        restaurant_id: {} | null;
+    }[]>;
+    vendorCouponStore(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
         message: string;
-    };
-    vendorCouponStatus(): {
+        errors?: undefined;
+        id?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+        id?: undefined;
+    } | {
         message: string;
-    };
-    vendorCouponDelete(): {
+        id: number;
+        errors?: undefined;
+    }>;
+    vendorCouponUpdatePut(body?: Record<string, unknown>): Promise<{
         message: string;
-    };
-    vendorCouponView(): {};
+        errors?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+    }>;
+    vendorCouponUpdate(body?: Record<string, unknown>): Promise<{
+        message: string;
+        errors?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+    }>;
+    vendorCouponStatus(body?: Record<string, unknown>): Promise<{
+        message: string;
+    }>;
+    vendorCouponDeletePost(body?: Record<string, unknown>, idQ?: string): Promise<{
+        message: string;
+    }>;
+    vendorCouponDelete(body?: Record<string, unknown>, idQ?: string): Promise<{
+        message: string;
+    }>;
+    vendorCouponView(idStr?: string): Promise<{}>;
     walletPaymentList(): {
         data: never[];
         total_size: number;
@@ -810,13 +1012,32 @@ export declare class VendorExtrasController {
         method_fields: {} | null;
         is_default: number | boolean | null;
     }[]>;
-    getWithdrawList(): {
-        data: never[];
+    getWithdrawList(req: AuthedRequest): Promise<{
+        data: {
+            id: number;
+            amount: number;
+            approved: {};
+            withdraw_method_id: {} | null;
+            created_at: {} | null;
+        }[];
         total_size: number;
-    };
-    requestWithdraw(): {
+    }>;
+    requestWithdraw(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
         message: string;
-    };
+        errors?: undefined;
+        id?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+        id?: undefined;
+    } | {
+        message: string;
+        id: number;
+        errors?: undefined;
+    }>;
     private vendorOrdersForReports;
     earningReport(req: AuthedRequest): Promise<{
         total: number;
@@ -852,14 +1073,27 @@ export declare class VendorExtrasController {
         total_amount: number;
         total_orders: number;
     };
-    taxReport(req: AuthedRequest): Promise<{
-        data: {
-            order_id: number;
-            order_amount: number;
-            tax_amount: number;
-            created_at: {} | null;
+    taxReport(req: AuthedRequest, limitStr?: string, offsetStr?: string): Promise<{
+        total_size: number;
+        limit: number;
+        offset: number;
+        taxSummary: {
+            tax_name: string;
+            tax_label: string;
+            total_tax: number;
         }[];
-        total: number;
+        totalOrders: number;
+        totalOrderAmount: number;
+        totalTax: number;
+        orders: {
+            id: number;
+            order_amount: number;
+            total_tax_amount: number;
+            order_status: {} | null;
+            payment_status: {} | null;
+            created_at: {} | null;
+            orderTaxes: never[];
+        }[];
     }>;
     disbursementReport(): {
         data: never[];
@@ -891,7 +1125,7 @@ export declare class VendorExtrasController {
     searchedFood(): {
         products: never[];
     };
-    vendorNotifications(): Promise<{
+    vendorNotifications(req: AuthedRequest): Promise<{
         id: number;
         title: string | null;
         description: string | null;
@@ -916,54 +1150,134 @@ export declare class VendorExtrasController {
     campaignLeave(): {
         message: string;
     };
-    ads(req: AuthedRequest): Promise<{
+    private shapeAd;
+    private parseAdTranslations;
+    private createAdvertisement;
+    ads(req: AuthedRequest, offsetQ?: string, limitQ?: string, adsType?: string): Promise<{
+        total_size: number;
+        limit: number;
+        offset: number;
+        all: number;
+        running: number;
+        pending: number;
+        denied: number;
+        approved: number;
+        expired: number;
+        paused: number;
+        adds: {
+            id: number;
+            restaurant_id: number;
+            add_type: {};
+            title: {} | null;
+            description: {} | null;
+            start_date: {} | null;
+            end_date: {} | null;
+            pause_note: {} | null;
+            cancellation_note: {} | null;
+            cover_image: {} | null;
+            profile_image: {} | null;
+            video_attachment: {} | null;
+            priority: number;
+            is_rating_active: number;
+            is_review_active: number;
+            is_paid: number;
+            is_updated: number;
+            created_by_id: number;
+            created_by_type: {};
+            status: {};
+            active: number;
+            created_at: {} | null;
+            updated_at: {} | null;
+            cover_image_full_url: string | null;
+            profile_image_full_url: string | null;
+            video_attachment_full_url: string | null;
+            translations: any[];
+            storage: never[];
+        }[];
+    }>;
+    adDetails(idStr: string): Promise<{
         id: number;
         restaurant_id: number;
+        add_type: {};
+        title: {} | null;
+        description: {} | null;
+        start_date: {} | null;
+        end_date: {} | null;
+        pause_note: {} | null;
+        cancellation_note: {} | null;
+        cover_image: {} | null;
+        profile_image: {} | null;
+        video_attachment: {} | null;
+        priority: number;
+        is_rating_active: number;
+        is_review_active: number;
+        is_paid: number;
+        is_updated: number;
         created_by_id: number;
-        mysql_id: number;
-        mysql_restaurant_id?: number | null;
-        mysql_created_by_id?: number | null;
-        legacy?: Record<string, unknown>;
-    }[] | {
+        created_by_type: {};
+        status: {};
+        active: number;
+        created_at: {} | null;
+        updated_at: {} | null;
+        cover_image_full_url: string | null;
+        profile_image_full_url: string | null;
+        video_attachment_full_url: string | null;
+        translations: any[];
+        storage: never[];
+    } | null>;
+    adStore(req: AuthedRequest, body?: Record<string, unknown>, files?: {
+        cover_image?: Express.Multer.File[];
+        profile_image?: Express.Multer.File[];
+        video_attachment?: Express.Multer.File[];
+    }): Promise<{
+        message: string;
+        errors?: undefined;
+        id?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+        id?: undefined;
+    } | {
+        message: string;
         id: number;
-        restaurant_id: number;
-        created_by_id: number;
-        created_at: Date | null;
-        updated_at: Date | null;
-        status: import("@prisma/client").$Enums.advertisements_status;
-        description: string | null;
-        priority: number | null;
-        title: string | null;
-        start_date: Date;
-        end_date: Date;
-        add_type: import("@prisma/client").$Enums.advertisements_add_type;
-        pause_note: string | null;
-        cancellation_note: string | null;
-        cover_image: string | null;
-        profile_image: string | null;
-        video_attachment: string | null;
-        is_rating_active: boolean;
-        is_review_active: boolean;
-        is_paid: boolean;
-        is_updated: boolean;
-        created_by_type: string;
-    }[]>;
-    adDetails(): null;
-    adStore(): {
+        errors?: undefined;
+    }>;
+    adCopy(req: AuthedRequest, body?: Record<string, unknown>, files?: {
+        cover_image?: Express.Multer.File[];
+        profile_image?: Express.Multer.File[];
+        video_attachment?: Express.Multer.File[];
+    }): Promise<{
         message: string;
-    };
-    adUpdate(): {
+        errors?: undefined;
+        id?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+        id?: undefined;
+    } | {
         message: string;
-    };
-    adStatus(): {
+        id: number;
+        errors?: undefined;
+    }>;
+    adUpdate(idStr: string, body?: Record<string, unknown>, files?: {
+        cover_image?: Express.Multer.File[];
+        profile_image?: Express.Multer.File[];
+        video_attachment?: Express.Multer.File[];
+    }): Promise<{
         message: string;
-    };
-    adCopy(): {
+    }>;
+    adStatus(body?: Record<string, unknown>): Promise<{
         message: string;
-    };
-    adDelete(): {
+    }>;
+    adDelete(idStr: string): Promise<{
         message: string;
-    };
+    }>;
     businessPlan(req: AuthedRequest): Promise<{
         commission: number;
         subscription: number;
@@ -971,19 +1285,9 @@ export declare class VendorExtrasController {
         restaurant_id: number | null;
         restaurant_name: string | null;
     }>;
-    packageView(): {
-        package: {
-            id: number;
-            package_name: string;
-            commission_status: number;
-            commission: number;
-            package_type: string;
-            validity: number;
-            price: number;
-            plan_type: string;
-        };
-        transactions: never[];
-    };
+    packageView(): Promise<{
+        packages: Record<string, unknown>[];
+    }>;
     subscriptionTransactionsList(): {
         transactions: never[];
         total_size: number;
