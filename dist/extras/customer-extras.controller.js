@@ -586,10 +586,38 @@ let CustomerExtrasController = class CustomerExtrasController {
                 ])
                 : [];
             const countMap = new Map(countRows.map((c) => [Number(c._id), c.count]));
+            const restIds = Array.from(new Set(rows.map((r) => Number(r.mysql_restaurant_id ?? 0)).filter((n) => n > 0)));
+            const restaurants = restIds.length
+                ? await this.mongo.findMany('restaurants', { mysql_id: { $in: restIds } })
+                : [];
+            const restMap = new Map(restaurants.map((r) => [Number(r.mysql_id), r]));
+            const vendIds = Array.from(new Set(restaurants.filter((r) => !r.logo && r.mysql_vendor_id).map((r) => Number(r.mysql_vendor_id))));
+            const vendImg = new Map();
+            if (vendIds.length) {
+                const vendors = await this.mongo.findMany('vendors', { mysql_id: { $in: vendIds } });
+                for (const v of vendors)
+                    vendImg.set(Number(v.mysql_id), v.image ?? null);
+            }
+            const me = await this.mongo.findByMysqlId('users', Number(req.actor.id));
+            const myName = me ? `${me.f_name ?? ''} ${me.l_name ?? ''}`.trim() || null : null;
             return rows.map((r) => {
                 const itemsField = r.items;
                 const embedded = Array.isArray(itemsField) ? itemsField.length : 0;
                 const detailsCount = embedded || countMap.get(Number(r.mysql_id)) || 1;
+                const rest = restMap.get(Number(r.mysql_restaurant_id ?? 0));
+                const vimg = rest && !rest.logo ? (vendImg.get(Number(rest.mysql_vendor_id ?? 0)) ?? null) : null;
+                const restaurantPayload = rest ? {
+                    id: Number(rest.mysql_id),
+                    name: rest.name ?? null,
+                    logo: rest.logo ?? vimg ?? null,
+                    logo_full_url: (0, storage_url_1.storageFullUrl)('restaurant', rest.logo ?? null) ?? (0, storage_url_1.storageFullUrl)('profile', vimg),
+                } : null;
+                const rawAddr = r.delivery_address;
+                const addrObj = rawAddr && typeof rawAddr === 'object'
+                    ? { ...rawAddr }
+                    : (typeof rawAddr === 'string' ? { address: rawAddr } : {});
+                if (!addrObj.contact_person_name && myName)
+                    addrObj.contact_person_name = myName;
                 return {
                     ...(r.legacy ?? {}),
                     ...r,
@@ -598,6 +626,8 @@ let CustomerExtrasController = class CustomerExtrasController {
                     restaurant_id: r.mysql_restaurant_id !== null && r.mysql_restaurant_id !== undefined ? Number(r.mysql_restaurant_id) : 0,
                     order_amount: toNum(r.order_amount),
                     details_count: detailsCount,
+                    restaurant: restaurantPayload,
+                    delivery_address: addrObj,
                 };
             });
         }

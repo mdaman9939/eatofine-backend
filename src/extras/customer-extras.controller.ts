@@ -788,10 +788,44 @@ export class CustomerExtrasController {
           )
         : [];
       const countMap = new Map(countRows.map((c) => [Number(c._id), c.count]));
+
+      // Batch-fetch restaurants so every order card shows the restaurant name +
+      // logo instead of a grey placeholder + blank name.
+      const restIds = Array.from(new Set(rows.map((r) => Number(r.mysql_restaurant_id ?? 0)).filter((n) => n > 0)));
+      const restaurants = restIds.length
+        ? await this.mongo.findMany<{ mysql_id: number; name?: string | null; logo?: string | null; mysql_vendor_id?: number | null }>('restaurants', { mysql_id: { $in: restIds } })
+        : [];
+      const restMap = new Map(restaurants.map((r) => [Number(r.mysql_id), r]));
+      // Vendor-image fallback for restaurants with no logo.
+      const vendIds = Array.from(new Set(restaurants.filter((r) => !r.logo && r.mysql_vendor_id).map((r) => Number(r.mysql_vendor_id))));
+      const vendImg = new Map<number, string | null>();
+      if (vendIds.length) {
+        const vendors = await this.mongo.findMany<{ mysql_id: number; image?: string | null }>('vendors', { mysql_id: { $in: vendIds } });
+        for (const v of vendors) vendImg.set(Number(v.mysql_id), v.image ?? null);
+      }
+      // The orderer's name — these are the customer's own orders, so fall back
+      // to their profile name when the saved address has no contact name.
+      const me = await this.mongo.findByMysqlId<{ mysql_id: number; f_name?: string; l_name?: string }>('users', Number(req.actor!.id));
+      const myName = me ? `${me.f_name ?? ''} ${me.l_name ?? ''}`.trim() || null : null;
+
       return rows.map((r) => {
         const itemsField = (r as unknown as { items?: unknown[] }).items;
         const embedded = Array.isArray(itemsField) ? itemsField.length : 0;
         const detailsCount = embedded || countMap.get(Number(r.mysql_id)) || 1;
+        const rest = restMap.get(Number(r.mysql_restaurant_id ?? 0));
+        const vimg = rest && !rest.logo ? (vendImg.get(Number(rest.mysql_vendor_id ?? 0)) ?? null) : null;
+        const restaurantPayload = rest ? {
+          id: Number(rest.mysql_id),
+          name: rest.name ?? null,
+          logo: rest.logo ?? vimg ?? null,
+          logo_full_url: storageFullUrl('restaurant', rest.logo ?? null) ?? storageFullUrl('profile', vimg),
+        } : null;
+        // Preserve any saved delivery_address but guarantee a contact name.
+        const rawAddr = (r as { delivery_address?: unknown }).delivery_address;
+        const addrObj: Record<string, unknown> = rawAddr && typeof rawAddr === 'object'
+          ? { ...(rawAddr as Record<string, unknown>) }
+          : (typeof rawAddr === 'string' ? { address: rawAddr } : {});
+        if (!addrObj.contact_person_name && myName) addrObj.contact_person_name = myName;
         return {
           ...(r.legacy ?? {}),
           ...r,
@@ -800,6 +834,8 @@ export class CustomerExtrasController {
           restaurant_id: r.mysql_restaurant_id !== null && r.mysql_restaurant_id !== undefined ? Number(r.mysql_restaurant_id) : 0,
           order_amount: toNum(r.order_amount),
           details_count: detailsCount,
+          restaurant: restaurantPayload,
+          delivery_address: addrObj,
         };
       });
     }

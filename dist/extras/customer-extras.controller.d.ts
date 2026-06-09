@@ -324,6 +324,13 @@ export declare class CustomerExtrasController {
         restaurant_id: number;
         order_amount: number;
         details_count: number;
+        restaurant: {
+            id: number;
+            name: string | null;
+            logo: string | null;
+            logo_full_url: string | null;
+        } | null;
+        delivery_address: Record<string, unknown>;
         mysql_id: number;
         mysql_user_id?: number | null;
         mysql_restaurant_id?: number | null;
