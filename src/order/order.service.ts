@@ -10,6 +10,9 @@ interface MongoFood {
   tax_type?: string;
   veg?: boolean;
   mysql_category_id?: number;
+  stock_type?: string;
+  item_stock?: number;
+  sell_count?: number;
 }
 
 interface MongoRestaurant {
@@ -113,6 +116,24 @@ export class OrderService {
       const itemIds = body.cart.map((c) => Number(c.item_id ?? 0));
       const foods = await this.mongo.findMany<MongoFood>('foods', { mysql_id: { $in: itemIds } });
       const foodById = new Map<number, MongoFood>(foods.map((f) => [Number(f.mysql_id), f]));
+
+      // Stock guard — block ordering an out-of-stock item (or more than what is
+      // left). Foods with stock_type 'unlimited' are always available.
+      for (const c of body.cart) {
+        const f = foodById.get(Number(c.item_id ?? 0));
+        if (!f) continue;
+        const stockType = String(f.stock_type ?? 'unlimited');
+        if (stockType !== 'unlimited') {
+          const available = Number(f.item_stock ?? 0);
+          const wanted = Number(c.quantity ?? 1);
+          if (available <= 0) {
+            throw new BadRequestException({ errors: [{ code: 'stock', message: `${f.name ?? 'This item'} is out of stock` }] });
+          }
+          if (wanted > available) {
+            throw new BadRequestException({ errors: [{ code: 'stock', message: `Only ${available} left of ${f.name ?? 'this item'}` }] });
+          }
+        }
+      }
 
       let orderAmount = 0;
       let totalTax = 0;
@@ -265,6 +286,19 @@ export class OrderService {
           created_at: now,
           updated_at: now,
         });
+      }
+
+      // Decrement stock for limited-stock foods + bump sell_count, so the item
+      // goes "out of stock" once depleted and can't be ordered again.
+      for (const c of body.cart) {
+        const f = foodById.get(Number(c.item_id ?? 0));
+        if (!f) continue;
+        const qty = Number(c.quantity ?? 1);
+        const data: Record<string, unknown> = { sell_count: Number(f.sell_count ?? 0) + qty, updated_at: now };
+        if (String(f.stock_type ?? 'unlimited') !== 'unlimited') {
+          data.item_stock = Math.max(0, Number(f.item_stock ?? 0) - qty);
+        }
+        await this.mongo.updateOne('foods', { mysql_id: Number(f.mysql_id) }, data).catch(() => undefined);
       }
 
       // In-app notification for the restaurant — so the vendor's notification

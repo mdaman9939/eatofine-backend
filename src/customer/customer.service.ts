@@ -409,8 +409,13 @@ export class CustomerService {
 
     if (this.useMongo()) {
       const itemIdNum = Number(body.item_id);
-      const food = await this.mongo.findByMysqlId<MongoFoodDoc>('foods', itemIdNum);
+      const food = await this.mongo.findByMysqlId<MongoFoodDoc & { stock_type?: string; item_stock?: number; name?: string }>('foods', itemIdNum);
       if (!food) throw new NotFoundException({ errors: [{ code: 'item_id', message: 'not_found' }] });
+
+      // Block adding an out-of-stock item to the cart (unlimited = always ok).
+      if (String(food.stock_type ?? 'unlimited') !== 'unlimited' && Number(food.item_stock ?? 0) <= 0) {
+        return { errors: [{ code: 'stock', message: `${food.name ?? 'This item'} is out of stock` }] };
+      }
 
       const existing = await this.mongo.findOne<MongoCartDoc>('carts', {
         user_id: Number(identity.id),
