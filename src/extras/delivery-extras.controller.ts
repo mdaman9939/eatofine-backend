@@ -1,9 +1,13 @@
-import { Body, Controller, Delete, Get, Post, Query, Req, UseGuards, HttpCode } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Post, Query, Req, UseGuards, HttpCode, UseInterceptors, UploadedFiles } from '@nestjs/common';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
+import * as fs from 'fs';
+import * as path from 'path';
 import { AuthGuard, RequireAuth } from '../auth/auth.guard';
 import type { AuthedRequest } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { storageFullUrl } from '../common/storage-url';
+import { compressImage } from '../common/image-compress';
 
 // Delivery-man app endpoints beyond the existing core ops. All return
 // empty / acknowledged shapes so the DM app navigates without 404s.
@@ -193,6 +197,7 @@ export class DeliveryExtrasController {
         email: d.email ?? null,
         phone: d.phone ?? null,
         image: d.image ?? null,
+        image_full_url: storageFullUrl('delivery-man', (d.image as string | null | undefined) ?? null),
         status: d.status ?? null,
         active: Number(d.active ?? 0) ? 1 : 0,
         application_status: d.application_status ?? null,
@@ -243,22 +248,58 @@ export class DeliveryExtrasController {
     };
   }
 
+  /** Save an uploaded image: compress to a small WebP, write to disk
+   *  (best-effort) + persist the bytes in Mongo (durable). Returns filename. */
+  private async saveImage(file: Express.Multer.File | undefined, folder: string): Promise<string | null> {
+    if (!file || !file.buffer || file.buffer.length === 0) return null;
+    let data = file.buffer;
+    let ext = path.extname(file.originalname || '').toLowerCase() || '.png';
+    let contentType = file.mimetype || 'image/png';
+    if (/^image\//i.test(contentType) && !/svg/i.test(contentType)) {
+      try { const c = await compressImage(file.buffer); if (c) { data = c.buffer; ext = c.ext; contentType = c.contentType; } } catch { /* keep original */ }
+    }
+    const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+    try {
+      const root = process.env.STORAGE_ROOT ?? path.resolve(__dirname, '../../storage/app/public');
+      const dir = path.join(root, folder);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, filename), data);
+    } catch { /* disk best-effort */ }
+    if (data.length < 15 * 1024 * 1024) {
+      await this.mongo.insertOne('uploads', { path: `${folder}/${filename}`, content_type: contentType, data, size: data.length, created_at: new Date() }).catch(() => undefined);
+    }
+    return filename;
+  }
+
+  // Edit Profile sends multipart/form-data with an `image` file alongside the
+  // text fields — without the interceptor the body is undefined and nothing
+  // (name / email / image) updates.
   @HttpCode(200)
   @Post('update-profile')
-  async updateProfile(@Req() req: AuthedRequest, @Body() body: { f_name?: string; l_name?: string; email?: string }) {
+  @UseInterceptors(FileFieldsInterceptor([{ name: 'image', maxCount: 1 }], { limits: { fileSize: 10 * 1024 * 1024 } }))
+  async updateProfile(
+    @Req() req: AuthedRequest,
+    @Body() body: Record<string, unknown> = {},
+    @UploadedFiles() files: { image?: Express.Multer.File[] } = {},
+  ) {
+    const b = body ?? {};
     const data: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(body)) if (v !== undefined) data[k] = v;
-    if (Object.keys(data).length) {
-      if (this.useMongo()) {
-        await this.mongo.updateOne(
-          'delivery_men',
-          { mysql_id: Number(req.actor!.id) },
-          { ...data, updated_at: new Date() },
-        );
-        return { message: 'Profile updated' };
-      }
-      await this.prisma.delivery_men.update({ where: { id: req.actor!.id }, data });
+    if (b.f_name !== undefined) data.f_name = String(b.f_name);
+    if (b.l_name !== undefined) data.l_name = String(b.l_name);
+    if (b.email !== undefined) data.email = String(b.email);
+    if (typeof b.password === 'string' && b.password.length > 1) {
+      const bcrypt = await import('bcrypt');
+      data.password = (await bcrypt.hash(b.password, 10)).replace(/^\$2b\$/, '$2y$');
     }
+    const imageName = await this.saveImage(files?.image?.[0], 'delivery-man');
+    if (imageName) data.image = imageName;
+    if (Object.keys(data).length === 0) return { message: 'nothing to update' };
+    data.updated_at = new Date();
+    if (this.useMongo()) {
+      await this.mongo.updateOne('delivery_men', { mysql_id: Number(req.actor!.id) }, data);
+      return { message: 'Profile updated', image: imageName ?? undefined };
+    }
+    await this.prisma.delivery_men.update({ where: { id: req.actor!.id }, data: data as never });
     return { message: 'Profile updated' };
   }
 
