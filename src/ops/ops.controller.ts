@@ -49,19 +49,12 @@ export class OpsController {
     return this.ops.vendorAllDeliveryMen(req.actor!.id);
   }
 
-  @Get('delivery-man/current-orders')
-  @UseGuards(AuthGuard)
-  @RequireAuth('deliveryman')
-  dmCurrent(@Req() req: AuthedRequest) {
-    return this.ops.dmCurrentOrders(req.actor!.id);
-  }
-
-  @Get('delivery-man/latest-orders')
-  @UseGuards(AuthGuard)
-  @RequireAuth('deliveryman')
-  dmLatest(@Req() req: AuthedRequest) {
-    return this.ops.dmLatestOrders(req.actor!.id);
-  }
+  // NOTE: `delivery-man/current-orders` and `delivery-man/latest-orders` are
+  // intentionally handled by DeliveryExtrasController instead. Those versions
+  // enrich each order with the restaurant name/logo, item count and customer —
+  // a duplicate route here would shadow them (NestJS matches the first
+  // registered handler) and the DM order list would show "No restaurant data
+  // found" + "0 Item" + "All 0" tab counts.
 
   @Get('delivery-man/order-details/:orderId')
   @UseGuards(AuthGuard)

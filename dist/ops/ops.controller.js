@@ -39,12 +39,6 @@ let OpsController = class OpsController {
     vendorAllDMs(req) {
         return this.ops.vendorAllDeliveryMen(req.actor.id);
     }
-    dmCurrent(req) {
-        return this.ops.dmCurrentOrders(req.actor.id);
-    }
-    dmLatest(req) {
-        return this.ops.dmLatestOrders(req.actor.id);
-    }
     dmDetail(req, orderId) {
         return this.ops.dmOrderDetail(req.actor.id, orderId);
     }
@@ -112,24 +106,6 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], OpsController.prototype, "vendorAllDMs", null);
-__decorate([
-    (0, common_1.Get)('delivery-man/current-orders'),
-    (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
-    (0, auth_guard_1.RequireAuth)('deliveryman'),
-    __param(0, (0, common_1.Req)()),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
-    __metadata("design:returntype", void 0)
-], OpsController.prototype, "dmCurrent", null);
-__decorate([
-    (0, common_1.Get)('delivery-man/latest-orders'),
-    (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
-    (0, auth_guard_1.RequireAuth)('deliveryman'),
-    __param(0, (0, common_1.Req)()),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
-    __metadata("design:returntype", void 0)
-], OpsController.prototype, "dmLatest", null);
 __decorate([
     (0, common_1.Get)('delivery-man/order-details/:orderId'),
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
