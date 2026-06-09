@@ -115,15 +115,4 @@ export declare class CatalogController {
         currency_symbol: string | null;
         exchange_rate: import("@prisma/client/runtime/library").Decimal | null;
     }[]>;
-    ads(): Promise<{
-        id: number;
-        title: string | null;
-        description: string | null;
-        status: string | null;
-    }[]> | Promise<{
-        id: bigint;
-        title: string | null;
-        description: string | null;
-        status: string;
-    }[]>;
 }

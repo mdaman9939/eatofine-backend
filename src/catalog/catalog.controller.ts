@@ -43,8 +43,11 @@ export class CatalogController {
     return this.catalog.listCurrencies();
   }
 
-  @Get('advertisement/list')
-  ads() {
-    return this.catalog.listAdvertisements();
-  }
+  // NOTE: `advertisement/list` is intentionally handled by
+  // CatalogExtrasController instead — that version enriches each ad with the
+  // restaurant name/logo, falls back the cover/profile image to the
+  // restaurant's own images, filters out ads for inactive restaurants, and
+  // sets restaurant_status. A duplicate route here would shadow it (NestJS
+  // matches the first-registered handler) and the home highlight card would
+  // show a grey box + "Restaurant is not available".
 }
