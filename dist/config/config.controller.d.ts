@@ -114,6 +114,12 @@ export declare class ConfigController {
         invoice_settings: {
             invoice_logo_full_url: string | null;
         };
+        privacy_policy: string | null;
+        terms_and_conditions: string | null;
+        about_us: string | null;
+        refund_policy: string | null;
+        cancellation_policy: string | null;
+        shipping_policy: string | null;
     }>;
     placeAutocomplete(searchText?: string): {
         suggestions: {

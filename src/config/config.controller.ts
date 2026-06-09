@@ -149,6 +149,15 @@ export class ConfigController {
       is_mail_active: false,
       openai_status: await this.bs.getInt('openai_status'),
       invoice_settings: { invoice_logo_full_url: fullUrl('business', logo) },
+      // Footer / legal pages — the apps render these from the config model
+      // (configModel.privacyPolicy etc.), NOT a separate endpoint, so they must
+      // be inlined here or the Privacy Policy / Terms screens come up blank.
+      privacy_policy: await this.bs.get('privacy_policy'),
+      terms_and_conditions: await this.bs.get('terms_and_conditions'),
+      about_us: await this.bs.get('about_us'),
+      refund_policy: await this.bs.get('refund_policy'),
+      cancellation_policy: await this.bs.get('cancellation_policy'),
+      shipping_policy: await this.bs.get('shipping_policy'),
     };
   }
 

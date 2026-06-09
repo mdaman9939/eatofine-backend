@@ -1756,8 +1756,9 @@ export class VendorExtrasController {
   @Post('make-wallet-adjustment')
   walletAdjustment() { return { message: 'recorded' }; }
 
-  @Get('withdraw-method/list')
-  async withdrawMethods() {
+  /** Admin-defined withdrawal method TYPES (Bank Transfer, UPI…) — drives the
+   *  "Select payment method" dropdown on the Add Withdraw Method screen. */
+  private async activeWithdrawalMethods() {
     if (this.useMongo()) {
       // Original Prisma filter uses `is_active: 1`; in Mongo we accept either
       // the numeric or boolean truthy value.
@@ -1772,18 +1773,94 @@ export class VendorExtrasController {
     const rows = await this.prisma.withdrawal_methods.findMany({ where: { is_active: 1 } });
     return rows.map((r) => ({ id: Number(r.id), method_name: r.method_name, method_fields: r.method_fields, is_default: r.is_default }));
   }
-  @HttpCode(200)
-  @Post('withdraw-method/store')
-  withdrawStore() { return { message: 'method added' }; }
-  @HttpCode(200)
-  @Post('withdraw-method/make-default')
-  withdrawDefault() { return { message: 'default set' }; }
-  @HttpCode(200)
-  @Delete('withdraw-method/delete')
-  withdrawDelete() { return { message: 'deleted' }; }
 
   @Get('get-withdraw-method-list')
-  getWithdrawMethods() { return this.withdrawMethods(); }
+  getWithdrawMethods() { return this.activeWithdrawalMethods(); }
+
+  /** The vendor's SAVED withdraw methods (their bank account / UPI etc.) — the
+   *  Withdraw Method list screen parses this as a DisbursementMethodBody. */
+  @Get('withdraw-method/list')
+  async withdrawMethods(@Req() req: AuthedRequest) {
+    if (!this.useMongo()) return { total_size: 0, limit: 10, offset: 1, methods: [] };
+    const vendorId = Number(req.actor!.id);
+    const rows = await this.mongo.findMany<Record<string, unknown>>('withdraw_methods', { mysql_vendor_id: vendorId }, { sort: { mysql_id: -1 } });
+    return {
+      total_size: rows.length,
+      limit: 10,
+      offset: 1,
+      methods: rows.map((r) => ({
+        id: Number(r.mysql_id),
+        restaurant_id: r.mysql_restaurant_id ?? null,
+        delivery_man_id: null,
+        withdrawal_method_id: r.mysql_withdrawal_method_id ?? r.withdrawal_method_id ?? null,
+        method_name: r.method_name ?? null,
+        method_fields: Array.isArray(r.method_fields) ? r.method_fields : [],
+        is_default: r.is_default ?? 0,
+        created_at: r.created_at ?? null,
+        updated_at: r.updated_at ?? null,
+      })),
+    };
+  }
+
+  @HttpCode(200)
+  @Post('withdraw-method/store')
+  async withdrawStore(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
+    if (!this.useMongo()) return { message: 'method added' };
+    const vendorId = Number(req.actor!.id);
+    const restaurant = await this.vendorRestaurant(req).catch(() => null);
+    const methodId = Number(body.withdraw_method_id ?? body.withdrawal_method_id ?? 0);
+    if (!methodId) return { errors: [{ code: 'withdraw_method_id', message: 'select a payment method' }] };
+    // Label each value the vendor typed using the chosen method's field defs.
+    const def = await this.mongo.findByMysqlId<MongoWithdrawalMethodDoc>('withdrawal_methods', methodId);
+    const fieldDefs = (Array.isArray(def?.method_fields) ? def!.method_fields : []) as Array<{ input_name?: string; placeholder?: string }>;
+    const methodFields = fieldDefs.map((f) => ({
+      user_input: f.placeholder ?? f.input_name ?? '',
+      user_data: body[String(f.input_name)] !== undefined ? String(body[String(f.input_name)]) : '',
+    }));
+    // The vendor's first saved method becomes the default automatically.
+    const existing = await this.mongo.count('withdraw_methods', { mysql_vendor_id: vendorId });
+    const nextId = await this.mongo.nextMysqlId('withdraw_methods');
+    const now = new Date();
+    await this.mongo.insertOne('withdraw_methods', {
+      mysql_id: nextId,
+      mysql_vendor_id: vendorId,
+      mysql_restaurant_id: restaurant ? Number(restaurant.mysql_id) : null,
+      mysql_withdrawal_method_id: methodId,
+      withdrawal_method_id: methodId,
+      method_name: def?.method_name ?? null,
+      method_fields: methodFields,
+      is_default: existing === 0 ? 1 : 0,
+      created_at: now,
+      updated_at: now,
+    });
+    return { message: 'method added', id: nextId };
+  }
+
+  @HttpCode(200)
+  @Post('withdraw-method/make-default')
+  async withdrawDefault(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
+    if (!this.useMongo()) return { message: 'default set' };
+    const vendorId = Number(req.actor!.id);
+    const id = Number(body.id ?? 0);
+    if (!id) return { errors: [{ code: 'id', message: 'id required' }] };
+    // Clear the flag on every method first (no updateMany helper), then set it.
+    const all = await this.mongo.findMany<{ mysql_id: number }>('withdraw_methods', { mysql_vendor_id: vendorId });
+    for (const m of all) {
+      await this.mongo.updateOne('withdraw_methods', { mysql_id: Number(m.mysql_id) }, { is_default: Number(m.mysql_id) === id ? 1 : 0 });
+    }
+    return { message: 'default set' };
+  }
+
+  @HttpCode(200)
+  @Delete('withdraw-method/delete')
+  async withdrawDelete(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
+    if (!this.useMongo()) return { message: 'deleted' };
+    const vendorId = Number(req.actor!.id);
+    const id = Number(body.id ?? 0);
+    if (!id) return { errors: [{ code: 'id', message: 'id required' }] };
+    await this.mongo.deleteOne('withdraw_methods', { mysql_id: id, mysql_vendor_id: vendorId });
+    return { message: 'deleted' };
+  }
 
   /** List this vendor's past withdraw requests (newest first). */
   @Get('get-withdraw-list')

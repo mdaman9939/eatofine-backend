@@ -1369,7 +1369,7 @@ let VendorExtrasController = class VendorExtrasController {
     walletPaymentList() { return { data: [], total_size: 0 }; }
     collectedCash() { return { message: 'recorded' }; }
     walletAdjustment() { return { message: 'recorded' }; }
-    async withdrawMethods() {
+    async activeWithdrawalMethods() {
         if (this.useMongo()) {
             const rows = await this.mongo.findMany('withdrawal_methods', { $or: [{ is_active: 1 }, { is_active: true }] });
             return rows.map((r) => ({
@@ -1382,10 +1382,83 @@ let VendorExtrasController = class VendorExtrasController {
         const rows = await this.prisma.withdrawal_methods.findMany({ where: { is_active: 1 } });
         return rows.map((r) => ({ id: Number(r.id), method_name: r.method_name, method_fields: r.method_fields, is_default: r.is_default }));
     }
-    withdrawStore() { return { message: 'method added' }; }
-    withdrawDefault() { return { message: 'default set' }; }
-    withdrawDelete() { return { message: 'deleted' }; }
-    getWithdrawMethods() { return this.withdrawMethods(); }
+    getWithdrawMethods() { return this.activeWithdrawalMethods(); }
+    async withdrawMethods(req) {
+        if (!this.useMongo())
+            return { total_size: 0, limit: 10, offset: 1, methods: [] };
+        const vendorId = Number(req.actor.id);
+        const rows = await this.mongo.findMany('withdraw_methods', { mysql_vendor_id: vendorId }, { sort: { mysql_id: -1 } });
+        return {
+            total_size: rows.length,
+            limit: 10,
+            offset: 1,
+            methods: rows.map((r) => ({
+                id: Number(r.mysql_id),
+                restaurant_id: r.mysql_restaurant_id ?? null,
+                delivery_man_id: null,
+                withdrawal_method_id: r.mysql_withdrawal_method_id ?? r.withdrawal_method_id ?? null,
+                method_name: r.method_name ?? null,
+                method_fields: Array.isArray(r.method_fields) ? r.method_fields : [],
+                is_default: r.is_default ?? 0,
+                created_at: r.created_at ?? null,
+                updated_at: r.updated_at ?? null,
+            })),
+        };
+    }
+    async withdrawStore(req, body = {}) {
+        if (!this.useMongo())
+            return { message: 'method added' };
+        const vendorId = Number(req.actor.id);
+        const restaurant = await this.vendorRestaurant(req).catch(() => null);
+        const methodId = Number(body.withdraw_method_id ?? body.withdrawal_method_id ?? 0);
+        if (!methodId)
+            return { errors: [{ code: 'withdraw_method_id', message: 'select a payment method' }] };
+        const def = await this.mongo.findByMysqlId('withdrawal_methods', methodId);
+        const fieldDefs = (Array.isArray(def?.method_fields) ? def.method_fields : []);
+        const methodFields = fieldDefs.map((f) => ({
+            user_input: f.placeholder ?? f.input_name ?? '',
+            user_data: body[String(f.input_name)] !== undefined ? String(body[String(f.input_name)]) : '',
+        }));
+        const existing = await this.mongo.count('withdraw_methods', { mysql_vendor_id: vendorId });
+        const nextId = await this.mongo.nextMysqlId('withdraw_methods');
+        const now = new Date();
+        await this.mongo.insertOne('withdraw_methods', {
+            mysql_id: nextId,
+            mysql_vendor_id: vendorId,
+            mysql_restaurant_id: restaurant ? Number(restaurant.mysql_id) : null,
+            mysql_withdrawal_method_id: methodId,
+            withdrawal_method_id: methodId,
+            method_name: def?.method_name ?? null,
+            method_fields: methodFields,
+            is_default: existing === 0 ? 1 : 0,
+            created_at: now,
+            updated_at: now,
+        });
+        return { message: 'method added', id: nextId };
+    }
+    async withdrawDefault(req, body = {}) {
+        if (!this.useMongo())
+            return { message: 'default set' };
+        const vendorId = Number(req.actor.id);
+        const id = Number(body.id ?? 0);
+        if (!id)
+            return { errors: [{ code: 'id', message: 'id required' }] };
+        const all = await this.mongo.findMany('withdraw_methods', { mysql_vendor_id: vendorId });
+        for (const m of all) {
+            await this.mongo.updateOne('withdraw_methods', { mysql_id: Number(m.mysql_id) }, { is_default: Number(m.mysql_id) === id ? 1 : 0 });
+        }
+        return { message: 'default set' };
+    }
+    async withdrawDelete(req, body = {}) {
+        if (!this.useMongo())
+            return { message: 'deleted' };
+        const vendorId = Number(req.actor.id);
+        const id = Number(body.id ?? 0);
+        if (!id)
+            return { errors: [{ code: 'id', message: 'id required' }] };
+        await this.mongo.deleteOne('withdraw_methods', { mysql_id: id, mysql_vendor_id: vendorId });
+        return { message: 'deleted' };
+    }
     async getWithdrawList(req) {
         if (!this.useMongo())
             return { data: [], total_size: 0 };
@@ -2375,38 +2448,45 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], VendorExtrasController.prototype, "walletAdjustment", null);
 __decorate([
-    (0, common_1.Get)('withdraw-method/list'),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", Promise)
-], VendorExtrasController.prototype, "withdrawMethods", null);
-__decorate([
-    (0, common_1.HttpCode)(200),
-    (0, common_1.Post)('withdraw-method/store'),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
-], VendorExtrasController.prototype, "withdrawStore", null);
-__decorate([
-    (0, common_1.HttpCode)(200),
-    (0, common_1.Post)('withdraw-method/make-default'),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
-], VendorExtrasController.prototype, "withdrawDefault", null);
-__decorate([
-    (0, common_1.HttpCode)(200),
-    (0, common_1.Delete)('withdraw-method/delete'),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
-], VendorExtrasController.prototype, "withdrawDelete", null);
-__decorate([
     (0, common_1.Get)('get-withdraw-method-list'),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", void 0)
 ], VendorExtrasController.prototype, "getWithdrawMethods", null);
+__decorate([
+    (0, common_1.Get)('withdraw-method/list'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], VendorExtrasController.prototype, "withdrawMethods", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Post)('withdraw-method/store'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
+], VendorExtrasController.prototype, "withdrawStore", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Post)('withdraw-method/make-default'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
+], VendorExtrasController.prototype, "withdrawDefault", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Delete)('withdraw-method/delete'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
+], VendorExtrasController.prototype, "withdrawDelete", null);
 __decorate([
     (0, common_1.Get)('get-withdraw-list'),
     __param(0, (0, common_1.Req)()),

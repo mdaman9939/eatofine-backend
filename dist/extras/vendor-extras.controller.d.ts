@@ -1012,27 +1012,65 @@ export declare class VendorExtrasController {
     walletAdjustment(): {
         message: string;
     };
-    withdrawMethods(): Promise<{
-        id: number;
-        method_name: string | null;
-        method_fields: {} | null;
-        is_default: number | boolean | null;
-    }[]>;
-    withdrawStore(): {
-        message: string;
-    };
-    withdrawDefault(): {
-        message: string;
-    };
-    withdrawDelete(): {
-        message: string;
-    };
+    private activeWithdrawalMethods;
     getWithdrawMethods(): Promise<{
         id: number;
         method_name: string | null;
         method_fields: {} | null;
         is_default: number | boolean | null;
     }[]>;
+    withdrawMethods(req: AuthedRequest): Promise<{
+        total_size: number;
+        limit: number;
+        offset: number;
+        methods: {
+            id: number;
+            restaurant_id: {} | null;
+            delivery_man_id: null;
+            withdrawal_method_id: {} | null;
+            method_name: {} | null;
+            method_fields: any[];
+            is_default: {};
+            created_at: {} | null;
+            updated_at: {} | null;
+        }[];
+    }>;
+    withdrawStore(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
+        message: string;
+        errors?: undefined;
+        id?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+        id?: undefined;
+    } | {
+        message: string;
+        id: number;
+        errors?: undefined;
+    }>;
+    withdrawDefault(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
+        message: string;
+        errors?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+    }>;
+    withdrawDelete(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
+        message: string;
+        errors?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+    }>;
     getWithdrawList(req: AuthedRequest): Promise<{
         data: {
             id: number;
