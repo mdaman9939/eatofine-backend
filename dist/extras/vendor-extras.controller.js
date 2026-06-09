@@ -1875,6 +1875,30 @@ let VendorExtrasController = class VendorExtrasController {
             restaurant_name: r?.name ?? null,
         };
     }
+    async setBusinessPlan(req, body = {}) {
+        if (!this.useMongo())
+            return { message: 'plan updated', redirect_url: null, success: true };
+        const restaurant = await this.vendorRestaurant(req).catch(() => null);
+        if (!restaurant)
+            return { errors: [{ code: 'restaurant', message: 'restaurant not found' }] };
+        const plan = String(body.business_plan ?? 'commission');
+        const data = {
+            restaurant_model: plan === 'subscription' ? 'subscription' : 'commission',
+            updated_at: new Date(),
+        };
+        if (plan === 'subscription' && body.package_id) {
+            const pkgId = Number(body.package_id);
+            const pkg = await this.mongo.findByMysqlId('subscription_packages', pkgId).catch(() => null);
+            const validity = Number(pkg?.validity ?? 30);
+            data.subscription_id = pkgId;
+            data.subscription_expiry_date = new Date(Date.now() + validity * 24 * 60 * 60 * 1000);
+        }
+        else {
+            data.subscription_id = null;
+        }
+        await this.mongo.updateOne('restaurants', { mysql_id: Number(restaurant.mysql_id) }, data);
+        return { message: 'plan updated successfully', redirect_url: null, success: true };
+    }
     async packageView() {
         let packages = [];
         if (this.useMongo()) {
@@ -2709,6 +2733,15 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "businessPlan", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Post)('business_plan'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
+], VendorExtrasController.prototype, "setBusinessPlan", null);
 __decorate([
     (0, common_1.Get)('package-view'),
     __metadata("design:type", Function),

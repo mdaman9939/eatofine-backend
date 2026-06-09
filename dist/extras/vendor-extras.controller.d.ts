@@ -1344,6 +1344,20 @@ export declare class VendorExtrasController {
         restaurant_id: number | null;
         restaurant_name: string | null;
     }>;
+    setBusinessPlan(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
+        message: string;
+        redirect_url: null;
+        success: boolean;
+        errors?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+        redirect_url?: undefined;
+        success?: undefined;
+    }>;
     packageView(): Promise<{
         packages: Record<string, unknown>[];
     }>;

@@ -2351,6 +2351,33 @@ export class VendorExtrasController {
     };
   }
 
+  /** "Shift to New Business Plan" submit. The app POSTs here; without a handler
+   *  it 404'd and the button just spun. Updates the restaurant's plan model and
+   *  returns immediately (wallet payment → no gateway redirect). */
+  @HttpCode(200)
+  @Post('business_plan')
+  async setBusinessPlan(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
+    if (!this.useMongo()) return { message: 'plan updated', redirect_url: null, success: true };
+    const restaurant = await this.vendorRestaurant(req).catch(() => null);
+    if (!restaurant) return { errors: [{ code: 'restaurant', message: 'restaurant not found' }] };
+    const plan = String(body.business_plan ?? 'commission');
+    const data: Record<string, unknown> = {
+      restaurant_model: plan === 'subscription' ? 'subscription' : 'commission',
+      updated_at: new Date(),
+    };
+    if (plan === 'subscription' && body.package_id) {
+      const pkgId = Number(body.package_id);
+      const pkg = await this.mongo.findByMysqlId<{ mysql_id: number; validity?: number }>('subscription_packages', pkgId).catch(() => null);
+      const validity = Number(pkg?.validity ?? 30);
+      data.subscription_id = pkgId;
+      data.subscription_expiry_date = new Date(Date.now() + validity * 24 * 60 * 60 * 1000);
+    } else {
+      data.subscription_id = null;
+    }
+    await this.mongo.updateOne('restaurants', { mysql_id: Number(restaurant.mysql_id) }, data);
+    return { message: 'plan updated successfully', redirect_url: null, success: true };
+  }
+
   /** "Change Subscription Plan" lists the active packages. The app reads
    *  `{ packages: [...] }`; the old stub returned a single `package`, so the
    *  screen showed "No package available". Returns real packages, falling back
