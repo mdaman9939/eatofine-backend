@@ -228,11 +228,15 @@ export class DeliveryExtrasController {
   async toggleActive(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
     if (this.useMongo()) {
       const actorId = Number(req.actor!.id);
-      const raw = body.active ?? body.status;
-      if (raw !== undefined) {
-        const active = Number(raw) ? 1 : 0;
-        await this.mongo.updateOne('delivery_men', { mysql_id: actorId }, { active, updated_at: new Date() });
-        return { message: 'updated', active };
+      const dm = await this.mongo.findByMysqlId<{ mysql_id: number; active?: number | boolean | null }>('delivery_men', actorId);
+      if (dm) {
+        // The app sends no value — this is a TOGGLE endpoint. Flip the current
+        // active flag (or honour an explicit active/status if one is sent) and
+        // persist it, so it survives a page refresh.
+        const raw = body.active ?? body.status;
+        const next = raw !== undefined ? (Number(raw) ? 1 : 0) : (Number(dm.active ?? 0) ? 0 : 1);
+        await this.mongo.updateOne('delivery_men', { mysql_id: actorId }, { active: next, updated_at: new Date() });
+        return { message: 'updated', active: next };
       }
     }
     return { message: 'updated' };
