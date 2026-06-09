@@ -519,6 +519,7 @@ export class OrderService {
         image: customer.image ?? null,
         image_full_url: storageFullUrl('profile', customer.image ?? null),
       } : null;
+      const dmRating = deliveryMan as unknown as { avg_rating?: number | null; rating_count?: number | null };
       const dmPayload = deliveryMan ? {
         id: Number(deliveryMan.mysql_id),
         f_name: deliveryMan.f_name ?? null,
@@ -526,6 +527,8 @@ export class OrderService {
         phone: deliveryMan.phone ?? null,
         image: deliveryMan.image ?? null,
         image_full_url: storageFullUrl('delivery-man', deliveryMan.image ?? null),
+        avg_rating: dmRating.avg_rating != null ? Number(dmRating.avg_rating) : 0,
+        rating_count: dmRating.rating_count != null ? Number(dmRating.rating_count) : 0,
       } : null;
 
       return {
