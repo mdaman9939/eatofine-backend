@@ -6,7 +6,7 @@ import { AuthGuard, RequireAuth } from '../auth/auth.guard';
 import type { AuthedRequest } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
-import { storageBaseUrl } from '../common/storage-url';
+import { storageBaseUrl, storageFullUrl } from '../common/storage-url';
 import { compressImage } from '../common/image-compress';
 
 // Mongo doc shapes (only fields we read).
@@ -655,10 +655,11 @@ export class VendorExtrasController {
    *  hits `!` on a null field. The widget reads detailsCount, orderStatus,
    *  orderType, createdAt, paymentMethod — and uses `!` on each, so missing
    *  data here translates directly to a red-screen crash on the device. */
-  private shapeOrder(rIn: MongoOrderDoc, detailsCount: number) {
+  private shapeOrder(rIn: MongoOrderDoc, detailsCount: number, user?: Record<string, unknown> | null) {
     const r = rIn as MongoOrderDoc & Record<string, unknown>;
     const created = (r as { created_at?: Date | string | null }).created_at;
     const updated = (r as { updated_at?: Date | string | null }).updated_at;
+    const u = user ?? null;
     return {
       ...(r.legacy ?? {}),
       ...r,
@@ -675,7 +676,28 @@ export class VendorExtrasController {
       delivery_address: (r as { delivery_address?: unknown }).delivery_address ?? null,
       created_at: created ? new Date(created).toISOString() : new Date().toISOString(),
       updated_at: updated ? new Date(updated).toISOString() : new Date().toISOString(),
+      // Nested customer object so the restaurant sees who ordered (name / phone).
+      customer: u
+        ? {
+            id: Number(u.mysql_id),
+            f_name: u.f_name ?? null,
+            l_name: u.l_name ?? null,
+            phone: u.phone ?? null,
+            email: u.email ?? null,
+            image_full_url: storageFullUrl('profile', (u.image as string | null | undefined) ?? null),
+          }
+        : null,
     };
+  }
+
+  /** Batch-fetch the customers (users) referenced by a set of orders. */
+  private async vendorUserMap(orders: MongoOrderDoc[]): Promise<Map<number, Record<string, unknown>>> {
+    const ids = Array.from(new Set(
+      orders.map((o) => Number(o.mysql_user_id ?? 0)).filter((n) => n > 0),
+    ));
+    if (ids.length === 0) return new Map();
+    const rows = await this.mongo.findMany<Record<string, unknown>>('users', { mysql_id: { $in: ids } });
+    return new Map(rows.map((u) => [Number(u.mysql_id), u]));
   }
 
   /** Bulk count items-per-order with one Mongo aggregation. Returns a Map
@@ -705,7 +727,8 @@ export class VendorExtrasController {
         { sort: { mysql_id: -1 } },
       );
       const countsByOrderId = await this.detailsCountMap(rows.map((r) => Number(r.mysql_id)));
-      return rows.map((r) => this.shapeOrder(r, countsByOrderId.get(Number(r.mysql_id)) ?? 1));
+      const userMap = await this.vendorUserMap(rows);
+      return rows.map((r) => this.shapeOrder(r, countsByOrderId.get(Number(r.mysql_id)) ?? 1, userMap.get(Number(r.mysql_user_id ?? 0))));
     }
     const restaurant = await this.prisma.restaurants.findFirst({ where: { vendor_id: req.actor!.id }, select: { id: true } });
     if (!restaurant) return [];
@@ -727,8 +750,9 @@ export class VendorExtrasController {
         { sort: { mysql_id: -1 }, limit: 50 },
       );
       const countsByOrderId = await this.detailsCountMap(rows.map((r) => Number(r.mysql_id)));
+      const userMap = await this.vendorUserMap(rows);
       return {
-        orders: rows.map((r) => this.shapeOrder(r, countsByOrderId.get(Number(r.mysql_id)) ?? 1)),
+        orders: rows.map((r) => this.shapeOrder(r, countsByOrderId.get(Number(r.mysql_id)) ?? 1, userMap.get(Number(r.mysql_user_id ?? 0)))),
         total_size: rows.length,
       };
     }
@@ -751,7 +775,9 @@ export class VendorExtrasController {
       const o = await this.mongo.findByMysqlId<MongoOrderDoc>('orders', id);
       if (!o) return null;
       const counts = await this.detailsCountMap([Number(o.mysql_id)]);
-      return this.shapeOrder(o, counts.get(Number(o.mysql_id)) ?? 1);
+      const userId = Number(o.mysql_user_id ?? 0);
+      const user = userId > 0 ? await this.mongo.findByMysqlId<Record<string, unknown>>('users', userId) : null;
+      return this.shapeOrder(o, counts.get(Number(o.mysql_id)) ?? 1, user);
     }
 
     const o = await this.prisma.orders.findUnique({ where: { id: BigInt(id) } });
