@@ -17,6 +17,7 @@ import { AuthGuard, RequireAuth } from '../auth/auth.guard';
 import type { AuthedRequest } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { storageFullUrl } from '../common/storage-url';
 
 interface MulterFile {
   buffer: Buffer;
@@ -153,11 +154,14 @@ export class CustomerExtrasController {
         tax: toNum(f.tax),
         restaurant_id: f.mysql_restaurant_id != null ? Number(f.mysql_restaurant_id) : null,
         category_id: f.mysql_category_id != null ? Number(f.mysql_category_id) : null,
+        // The app reads image_full_url for the wishlist card image.
+        image_full_url: storageFullUrl('product', (f.image as string | null | undefined) ?? null),
       })),
       restaurant: restaurants.map((r) => ({
         id: Number(r.mysql_id),
         name: r.name ?? null,
         logo: r.logo ?? null,
+        logo_full_url: storageFullUrl('restaurant', r.logo ?? null),
         address: r.address ?? null,
         avg_rating: r.avg_rating ?? 0,
       })),
