@@ -25,27 +25,23 @@ import { MigrationModule } from './mongo/migration.module';
 @Module({
   imports: [
     NestConfig.forRoot({ isGlobal: true }),
-    // Two throttler buckets: a permissive global default + an `auth` bucket
-    // for login/signup. The default is intentionally generous — the apps are
-    // chatty (search-as-you-type + 10–15 calls per screen), so a low cap shows
-    // up as "Too Many Requests" during normal use. Tune via env if needed.
+    // ONE global throttler bucket. (A second named bucket here would apply to
+    // EVERY route — so a strict 'auth' bucket in this array silently capped all
+    // traffic. Auth routes instead override this bucket locally via @Throttle.)
+    // The global default is generous — the apps are chatty (search-as-you-type,
+    // order polling, 10–15 calls per screen, and a tester runs all 3 apps off
+    // one IP), so a low cap shows up as "Too Many Requests" during normal use.
     //
-    //   THROTTLE_LIMIT       (default 2000) requests per IP per window
-    //   THROTTLE_TTL         (default 60000 ms = 1 min)  window
-    //   AUTH_THROTTLE_LIMIT  (default 30) login/signup attempts per IP
-    //   AUTH_THROTTLE_TTL    (default 300000 ms = 5 min)  window
+    //   THROTTLE_LIMIT  (default 6000) requests per IP per window
+    //   THROTTLE_TTL    (default 60000 ms = 1 min)  window
+    //   AUTH routes are limited separately (AUTH_THROTTLE_* — see auth.controller).
     //
-    // For hardened production, lower THROTTLE_LIMIT and AUTH_THROTTLE_LIMIT.
+    // For hardened production, lower THROTTLE_LIMIT.
     ThrottlerModule.forRoot([
       {
         name: 'default',
         ttl: parseInt(process.env.THROTTLE_TTL ?? '60000', 10),
-        limit: parseInt(process.env.THROTTLE_LIMIT ?? '2000', 10),
-      },
-      {
-        name: 'auth',
-        ttl: parseInt(process.env.AUTH_THROTTLE_TTL ?? '300000', 10),
-        limit: parseInt(process.env.AUTH_THROTTLE_LIMIT ?? '30', 10),
+        limit: parseInt(process.env.THROTTLE_LIMIT ?? '6000', 10),
       },
     ]),
     PrismaModule,

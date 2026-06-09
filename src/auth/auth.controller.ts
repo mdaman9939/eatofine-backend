@@ -2,11 +2,16 @@ import { BadRequestException, Body, Controller, HttpCode, Post } from '@nestjs/c
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 
-// All login + signup routes share the strict `auth` throttler bucket
-// (5 attempts / 15 min by default — see AUTH_THROTTLE_* env vars in
-// app.module.ts). The `default` bucket is set to {limit:0} so it doesn't
-// double-count against the auth bucket.
-const AUTH_THROTTLE = { auth: {}, default: { limit: 0, ttl: 0 } } as const;
+// Login + signup routes override the single global `default` bucket with a
+// much stricter limit (30 attempts / 5 min by default — see AUTH_THROTTLE_*
+// env vars in app.module.ts). This per-route override applies ONLY to auth
+// routes, so normal app traffic keeps the generous global limit.
+const AUTH_THROTTLE = {
+  default: {
+    ttl: parseInt(process.env.AUTH_THROTTLE_TTL ?? '300000', 10),
+    limit: parseInt(process.env.AUTH_THROTTLE_LIMIT ?? '30', 10),
+  },
+} as const;
 
 @Controller('auth')
 @Throttle(AUTH_THROTTLE)
