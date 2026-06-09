@@ -488,7 +488,25 @@ export class DeliveryExtrasController {
 
   @HttpCode(200)
   @Post('accept-order')
-  acceptOrder() { return { message: 'order accepted' }; }
+  async acceptOrder(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
+    const orderId = Number(body.order_id ?? body.id ?? 0);
+    if (this.useMongo() && orderId > 0) {
+      const o = await this.mongo.findByMysqlId<{ mysql_id: number; mysql_delivery_man_id?: number | null; delivery_man_id?: number | null }>('orders', orderId);
+      if (!o) return { errors: [{ code: 'order', message: 'Order not found' }] };
+      const assigned = Number(o.mysql_delivery_man_id ?? o.delivery_man_id ?? 0);
+      // Don't let a second rider grab an order already taken by someone else.
+      if (assigned > 0 && assigned !== Number(req.actor!.id)) {
+        return { errors: [{ code: 'order', message: 'This order has already been taken by another delivery man' }] };
+      }
+      await this.mongo.updateOne('orders', { mysql_id: orderId }, {
+        mysql_delivery_man_id: Number(req.actor!.id),
+        delivery_man_id: Number(req.actor!.id),
+        updated_at: new Date(),
+      });
+      return { message: 'order accepted' };
+    }
+    return { message: 'order accepted' };
+  }
 
   @HttpCode(200)
   @Post('update-payment-status')
