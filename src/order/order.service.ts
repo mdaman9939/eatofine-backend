@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { storageFullUrl } from '../common/storage-url';
 
 interface MongoFood {
   mysql_id: number;
@@ -493,6 +494,7 @@ export class OrderService {
           : Promise.resolve(null),
       ]);
 
+      const restCover = (restaurant as { cover_photo?: string | null } | null)?.cover_photo ?? null;
       const restaurantPayload = restaurant ? {
         id: Number(restaurant.mysql_id),
         name: restaurant.name ?? 'Restaurant',
@@ -500,6 +502,11 @@ export class OrderService {
         email: restaurant.email ?? null,
         address: restaurant.address ?? null,
         logo: restaurant.logo ?? 'default.png',
+        // The Flutter app reads *_full_url for the logo / cover image.
+        logo_full_url: storageFullUrl('restaurant', restaurant.logo ?? null),
+        image_full_url: storageFullUrl('restaurant', restaurant.logo ?? null),
+        cover_photo: restCover,
+        cover_photo_full_url: storageFullUrl('restaurant/cover', restCover),
         latitude: restaurant.latitude != null ? String(restaurant.latitude) : null,
         longitude: restaurant.longitude != null ? String(restaurant.longitude) : null,
       } : null;
@@ -510,6 +517,7 @@ export class OrderService {
         phone: customer.phone ?? null,
         email: customer.email ?? null,
         image: customer.image ?? null,
+        image_full_url: storageFullUrl('profile', customer.image ?? null),
       } : null;
       const dmPayload = deliveryMan ? {
         id: Number(deliveryMan.mysql_id),
@@ -517,6 +525,7 @@ export class OrderService {
         l_name: deliveryMan.l_name ?? null,
         phone: deliveryMan.phone ?? null,
         image: deliveryMan.image ?? null,
+        image_full_url: storageFullUrl('delivery-man', deliveryMan.image ?? null),
       } : null;
 
       return {

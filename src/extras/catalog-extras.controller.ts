@@ -566,15 +566,34 @@ export class CatalogExtrasController {
         if (!s) return null;
         return /^https?:\/\//i.test(s) ? s : storageFullUrl('advertisement', s);
       };
-      return rows.map((r) => ({
-        ...r,
-        id: Number(r.mysql_id),
-        restaurant_id: Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0),
-        created_by_id: Number(r.mysql_created_by_id ?? r.created_by_id ?? 0),
-        cover_image_full_url: img(r.cover_image),
-        profile_image_full_url: img(r.profile_image),
-        video_attachment_full_url: img(r.video_attachment),
-      }));
+      // Resolve the linked restaurants so we can (a) drop ads whose restaurant
+      // no longer exists — tapping one would 404 — and (b) embed the restaurant
+      // name/logo the highlight card shows.
+      const restIds = Array.from(new Set(rows
+        .map((r) => Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0))
+        .filter((n) => n > 0)));
+      const restaurants = restIds.length
+        ? await this.mongo.findMany<{ mysql_id: number; name?: string | null; logo?: string | null }>(
+            'restaurants', { mysql_id: { $in: restIds } })
+        : [];
+      const restMap = new Map(restaurants.map((r) => [Number(r.mysql_id), r]));
+      return rows
+        .filter((r) => restMap.has(Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0)))
+        .map((r) => {
+          const rid = Number(r.mysql_restaurant_id ?? r.restaurant_id ?? 0);
+          const rest = restMap.get(rid);
+          return {
+            ...r,
+            id: Number(r.mysql_id),
+            restaurant_id: rid,
+            restaurant_name: rest?.name ?? null,
+            restaurant_logo_full_url: storageFullUrl('restaurant', rest?.logo ?? null),
+            created_by_id: Number(r.mysql_created_by_id ?? r.created_by_id ?? 0),
+            cover_image_full_url: img(r.cover_image),
+            profile_image_full_url: img(r.profile_image),
+            video_attachment_full_url: img(r.video_attachment),
+          };
+        });
     }
     // Prisma fallback: catch the inevitable MySQL-unreachable error so the
     // app keeps working in Mongo-only deployments where USE_MONGO_EXTRAS=1

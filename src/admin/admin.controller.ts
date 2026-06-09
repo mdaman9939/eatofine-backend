@@ -1218,25 +1218,37 @@ export class AdminController {
       throw new BadRequestException({ errors: [{ code: 'ext', message: 'only png/jpg/jpeg/webp/gif allowed' }] });
     }
     // Auto-compress to a small WebP (~150–300 KB). Fall back to the original
-    // bytes if sharp can't process it.
+    // bytes if sharp can't process it (compressImage never throws).
     let data = file.buffer;
     let contentType = file.mimetype || 'image/png';
-    const compressed = await compressImage(file.buffer);
-    if (compressed) { data = compressed.buffer; ext = compressed.ext; contentType = compressed.contentType; }
-    const safeDir = path.join(STORAGE_ROOT, dir);
-    fs.mkdirSync(safeDir, { recursive: true });
+    try {
+      const compressed = await compressImage(file.buffer);
+      if (compressed) { data = compressed.buffer; ext = compressed.ext; contentType = compressed.contentType; }
+    } catch { /* keep original bytes */ }
+
     const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
-    const targetPath = path.join(safeDir, filename);
-    try { fs.writeFileSync(targetPath, data); } catch { /* disk may be read-only */ }
-    // Durable copy in Mongo so the image survives Render's ephemeral disk
-    // (served back by the /storage/* Mongo fallback in main.ts).
-    void this.mongo.insertOne('uploads', {
-      path: `${dir}/${filename}`,
-      content_type: contentType,
-      data,
-      size: data.length,
-      created_at: new Date(),
-    }).catch(() => undefined);
+    // Disk write is best-effort — Render's disk can be read-only / the path may
+    // not be creatable. mkdirSync + writeFileSync must NEVER 500 the upload.
+    try {
+      const safeDir = path.join(STORAGE_ROOT, dir);
+      fs.mkdirSync(safeDir, { recursive: true });
+      fs.writeFileSync(path.join(safeDir, filename), data);
+    } catch { /* ignore — Mongo copy below is the durable store */ }
+
+    // Durable copy in Mongo (served back by the /storage/* Mongo fallback in
+    // main.ts). This is what actually persists the image, so await it and only
+    // surface a clean error if it genuinely fails.
+    try {
+      await this.mongo.insertOne('uploads', {
+        path: `${dir}/${filename}`,
+        content_type: contentType,
+        data,
+        size: data.length,
+        created_at: new Date(),
+      });
+    } catch {
+      throw new BadRequestException({ errors: [{ code: 'upload', message: 'Could not store the image. Try a smaller file.' }] });
+    }
     return { ok: true, filename, path: `${dir}/${filename}`, url: `/storage/${dir}/${filename}` };
   }
 }
