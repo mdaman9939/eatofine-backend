@@ -20,6 +20,7 @@ export declare class DeliveryExtrasController {
         phone?: undefined;
         image?: undefined;
         image_full_url?: undefined;
+        identity_image?: undefined;
         status?: undefined;
         active?: undefined;
         application_status?: undefined;
@@ -44,6 +45,7 @@ export declare class DeliveryExtrasController {
         phone: {} | null;
         image: {} | null;
         image_full_url: string | null;
+        identity_image: string | null;
         status: {} | null;
         active: number;
         application_status: {} | null;
@@ -83,6 +85,7 @@ export declare class DeliveryExtrasController {
         total_withdrawn: number;
         pending_withdraw: number;
         image_full_url?: undefined;
+        identity_image?: undefined;
         active?: undefined;
     }>;
     private saveImage;

@@ -211,6 +211,7 @@ let DeliveryExtrasController = class DeliveryExtrasController {
                 phone: d.phone ?? null,
                 image: d.image ?? null,
                 image_full_url: (0, storage_url_1.storageFullUrl)('delivery-man', d.image ?? null),
+                identity_image: (0, storage_url_1.storageFullUrl)('delivery-man', d.image ?? null),
                 status: d.status ?? null,
                 active: Number(d.active ?? 0) ? 1 : 0,
                 application_status: d.application_status ?? null,

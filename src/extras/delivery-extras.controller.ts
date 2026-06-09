@@ -198,6 +198,9 @@ export class DeliveryExtrasController {
         phone: d.phone ?? null,
         image: d.image ?? null,
         image_full_url: storageFullUrl('delivery-man', (d.image as string | null | undefined) ?? null),
+        // The DM app's ProfileModel reads the profile photo from `identity_image`
+        // (not image_full_url), so mirror the URL here or the avatar shows blank.
+        identity_image: storageFullUrl('delivery-man', (d.image as string | null | undefined) ?? null),
         status: d.status ?? null,
         active: Number(d.active ?? 0) ? 1 : 0,
         application_status: d.application_status ?? null,
