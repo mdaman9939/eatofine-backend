@@ -380,6 +380,13 @@ let AdminController = class AdminController {
             restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
         });
     }
+    foodReport(zoneId, restaurantId, categoryId) {
+        return this.admin.foodReport({
+            zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
+            restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
+            categoryId: categoryId ? parseInt(categoryId, 10) : undefined,
+        });
+    }
     expenseDetails(from, to, zoneId, restaurantId) {
         return this.admin.expenseDetails({
             from: from || undefined,
@@ -1539,6 +1546,15 @@ __decorate([
     __metadata("design:paramtypes", [String, String, String, String, String]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "salesSummary", null);
+__decorate([
+    (0, common_1.Get)('reports/food-report'),
+    __param(0, (0, common_1.Query)('zone_id')),
+    __param(1, (0, common_1.Query)('restaurant_id')),
+    __param(2, (0, common_1.Query)('category_id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "foodReport", null);
 __decorate([
     (0, common_1.Get)('reports/expense-details'),
     __param(0, (0, common_1.Query)('from')),

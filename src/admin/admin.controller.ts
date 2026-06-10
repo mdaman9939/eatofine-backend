@@ -660,6 +660,19 @@ export class AdminController {
     });
   }
 
+  @Get('reports/food-report')
+  foodReport(
+    @Query('zone_id') zoneId?: string,
+    @Query('restaurant_id') restaurantId?: string,
+    @Query('category_id') categoryId?: string,
+  ) {
+    return this.admin.foodReport({
+      zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
+      restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
+      categoryId: categoryId ? parseInt(categoryId, 10) : undefined,
+    });
+  }
+
   @Get('reports/expense-details')
   expenseDetails(
     @Query('from') from?: string,

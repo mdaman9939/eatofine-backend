@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { storageFullUrl } from '../common/storage-url';
 
 /** Shared shape for the admin food create + update endpoints. */
 export interface FoodWriteBody {
@@ -3791,6 +3792,77 @@ export class AdminService {
     }
     const total = rows.reduce((s, r) => s + r.amount, 0);
     return { total: rows.length, total_amount: Math.round(total * 100) / 100, rows };
+  }
+
+  /** Per-food sales report (StackFood's "Food Report Table"). Aggregates every
+   *  order line by food → order count, total sold, discount given, avg sale,
+   *  rating; joined with the food (name/image/price) and its restaurant. */
+  async foodReport(opts: ReportFilterOpts & { categoryId?: number } = {}) {
+    if (!this.useMongo()) return { total: 0, rows: [], yearly: [] as Array<{ year: number; total: number }> };
+    const agg = await this.mongo.aggregate<{ _id: number; order_count: number; total_amount_sold: number; total_discount: number }>(
+      'order_details',
+      [
+        {
+          $group: {
+            _id: { $ifNull: ['$food_id', '$mysql_food_id'] },
+            order_count: { $sum: 1 },
+            total_amount_sold: { $sum: { $multiply: [{ $toDouble: { $ifNull: ['$price', 0] } }, { $ifNull: ['$quantity', 1] }] } },
+            total_discount: { $sum: { $toDouble: { $ifNull: ['$discount_on_food', 0] } } },
+          },
+        },
+      ],
+    );
+    const foodIds = agg.map((a) => Number(a._id)).filter((n) => n > 0);
+    const foods = foodIds.length
+      ? await this.mongo.findMany<{ mysql_id: number; name?: string; image?: string; price?: unknown; avg_rating?: number; rating_count?: number; mysql_restaurant_id?: number; mysql_category_id?: number }>('foods', { mysql_id: { $in: foodIds } })
+      : [];
+    const foodMap = new Map(foods.map((f) => [Number(f.mysql_id), f]));
+    const restIds = Array.from(new Set(foods.map((f) => Number(f.mysql_restaurant_id ?? 0)).filter((n) => n > 0)));
+    const rests = restIds.length
+      ? await this.mongo.findMany<{ mysql_id: number; name?: string }>('restaurants', { mysql_id: { $in: restIds } })
+      : [];
+    const restMap = new Map(rests.map((r) => [Number(r.mysql_id), r.name ?? null]));
+    const num = (v: unknown) => (v == null ? 0 : Number(typeof v === 'object' ? String(v) : v) || 0);
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+
+    let rows = agg
+      .map((a) => {
+        const fid = Number(a._id);
+        const food = foodMap.get(fid);
+        if (!food) return null;
+        const sold = r2(a.total_amount_sold);
+        const oc = a.order_count;
+        return {
+          food_id: fid,
+          name: food.name ?? null,
+          image_full_url: storageFullUrl('product', food.image ?? null),
+          restaurant_id: Number(food.mysql_restaurant_id ?? 0),
+          restaurant: restMap.get(Number(food.mysql_restaurant_id ?? 0)) ?? null,
+          category_id: Number(food.mysql_category_id ?? 0),
+          order_count: oc,
+          price: num(food.price),
+          total_amount_sold: sold,
+          total_discount: r2(a.total_discount),
+          average_sale_value: oc ? r2(sold / oc) : 0,
+          avg_rating: num(food.avg_rating),
+          rating_count: Number(food.rating_count ?? 0),
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null);
+
+    if (opts.restaurantId) rows = rows.filter((r) => r.restaurant_id === Number(opts.restaurantId));
+    if (opts.categoryId) rows = rows.filter((r) => r.category_id === Number(opts.categoryId));
+    rows.sort((a, b) => b.total_amount_sold - a.total_amount_sold);
+
+    // Yearly sales statistics for the chart (sum sold per delivered-order year).
+    const yearAgg = await this.mongo.aggregate<{ _id: number; total: number }>('orders', [
+      { $match: { order_status: 'delivered' } },
+      { $group: { _id: { $year: '$created_at' }, total: { $sum: { $toDouble: { $ifNull: ['$order_amount', 0] } } } } },
+      { $sort: { _id: 1 } },
+    ]).catch(() => [] as Array<{ _id: number; total: number }>);
+    const yearly = yearAgg.filter((y) => y._id).map((y) => ({ year: Number(y._id), total: r2(y.total) }));
+
+    return { total: rows.length, rows, yearly };
   }
 
   async restaurantEarnings(limit = 10, opts: ReportFilterOpts = {}) {

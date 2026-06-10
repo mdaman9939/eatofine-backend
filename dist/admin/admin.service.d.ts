@@ -1654,6 +1654,30 @@ export declare class AdminService {
             amount: number;
         }[];
     }>;
+    foodReport(opts?: ReportFilterOpts & {
+        categoryId?: number;
+    }): Promise<{
+        total: number;
+        rows: {
+            food_id: number;
+            name: string | null;
+            image_full_url: string | null;
+            restaurant_id: number;
+            restaurant: string | null;
+            category_id: number;
+            order_count: number;
+            price: number;
+            total_amount_sold: number;
+            total_discount: number;
+            average_sale_value: number;
+            avg_rating: number;
+            rating_count: number;
+        }[];
+        yearly: {
+            year: number;
+            total: number;
+        }[];
+    }>;
     restaurantEarnings(limit?: number, opts?: ReportFilterOpts): Promise<{
         top_earners: {
             restaurant_id: number;

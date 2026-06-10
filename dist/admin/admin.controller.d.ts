@@ -1408,6 +1408,28 @@ export declare class AdminController {
             delivery: number;
         }[];
     }>;
+    foodReport(zoneId?: string, restaurantId?: string, categoryId?: string): Promise<{
+        total: number;
+        rows: {
+            food_id: number;
+            name: string | null;
+            image_full_url: string | null;
+            restaurant_id: number;
+            restaurant: string | null;
+            category_id: number;
+            order_count: number;
+            price: number;
+            total_amount_sold: number;
+            total_discount: number;
+            average_sale_value: number;
+            avg_rating: number;
+            rating_count: number;
+        }[];
+        yearly: {
+            year: number;
+            total: number;
+        }[];
+    }>;
     expenseDetails(from?: string, to?: string, zoneId?: string, restaurantId?: string): Promise<{
         total: number;
         rows: never[];

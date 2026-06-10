@@ -47,6 +47,7 @@ const common_1 = require("@nestjs/common");
 const bcrypt = __importStar(require("bcrypt"));
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
+const storage_url_1 = require("../common/storage-url");
 function vegToBool(v, fallback = true) {
     if (v === undefined || v === null)
         return fallback;
@@ -3468,6 +3469,69 @@ let AdminService = class AdminService {
         }
         const total = rows.reduce((s, r) => s + r.amount, 0);
         return { total: rows.length, total_amount: Math.round(total * 100) / 100, rows };
+    }
+    async foodReport(opts = {}) {
+        if (!this.useMongo())
+            return { total: 0, rows: [], yearly: [] };
+        const agg = await this.mongo.aggregate('order_details', [
+            {
+                $group: {
+                    _id: { $ifNull: ['$food_id', '$mysql_food_id'] },
+                    order_count: { $sum: 1 },
+                    total_amount_sold: { $sum: { $multiply: [{ $toDouble: { $ifNull: ['$price', 0] } }, { $ifNull: ['$quantity', 1] }] } },
+                    total_discount: { $sum: { $toDouble: { $ifNull: ['$discount_on_food', 0] } } },
+                },
+            },
+        ]);
+        const foodIds = agg.map((a) => Number(a._id)).filter((n) => n > 0);
+        const foods = foodIds.length
+            ? await this.mongo.findMany('foods', { mysql_id: { $in: foodIds } })
+            : [];
+        const foodMap = new Map(foods.map((f) => [Number(f.mysql_id), f]));
+        const restIds = Array.from(new Set(foods.map((f) => Number(f.mysql_restaurant_id ?? 0)).filter((n) => n > 0)));
+        const rests = restIds.length
+            ? await this.mongo.findMany('restaurants', { mysql_id: { $in: restIds } })
+            : [];
+        const restMap = new Map(rests.map((r) => [Number(r.mysql_id), r.name ?? null]));
+        const num = (v) => (v == null ? 0 : Number(typeof v === 'object' ? String(v) : v) || 0);
+        const r2 = (n) => Math.round(n * 100) / 100;
+        let rows = agg
+            .map((a) => {
+            const fid = Number(a._id);
+            const food = foodMap.get(fid);
+            if (!food)
+                return null;
+            const sold = r2(a.total_amount_sold);
+            const oc = a.order_count;
+            return {
+                food_id: fid,
+                name: food.name ?? null,
+                image_full_url: (0, storage_url_1.storageFullUrl)('product', food.image ?? null),
+                restaurant_id: Number(food.mysql_restaurant_id ?? 0),
+                restaurant: restMap.get(Number(food.mysql_restaurant_id ?? 0)) ?? null,
+                category_id: Number(food.mysql_category_id ?? 0),
+                order_count: oc,
+                price: num(food.price),
+                total_amount_sold: sold,
+                total_discount: r2(a.total_discount),
+                average_sale_value: oc ? r2(sold / oc) : 0,
+                avg_rating: num(food.avg_rating),
+                rating_count: Number(food.rating_count ?? 0),
+            };
+        })
+            .filter((r) => r !== null);
+        if (opts.restaurantId)
+            rows = rows.filter((r) => r.restaurant_id === Number(opts.restaurantId));
+        if (opts.categoryId)
+            rows = rows.filter((r) => r.category_id === Number(opts.categoryId));
+        rows.sort((a, b) => b.total_amount_sold - a.total_amount_sold);
+        const yearAgg = await this.mongo.aggregate('orders', [
+            { $match: { order_status: 'delivered' } },
+            { $group: { _id: { $year: '$created_at' }, total: { $sum: { $toDouble: { $ifNull: ['$order_amount', 0] } } } } },
+            { $sort: { _id: 1 } },
+        ]).catch(() => []);
+        const yearly = yearAgg.filter((y) => y._id).map((y) => ({ year: Number(y._id), total: r2(y.total) }));
+        return { total: rows.length, rows, yearly };
     }
     async restaurantEarnings(limit = 10, opts = {}) {
         if (this.useMongo()) {
