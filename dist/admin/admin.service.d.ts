@@ -1807,6 +1807,19 @@ export declare class AdminService {
             expenses: Record<string, unknown>[];
         };
     }>;
+    restaurantEarningDetailed(opts?: ReportFilterOpts): Promise<{
+        transactions: {
+            earnings: Record<string, unknown>[];
+            expenses: Record<string, unknown>[];
+            subscription: {
+                txn_id: string;
+                date: {} | null;
+                restaurant: string | null;
+                transaction_type: string;
+                amount: number;
+            }[];
+        };
+    }>;
     restaurantEarnings(limit?: number, opts?: ReportFilterOpts): Promise<{
         top_earners: {
             restaurant_id: number;

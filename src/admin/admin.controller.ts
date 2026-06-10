@@ -769,6 +769,21 @@ export class AdminController {
     });
   }
 
+  @Get('reports/restaurant-earning-detailed')
+  restaurantEarningDetailed(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('zone_id') zoneId?: string,
+    @Query('restaurant_id') restaurantId?: string,
+  ) {
+    return this.admin.restaurantEarningDetailed({
+      from: from || undefined,
+      to: to || undefined,
+      zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
+      restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
+    });
+  }
+
   @Get('reports/admin-earnings')
   adminEarningReport(
     @Query('days') days?: string,

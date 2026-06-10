@@ -1609,6 +1609,19 @@ export declare class AdminController {
             restaurant_take: number;
         }[];
     }>;
+    restaurantEarningDetailed(from?: string, to?: string, zoneId?: string, restaurantId?: string): Promise<{
+        transactions: {
+            earnings: Record<string, unknown>[];
+            expenses: Record<string, unknown>[];
+            subscription: {
+                txn_id: string;
+                date: {} | null;
+                restaurant: string | null;
+                transaction_type: string;
+                amount: number;
+            }[];
+        };
+    }>;
     adminEarningReport(days?: string, from?: string, to?: string, zoneId?: string, restaurantId?: string): Promise<unknown>;
     customerReport(limit?: string, from?: string, to?: string, zoneId?: string, restaurantId?: string): Promise<unknown>;
     topFoods(limit?: string, from?: string, to?: string, zoneId?: string, restaurantId?: string): Promise<{
