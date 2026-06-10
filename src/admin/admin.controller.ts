@@ -677,6 +677,11 @@ export class AdminController {
     });
   }
 
+  @Get('reports/admin-earning-detailed')
+  adminEarningDetailed() {
+    return this.admin.adminEarningDetailed();
+  }
+
   @Get('reports/customer-report')
   customerOverviewReport() {
     return this.admin.customerOverviewReport();

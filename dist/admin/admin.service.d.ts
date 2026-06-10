@@ -1778,6 +1778,35 @@ export declare class AdminService {
             balance: number;
         };
     }>;
+    adminEarningDetailed(_opts?: ReportFilterOpts): Promise<{
+        summary: {
+            total_earnings: number;
+            total_expenses: number;
+            net_profit: number;
+        };
+        earnings_breakdown: {
+            label: string;
+            amount: number;
+            pct: number;
+        }[];
+        expenses_breakdown: {
+            label: string;
+            amount: number;
+            pct: number;
+        }[];
+        transactions: {
+            earnings: Record<string, unknown>[];
+            subscription: {
+                txn_id: string;
+                date: {} | null;
+                source: string | null;
+                source_type: string;
+                earning_source: string;
+                amount: number;
+            }[];
+            expenses: Record<string, unknown>[];
+        };
+    }>;
     restaurantEarnings(limit?: number, opts?: ReportFilterOpts): Promise<{
         top_earners: {
             restaurant_id: number;

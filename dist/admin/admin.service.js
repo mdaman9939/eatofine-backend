@@ -3767,6 +3767,78 @@ let AdminService = class AdminService {
         });
         return { total: rows.length, rows, totals: { credit: r2(totalCredit), debit: r2(totalDebit), balance: r2(totalCredit - totalDebit) } };
     }
+    async adminEarningDetailed(_opts = {}) {
+        const empty = { summary: { total_earnings: 0, total_expenses: 0, net_profit: 0 }, earnings_breakdown: [], expenses_breakdown: [], transactions: { earnings: [], subscription: [], expenses: [] } };
+        if (!this.useMongo())
+            return empty;
+        const num = (v) => (v == null ? 0 : Number(v) || 0);
+        const r2 = (n) => Math.round(n * 100) / 100;
+        const orders = await this.mongo.findMany('orders', { order_status: 'delivered' }, { sort: { mysql_id: -1 }, limit: 1000 });
+        const restIds = Array.from(new Set(orders.map((o) => Number(o.mysql_restaurant_id ?? 0)).filter((n) => n > 0)));
+        const rests = restIds.length ? await this.mongo.findMany('restaurants', { mysql_id: { $in: restIds } }) : [];
+        const restMap = new Map(rests.map((r) => [Number(r.mysql_id), r]));
+        let orderCommission = 0, additionalCharge = 0, deliveryCharge = 0, couponExp = 0, prodDiscExp = 0;
+        const earningTxns = [];
+        const expenseTxns = [];
+        for (const o of orders) {
+            const orderAmount = num(o.order_amount), tax = num(o.total_tax_amount), delivery = num(o.delivery_charge);
+            const coupon = num(o.coupon_discount_amount), restDiscount = num(o.restaurant_discount_amount), extra = num(o.additional_charge);
+            let itemAmount = r2(orderAmount + coupon + restDiscount - tax - delivery - extra);
+            if (itemAmount <= 0)
+                itemAmount = r2(Math.max(0, orderAmount - tax - delivery)) || orderAmount;
+            const rest = restMap.get(Number(o.mysql_restaurant_id ?? 0));
+            const commission = r2((itemAmount * (num(rest?.comission) || 10)) / 100);
+            orderCommission += commission;
+            additionalCharge += extra;
+            deliveryCharge += delivery;
+            couponExp += coupon;
+            prodDiscExp += restDiscount;
+            const oid = Number(o.mysql_id);
+            if (commission > 0)
+                earningTxns.push({ txn_id: `TXN ${oid}`, date: o.created_at ?? null, source: rest?.name ?? null, source_type: 'Restaurant', earning_source: `#ORD ${oid}`, amount: commission });
+            if (coupon > 0)
+                expenseTxns.push({ txn_id: `TXN ${oid}`, date: o.created_at ?? null, source: rest?.name ?? null, source_type: 'Coupon', earning_source: `#ORD ${oid}`, amount: coupon });
+        }
+        const subs = await this.mongo.findMany('subscriptions', {}, { sort: { mysql_id: -1 }, limit: 500 });
+        const subVendorIds = Array.from(new Set(subs.map((s) => Number(s.vendor_id ?? 0)).filter((n) => n > 0)));
+        const subRests = subVendorIds.length ? await this.mongo.findMany('restaurants', { mysql_vendor_id: { $in: subVendorIds } }) : [];
+        const subRestByVendor = new Map(subRests.map((r) => [Number(r.mysql_vendor_id ?? 0), r.name ?? null]));
+        const subscriptionEarning = subs.reduce((s, x) => s + num(x.amount), 0);
+        const subscriptionTxns = subs.map((s) => ({ txn_id: s.transaction_id ?? `SUB ${Number(s.mysql_id)}`, date: s.started_at ?? s.created_at ?? null, source: subRestByVendor.get(Number(s.vendor_id ?? 0)) ?? null, source_type: 'Subscription', earning_source: 'Subscription', amount: num(s.amount) }));
+        const walletAgg = await this.mongo.aggregate('wallet_transactions', [
+            { $group: { _id: '$transaction_type', total: { $sum: { $toDouble: { $ifNull: ['$credit', 0] } } } } },
+        ]).catch(() => []);
+        const walletMap = new Map(walletAgg.map((w) => [w._id, w.total]));
+        const cashback = r2(walletMap.get('cashback') ?? 0);
+        const addFundBonus = 0;
+        orderCommission = r2(orderCommission);
+        additionalCharge = r2(additionalCharge);
+        couponExp = r2(couponExp);
+        prodDiscExp = r2(prodDiscExp);
+        const deliveryFeeCommission = 0;
+        const totalEarnings = r2(orderCommission + subscriptionEarning + additionalCharge + deliveryFeeCommission);
+        const totalExpenses = r2(couponExp + prodDiscExp + cashback + addFundBonus);
+        const netProfit = r2(totalEarnings - totalExpenses);
+        const pct = (a, t) => (t ? r2((a / t) * 100) : 0);
+        return {
+            summary: { total_earnings: totalEarnings, total_expenses: totalExpenses, net_profit: netProfit },
+            earnings_breakdown: [
+                { label: 'Order Commission', amount: orderCommission, pct: pct(orderCommission, totalEarnings) },
+                { label: 'Subscription Packages', amount: r2(subscriptionEarning), pct: pct(subscriptionEarning, totalEarnings) },
+                { label: 'Additional Charge', amount: additionalCharge, pct: pct(additionalCharge, totalEarnings) },
+                { label: 'Delivery Fee Commission', amount: deliveryFeeCommission, pct: 0 },
+                { label: 'Expense Charge', amount: 0, pct: 0 },
+            ],
+            expenses_breakdown: [
+                { label: 'Coupon Offers', amount: couponExp, pct: pct(couponExp, totalExpenses) },
+                { label: 'Discount on Product', amount: prodDiscExp, pct: pct(prodDiscExp, totalExpenses) },
+                { label: 'Free Delivery Costs', amount: 0, pct: 0 },
+                { label: 'Cashback', amount: cashback, pct: pct(cashback, totalExpenses) },
+                { label: 'Add Fund Bonus', amount: addFundBonus, pct: 0 },
+            ],
+            transactions: { earnings: earningTxns.slice(0, 200), subscription: subscriptionTxns, expenses: expenseTxns.slice(0, 200) },
+        };
+    }
     async restaurantEarnings(limit = 10, opts = {}) {
         if (this.useMongo()) {
             const rows = await this.mongo.aggregate('orders', [

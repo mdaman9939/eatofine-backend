@@ -389,6 +389,9 @@ let AdminController = class AdminController {
             restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
         });
     }
+    adminEarningDetailed() {
+        return this.admin.adminEarningDetailed();
+    }
     customerOverviewReport() {
         return this.admin.customerOverviewReport();
     }
@@ -1581,6 +1584,12 @@ __decorate([
     __metadata("design:paramtypes", [String, String, String, String, String]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "orderReport", null);
+__decorate([
+    (0, common_1.Get)('reports/admin-earning-detailed'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "adminEarningDetailed", null);
 __decorate([
     (0, common_1.Get)('reports/customer-report'),
     __metadata("design:type", Function),

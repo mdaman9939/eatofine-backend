@@ -1431,6 +1431,35 @@ export declare class AdminController {
         }[];
         status_counts: Record<string, number>;
     }>;
+    adminEarningDetailed(): Promise<{
+        summary: {
+            total_earnings: number;
+            total_expenses: number;
+            net_profit: number;
+        };
+        earnings_breakdown: {
+            label: string;
+            amount: number;
+            pct: number;
+        }[];
+        expenses_breakdown: {
+            label: string;
+            amount: number;
+            pct: number;
+        }[];
+        transactions: {
+            earnings: Record<string, unknown>[];
+            subscription: {
+                txn_id: string;
+                date: {} | null;
+                source: string | null;
+                source_type: string;
+                earning_source: string;
+                amount: number;
+            }[];
+            expenses: Record<string, unknown>[];
+        };
+    }>;
     customerOverviewReport(): Promise<{
         total: number;
         rows: {
