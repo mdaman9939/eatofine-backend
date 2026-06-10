@@ -1678,6 +1678,31 @@ export declare class AdminService {
             total: number;
         }[];
     }>;
+    orderReport(opts?: ReportFilterOpts & {
+        days?: number;
+    }): Promise<{
+        total: number;
+        rows: {
+            order_id: number;
+            restaurant: string | null;
+            customer_name: string | null;
+            total_item_amount: number;
+            item_discount: number;
+            coupon_discount: number;
+            referral_discount: number;
+            discounted_amount: number;
+            tax: number;
+            delivery_charge: number;
+            service_charge: number;
+            order_amount: number;
+            amount_received_by: string;
+            payment_method: string;
+            payment_status: string;
+            order_status: string;
+            created_at: {} | null;
+        }[];
+        status_counts: Record<string, number>;
+    }>;
     restaurantEarnings(limit?: number, opts?: ReportFilterOpts): Promise<{
         top_earners: {
             restaurant_id: number;

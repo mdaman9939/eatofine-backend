@@ -660,6 +660,23 @@ export class AdminController {
     });
   }
 
+  @Get('reports/order-report')
+  orderReport(
+    @Query('days') days?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('zone_id') zoneId?: string,
+    @Query('restaurant_id') restaurantId?: string,
+  ) {
+    return this.admin.orderReport({
+      days: toInt(days, 30),
+      from: from || undefined,
+      to: to || undefined,
+      zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
+      restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
+    });
+  }
+
   @Get('reports/food-report')
   foodReport(
     @Query('zone_id') zoneId?: string,

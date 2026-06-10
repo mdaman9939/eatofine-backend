@@ -3533,6 +3533,70 @@ let AdminService = class AdminService {
         const yearly = yearAgg.filter((y) => y._id).map((y) => ({ year: Number(y._id), total: r2(y.total) }));
         return { total: rows.length, rows, yearly };
     }
+    async orderReport(opts = {}) {
+        if (!this.useMongo())
+            return { total: 0, rows: [], status_counts: {} };
+        const match = {};
+        if (opts.from || opts.to) {
+            const range = {};
+            if (opts.from)
+                range.$gte = new Date(opts.from);
+            if (opts.to)
+                range.$lte = new Date(`${opts.to}T23:59:59.999Z`);
+            match.created_at = range;
+        }
+        if (opts.zoneId)
+            match.mysql_zone_id = Number(opts.zoneId);
+        if (opts.restaurantId)
+            match.mysql_restaurant_id = Number(opts.restaurantId);
+        const orders = await this.mongo.findMany('orders', match, { sort: { mysql_id: -1 }, limit: 500 });
+        const restIds = Array.from(new Set(orders.map((o) => Number(o.mysql_restaurant_id ?? 0)).filter((n) => n > 0)));
+        const userIds = Array.from(new Set(orders.map((o) => Number(o.mysql_user_id ?? 0)).filter((n) => n > 0)));
+        const [rests, users] = await Promise.all([
+            restIds.length ? this.mongo.findMany('restaurants', { mysql_id: { $in: restIds } }) : Promise.resolve([]),
+            userIds.length ? this.mongo.findMany('users', { mysql_id: { $in: userIds } }) : Promise.resolve([]),
+        ]);
+        const restMap = new Map(rests.map((r) => [Number(r.mysql_id), r]));
+        const userMap = new Map(users.map((u) => [Number(u.mysql_id), u]));
+        const num = (v) => (v == null ? 0 : Number(v) || 0);
+        const r2 = (n) => Math.round(n * 100) / 100;
+        const status_counts = {};
+        const rows = orders.map((o) => {
+            const orderAmount = num(o.order_amount);
+            const tax = num(o.total_tax_amount);
+            const delivery = num(o.delivery_charge);
+            const coupon = num(o.coupon_discount_amount);
+            const restDiscount = num(o.restaurant_discount_amount);
+            const extraPackaging = num(o.additional_charge);
+            let itemAmount = r2(orderAmount + coupon + restDiscount - tax - delivery - extraPackaging);
+            if (itemAmount <= 0)
+                itemAmount = r2(Math.max(0, orderAmount - tax - delivery)) || orderAmount;
+            const user = userMap.get(Number(o.mysql_user_id ?? 0));
+            const cod = String(o.payment_method) === 'cash_on_delivery';
+            const status = String(o.order_status ?? 'pending');
+            status_counts[status] = (status_counts[status] ?? 0) + 1;
+            return {
+                order_id: Number(o.mysql_id),
+                restaurant: restMap.get(Number(o.mysql_restaurant_id ?? 0))?.name ?? null,
+                customer_name: user ? `${user.f_name ?? ''} ${user.l_name ?? ''}`.trim() || null : null,
+                total_item_amount: itemAmount,
+                item_discount: 0,
+                coupon_discount: coupon,
+                referral_discount: 0,
+                discounted_amount: r2(itemAmount - coupon - restDiscount),
+                tax,
+                delivery_charge: delivery,
+                service_charge: 0,
+                order_amount: orderAmount,
+                amount_received_by: status === 'delivered' ? (cod ? 'Delivery man' : 'Admin') : 'Not Received Yet',
+                payment_method: String(o.payment_method ?? 'cash_on_delivery'),
+                payment_status: String(o.payment_status ?? 'unpaid'),
+                order_status: status,
+                created_at: o.created_at ?? null,
+            };
+        });
+        return { total: rows.length, rows, status_counts };
+    }
     async restaurantEarnings(limit = 10, opts = {}) {
         if (this.useMongo()) {
             const rows = await this.mongo.aggregate('orders', [
