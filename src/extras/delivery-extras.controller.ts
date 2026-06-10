@@ -521,7 +521,27 @@ export class DeliveryExtrasController {
 
   @HttpCode(200)
   @Post('record-location-data')
-  recordLocation() { return { ok: true }; }
+  async recordLocation(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
+    // Persist the rider's live GPS so the customer's track screen can show a
+    // moving delivery-man marker (Zomato-style). Was a no-op stub before, so
+    // the track response never had rider lat/lng.
+    const lat = body?.latitude;
+    const lng = body?.longitude;
+    if (this.useMongo() && lat != null && lng != null) {
+      await this.mongo.updateOne(
+        'delivery_men',
+        { mysql_id: Number(req.actor!.id) },
+        {
+          latitude: Number(lat),
+          longitude: Number(lng),
+          location: body?.location != null ? String(body.location) : null,
+          location_updated_at: new Date(),
+          updated_at: new Date(),
+        },
+      ).catch(() => undefined);
+    }
+    return { ok: true };
+  }
 
   @HttpCode(200)
   @Post('last-location')

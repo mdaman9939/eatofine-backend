@@ -581,9 +581,9 @@ export declare class DeliveryExtrasController {
     sendOtp(): {
         otp: string;
     };
-    recordLocation(): {
+    recordLocation(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
         ok: boolean;
-    };
+    }>;
     lastLocation(): {
         ok: boolean;
     };

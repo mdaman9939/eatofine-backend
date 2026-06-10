@@ -82,6 +82,9 @@ export declare class OrderService {
             image_full_url: string | null;
             avg_rating: number;
             rating_count: number;
+            lat: string | null;
+            lng: string | null;
+            location: string | null;
         } | null;
         deliveryMan: {
             id: number;
@@ -92,6 +95,9 @@ export declare class OrderService {
             image_full_url: string | null;
             avg_rating: number;
             rating_count: number;
+            lat: string | null;
+            lng: string | null;
+            location: string | null;
         } | null;
         delivery_address: Record<string, unknown>;
         cutlery: boolean;

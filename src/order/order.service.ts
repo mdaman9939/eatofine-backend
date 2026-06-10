@@ -512,7 +512,7 @@ export class OrderService {
           ? this.mongo.findByMysqlId<{ mysql_id: number; f_name?: string; l_name?: string; phone?: string; email?: string; image?: string }>('users', Number(o.mysql_user_id))
           : Promise.resolve(null),
         o.mysql_delivery_man_id != null
-          ? this.mongo.findByMysqlId<{ mysql_id: number; f_name?: string; l_name?: string; phone?: string; image?: string }>('delivery_men', Number(o.mysql_delivery_man_id))
+          ? this.mongo.findByMysqlId<{ mysql_id: number; f_name?: string; l_name?: string; phone?: string; image?: string; latitude?: number; longitude?: number; location?: string }>('delivery_men', Number(o.mysql_delivery_man_id))
           : Promise.resolve(null),
         // Backfill chain — if the order itself doesn't carry a
         // delivery_address blob, fall back to the customer's default saved
@@ -562,6 +562,10 @@ export class OrderService {
         image_full_url: storageFullUrl('delivery-man', deliveryMan.image ?? null),
         avg_rating: dmRating.avg_rating != null ? Number(dmRating.avg_rating) : 0,
         rating_count: dmRating.rating_count != null ? Number(dmRating.rating_count) : 0,
+        // Live GPS — drives the moving delivery-man marker on the track map.
+        lat: deliveryMan.latitude != null ? String(deliveryMan.latitude) : null,
+        lng: deliveryMan.longitude != null ? String(deliveryMan.longitude) : null,
+        location: deliveryMan.location ?? null,
       } : null;
 
       return {

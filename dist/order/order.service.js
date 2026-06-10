@@ -413,6 +413,9 @@ let OrderService = class OrderService {
                 image_full_url: (0, storage_url_1.storageFullUrl)('delivery-man', deliveryMan.image ?? null),
                 avg_rating: dmRating.avg_rating != null ? Number(dmRating.avg_rating) : 0,
                 rating_count: dmRating.rating_count != null ? Number(dmRating.rating_count) : 0,
+                lat: deliveryMan.latitude != null ? String(deliveryMan.latitude) : null,
+                lng: deliveryMan.longitude != null ? String(deliveryMan.longitude) : null,
+                location: deliveryMan.location ?? null,
             } : null;
             return {
                 id: o.mysql_id,

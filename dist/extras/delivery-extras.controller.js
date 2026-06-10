@@ -476,7 +476,20 @@ let DeliveryExtrasController = class DeliveryExtrasController {
     }
     updatePayment() { return { message: 'updated' }; }
     sendOtp() { return { otp: '1234' }; }
-    recordLocation() { return { ok: true }; }
+    async recordLocation(req, body = {}) {
+        const lat = body?.latitude;
+        const lng = body?.longitude;
+        if (this.useMongo() && lat != null && lng != null) {
+            await this.mongo.updateOne('delivery_men', { mysql_id: Number(req.actor.id) }, {
+                latitude: Number(lat),
+                longitude: Number(lng),
+                location: body?.location != null ? String(body.location) : null,
+                location_updated_at: new Date(),
+                updated_at: new Date(),
+            }).catch(() => undefined);
+        }
+        return { ok: true };
+    }
     lastLocation() { return { ok: true }; }
     async earningReport(req) {
         if (!this.useMongo())
@@ -808,9 +821,11 @@ __decorate([
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('record-location-data'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], DeliveryExtrasController.prototype, "recordLocation", null);
 __decorate([
     (0, common_1.HttpCode)(200),
