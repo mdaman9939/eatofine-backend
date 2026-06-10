@@ -1071,6 +1071,16 @@ export declare class VendorExtrasController {
         }[];
         message?: undefined;
     }>;
+    withdrawDeletePost(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
+        message: string;
+        errors?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+    }>;
     getWithdrawList(req: AuthedRequest): Promise<{
         data: {
             id: number;

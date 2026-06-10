@@ -889,7 +889,7 @@ __decorate([
 ], DeliveryExtrasController.prototype, "withdrawDefault", null);
 __decorate([
     (0, common_1.HttpCode)(200),
-    (0, common_1.Delete)('withdraw-method/delete'),
+    (0, common_1.Post)('withdraw-method/delete'),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", void 0)

@@ -1459,6 +1459,9 @@ let VendorExtrasController = class VendorExtrasController {
         await this.mongo.deleteOne('withdraw_methods', { mysql_id: id, mysql_vendor_id: vendorId });
         return { message: 'deleted' };
     }
+    withdrawDeletePost(req, body = {}) {
+        return this.withdrawDelete(req, body);
+    }
     async getWithdrawList(req) {
         if (!this.useMongo())
             return { data: [], total_size: 0 };
@@ -2511,6 +2514,15 @@ __decorate([
     __metadata("design:paramtypes", [Object, Object]),
     __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "withdrawDelete", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Post)('withdraw-method/delete'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], VendorExtrasController.prototype, "withdrawDeletePost", null);
 __decorate([
     (0, common_1.Get)('get-withdraw-list'),
     __param(0, (0, common_1.Req)()),

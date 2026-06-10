@@ -1862,6 +1862,16 @@ export class VendorExtrasController {
     return { message: 'deleted' };
   }
 
+  // The vendor app deletes via Laravel-style method spoofing — it POSTs with
+  // body { _method: 'delete', id }. NestJS doesn't honor _method, so without a
+  // POST route this 404s ("Cannot POST .../withdraw-method/delete"). Alias to
+  // the same logic.
+  @HttpCode(200)
+  @Post('withdraw-method/delete')
+  withdrawDeletePost(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
+    return this.withdrawDelete(req, body);
+  }
+
   /** List this vendor's past withdraw requests (newest first). */
   @Get('get-withdraw-list')
   async getWithdrawList(@Req() req: AuthedRequest) {

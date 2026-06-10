@@ -608,8 +608,10 @@ export class DeliveryExtrasController {
   @HttpCode(200)
   @Post('withdraw-method/make-default')
   withdrawDefault() { return { message: 'default set' }; }
+  // App POSTs with body { _method: 'delete' } (Laravel-style spoofing), so the
+  // route must be POST — a @Delete route 404s ("Cannot POST").
   @HttpCode(200)
-  @Delete('withdraw-method/delete')
+  @Post('withdraw-method/delete')
   withdrawDelete() { return { message: 'deleted' }; }
 
   @Get('get-withdraw-method-list')
