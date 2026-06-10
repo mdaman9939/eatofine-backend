@@ -14,12 +14,30 @@ const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
 const storage_url_1 = require("../common/storage-url");
+const fcm_service_1 = require("../notifications/fcm.service");
 let OrderService = class OrderService {
     prisma;
     mongo;
-    constructor(prisma, mongo) {
+    fcm;
+    constructor(prisma, mongo, fcm) {
         this.prisma = prisma;
         this.mongo = mongo;
+        this.fcm = fcm;
+    }
+    async pushNewOrderToRestaurant(restaurantId, orderId) {
+        try {
+            const restaurant = await this.mongo.findOne('restaurants', { mysql_id: Number(restaurantId) });
+            const vendorId = Number(restaurant?.mysql_vendor_id ?? 0);
+            if (!vendorId)
+                return;
+            const vendor = await this.mongo.findOne('vendors', { mysql_id: vendorId });
+            const token = vendor?.fcm_token;
+            if (!token)
+                return;
+            await this.fcm.sendToToken(token, { title: 'New order placed', body: `You have a new order #${orderId}` }, { type: 'new_order', order_id: orderId, title: 'New order placed' });
+        }
+        catch {
+        }
     }
     useMongo() {
         const v = (process.env.USE_MONGO_ORDER ?? '1').toLowerCase();
@@ -224,6 +242,7 @@ let OrderService = class OrderService {
             }
             catch {
             }
+            await this.pushNewOrderToRestaurant(Number(body.restaurant_id), orderMysqlId);
             try {
                 await this.mongo.updateMany('carts', { mysql_user_id: Number(userId), is_guest: false }, {});
             }
@@ -514,6 +533,7 @@ exports.OrderService = OrderService;
 exports.OrderService = OrderService = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
-        mongo_data_service_1.MongoDataService])
+        mongo_data_service_1.MongoDataService,
+        fcm_service_1.FcmService])
 ], OrderService);
 //# sourceMappingURL=order.service.js.map

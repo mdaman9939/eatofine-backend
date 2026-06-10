@@ -78,7 +78,11 @@ export class ConfigController {
       digital_payment: await this.bs.getStatus('digital_payment'),
       demo: false,
       maintenance_mode: await this.bs.getBool('maintenance_mode'),
-      order_confirmation_model: (await this.bs.get('order_confirmation_model')) ?? 'deliveryman',
+      // Default 'restaurant' so a freshly-placed DELIVERY order shows up in the
+      // restaurant's Pending list immediately. With 'deliveryman' the vendor app
+      // hides pending delivery orders (deliveryman confirms them) — which looked
+      // like "new orders not showing". Admin can still switch this in settings.
+      order_confirmation_model: (await this.bs.get('order_confirmation_model')) ?? 'restaurant',
       popular_food: await this.bs.getInt('popular_food', 1),
       popular_restaurant: await this.bs.getInt('popular_restaurant', 1),
       new_restaurant: await this.bs.getInt('new_restaurant', 1),

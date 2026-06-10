@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { storageFullUrl } from '../common/storage-url';
+import { FcmService } from '../notifications/fcm.service';
 
 interface MongoFood {
   mysql_id: number;
@@ -62,7 +63,35 @@ export class OrderService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mongo: MongoDataService,
+    private readonly fcm: FcmService,
   ) {}
+
+  /** Push a real-time "new order" FCM notification to the restaurant's vendor
+   *  device. Looks up the vendor's stored fcm_token via the restaurant. Fully
+   *  best-effort — never throws, no-ops when FCM creds / token are absent. */
+  private async pushNewOrderToRestaurant(restaurantId: number, orderId: number): Promise<void> {
+    try {
+      const restaurant = await this.mongo.findOne<{ mysql_vendor_id?: number; name?: string }>(
+        'restaurants',
+        { mysql_id: Number(restaurantId) },
+      );
+      const vendorId = Number(restaurant?.mysql_vendor_id ?? 0);
+      if (!vendorId) return;
+      const vendor = await this.mongo.findOne<{ fcm_token?: string }>(
+        'vendors',
+        { mysql_id: vendorId },
+      );
+      const token = vendor?.fcm_token;
+      if (!token) return;
+      await this.fcm.sendToToken(
+        token,
+        { title: 'New order placed', body: `You have a new order #${orderId}` },
+        { type: 'new_order', order_id: orderId, title: 'New order placed' },
+      );
+    } catch {
+      // ignore — push is non-fatal
+    }
+  }
 
   /** Feature flag — when "1", order reads/writes go to MongoDB instead of MySQL. */
   private useMongo(): boolean {
@@ -321,6 +350,10 @@ export class OrderService {
       } catch {
         // ignore — notification is non-fatal
       }
+
+      // Real-time FCM push to the restaurant's vendor device — instant
+      // new-order alert (sound + popup) without waiting for the 15s poll.
+      await this.pushNewOrderToRestaurant(Number(body.restaurant_id), orderMysqlId);
 
       // Clear cart for this user (best-effort — carts collection may not exist)
       try {
