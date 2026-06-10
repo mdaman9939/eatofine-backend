@@ -1408,6 +1408,33 @@ export declare class AdminController {
             delivery: number;
         }[];
     }>;
+    transactionDetails(days?: string, from?: string, to?: string, zoneId?: string, restaurantId?: string): Promise<{
+        total: number;
+        rows: {
+            order_id: number;
+            restaurant: string | null;
+            customer_name: string | null;
+            total_item_amount: number;
+            item_discount: number;
+            coupon_discount: number;
+            referral_discount: number;
+            discounted_amount: number;
+            vat_tax: number;
+            delivery_charge: number;
+            order_amount: number;
+            admin_discount: number;
+            restaurant_discount: number;
+            admin_commission: number;
+            service_charge: number;
+            extra_packaging_amount: number;
+            commission_on_delivery_charge: number;
+            admin_net_income: number;
+            restaurant_net_income: number;
+            amount_received_by: string;
+            payment_method: string;
+            payment_status: string;
+        }[];
+    }>;
     restaurantEarnings(limit?: string, from?: string, to?: string, zoneId?: string, restaurantId?: string): Promise<{
         top_earners: {
             restaurant_id: number;
