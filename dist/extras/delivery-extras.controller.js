@@ -566,17 +566,33 @@ let DeliveryExtrasController = class DeliveryExtrasController {
             total_size: rows.length,
         };
     }
-    async messageDetails(req, convId) {
-        if (!this.useMongo() || !convId)
+    async messageDetails(req, convId, userId) {
+        if (!this.useMongo())
             return { messages: [] };
         const dmId = Number(req.actor.id);
-        const rows = await this.mongo.findMany('messages', { conversation_id: Number(convId) }, { sort: { mysql_id: 1 }, limit: 100 });
+        let conversationId = convId ? Number(convId) : undefined;
+        if (!conversationId && userId) {
+            const conv = await this.mongo.findOne('conversations', {
+                user_id: Number(userId), counterpart_type: 'delivery_man', counterpart_id: dmId,
+            });
+            if (conv)
+                conversationId = Number(conv.mysql_id);
+        }
+        if (!conversationId)
+            return { messages: [] };
+        const rows = await this.mongo.findMany('messages', { conversation_id: conversationId }, { sort: { mysql_id: 1 }, limit: 100 });
         return {
             messages: rows.map((m) => ({
                 id: Number(m.mysql_id),
+                conversation_id: conversationId,
                 sender_type: m.sender_type,
                 sender_id: m.sender_id != null ? Number(m.sender_id) : null,
-                body: m.body,
+                message: (m.message ?? m.body ?? ''),
+                body: (m.message ?? m.body ?? ''),
+                file_full_url: Array.isArray(m.files)
+                    ? m.files.map((f) => (0, storage_url_1.storageFullUrl)('conversation', f)).filter((u) => !!u)
+                    : [],
+                is_seen: m.is_seen ?? 1,
                 sent_by_me: m.sender_type === 'delivery_man' && Number(m.sender_id) === dmId,
                 created_at: m.created_at ?? null,
             })),
@@ -591,36 +607,49 @@ let DeliveryExtrasController = class DeliveryExtrasController {
         }, { limit: 25 });
         return { conversations: rows.map((c) => ({ id: Number(c.mysql_id), name: c.user_name ?? `Customer #${c.user_id}` })) };
     }
-    async messageSend(req, body = {}) {
+    async messageSend(req, files, rawBody) {
         if (!this.useMongo())
             return { message: 'sent' };
         const dmId = Number(req.actor.id);
-        if (!body.body || !body.body.trim())
+        const body = rawBody ?? {};
+        const text = (body.message ?? body.body ?? '').toString();
+        const imageNames = [];
+        for (const f of files ?? []) {
+            const name = await this.saveImage(f, 'conversation');
+            if (name)
+                imageNames.push(name);
+        }
+        if (!text.trim() && imageNames.length === 0) {
             return { errors: [{ code: 'body', message: 'message body required' }] };
-        let convId = body.conversation_id;
-        if (!convId && body.user_id) {
+        }
+        const counterpartUserId = body.receiver_id ?? body.user_id;
+        let convId = body.conversation_id != null && body.conversation_id !== '' ? Number(body.conversation_id) : undefined;
+        if (!convId && counterpartUserId != null && counterpartUserId !== '') {
+            const uid = Number(counterpartUserId);
             const existing = await this.mongo.findOne('conversations', {
-                user_id: Number(body.user_id), counterpart_type: 'delivery_man', counterpart_id: dmId,
+                user_id: uid, counterpart_type: 'delivery_man', counterpart_id: dmId,
             });
             if (existing)
                 convId = Number(existing.mysql_id);
             else {
                 convId = await this.mongo.nextMysqlId('conversations');
                 await this.mongo.insertOne('conversations', {
-                    mysql_id: convId, user_id: Number(body.user_id), counterpart_type: 'delivery_man', counterpart_id: dmId,
-                    last_message: body.body, last_message_at: new Date(), unread: 0,
+                    mysql_id: convId, user_id: uid, counterpart_type: 'delivery_man', counterpart_id: dmId,
+                    last_message: text, last_message_at: new Date(), unread: 0,
                 });
             }
         }
         if (!convId)
-            return { errors: [{ code: 'conversation', message: 'conversation_id or user_id required' }] };
+            return { errors: [{ code: 'conversation', message: 'conversation_id or receiver_id required' }] };
         const msgId = await this.mongo.nextMysqlId('messages');
         await this.mongo.insertOne('messages', {
             mysql_id: msgId, conversation_id: convId, sender_type: 'delivery_man', sender_id: dmId,
-            body: body.body, created_at: new Date(),
+            message: text, body: text, files: imageNames, created_at: new Date(),
         });
-        await this.mongo.updateOne('conversations', { mysql_id: convId }, { last_message: body.body, last_message_at: new Date() });
-        return { message: 'sent', conversation_id: convId };
+        await this.mongo.updateOne('conversations', { mysql_id: convId }, {
+            last_message: text || (imageNames.length ? 'Photo' : ''), last_message_at: new Date(),
+        });
+        return { message: 'sent', conversation_id: convId, id: msgId, files: imageNames };
     }
 };
 exports.DeliveryExtrasController = DeliveryExtrasController;
@@ -845,8 +874,9 @@ __decorate([
     (0, common_1.Get)('message/details'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Query)('conversation_id')),
+    __param(2, (0, common_1.Query)('user_id')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:paramtypes", [Object, String, String]),
     __metadata("design:returntype", Promise)
 ], DeliveryExtrasController.prototype, "messageDetails", null);
 __decorate([
@@ -859,11 +889,14 @@ __decorate([
 ], DeliveryExtrasController.prototype, "messageSearch", null);
 __decorate([
     (0, common_1.HttpCode)(200),
+    (0, common_1.HttpCode)(200),
     (0, common_1.Post)('message/send'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.AnyFilesInterceptor)({ limits: { fileSize: 10 * 1024 * 1024 } })),
     __param(0, (0, common_1.Req)()),
-    __param(1, (0, common_1.Body)()),
+    __param(1, (0, common_1.UploadedFiles)()),
+    __param(2, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:paramtypes", [Object, Object, Object]),
     __metadata("design:returntype", Promise)
 ], DeliveryExtrasController.prototype, "messageSend", null);
 exports.DeliveryExtrasController = DeliveryExtrasController = __decorate([

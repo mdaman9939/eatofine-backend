@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Post, Query, Req, UseGuards, HttpCode, UseInterceptors, UploadedFiles } from '@nestjs/common';
-import { FileFieldsInterceptor } from '@nestjs/platform-express';
+import { FileFieldsInterceptor, AnyFilesInterceptor } from '@nestjs/platform-express';
 import * as fs from 'fs';
 import * as path from 'path';
 import { AuthGuard, RequireAuth } from '../auth/auth.guard';
@@ -661,18 +661,40 @@ export class DeliveryExtrasController {
   }
 
   @Get('message/details')
-  async messageDetails(@Req() req: AuthedRequest, @Query('conversation_id') convId?: string) {
-    if (!this.useMongo() || !convId) return { messages: [] };
+  async messageDetails(
+    @Req() req: AuthedRequest,
+    @Query('conversation_id') convId?: string,
+    @Query('user_id') userId?: string,
+  ) {
+    if (!this.useMongo()) return { messages: [] };
     const dmId = Number(req.actor!.id);
+    // The app loads a thread by conversation_id OR (first time) by user_id.
+    let conversationId = convId ? Number(convId) : undefined;
+    if (!conversationId && userId) {
+      const conv = await this.mongo.findOne<{ mysql_id: number }>('conversations', {
+        user_id: Number(userId), counterpart_type: 'delivery_man', counterpart_id: dmId,
+      });
+      if (conv) conversationId = Number(conv.mysql_id);
+    }
+    if (!conversationId) return { messages: [] };
     const rows = await this.mongo.findMany<Record<string, unknown>>(
-      'messages', { conversation_id: Number(convId) }, { sort: { mysql_id: 1 }, limit: 100 },
+      'messages', { conversation_id: conversationId }, { sort: { mysql_id: 1 }, limit: 100 },
     );
     return {
       messages: rows.map((m) => ({
         id: Number(m.mysql_id),
+        conversation_id: conversationId,
         sender_type: m.sender_type,
         sender_id: m.sender_id != null ? Number(m.sender_id) : null,
-        body: m.body,
+        // The DM MessageModel reads `message` for text and `file_full_url`
+        // for image attachments — and calls `.cast<String>()` on it, so it
+        // MUST always be an array (never null) or the chat crashes to empty.
+        message: (m.message ?? m.body ?? '') as string,
+        body: (m.message ?? m.body ?? '') as string,
+        file_full_url: Array.isArray(m.files)
+          ? (m.files as string[]).map((f) => storageFullUrl('conversation', f)).filter((u): u is string => !!u)
+          : [],
+        is_seen: m.is_seen ?? 1,
         sent_by_me: m.sender_type === 'delivery_man' && Number(m.sender_id) === dmId,
         created_at: m.created_at ?? null,
       })),
@@ -690,32 +712,58 @@ export class DeliveryExtrasController {
   }
 
   @HttpCode(200)
+  @HttpCode(200)
   @Post('message/send')
-  async messageSend(@Req() req: AuthedRequest, @Body() body: { conversation_id?: number; user_id?: number; body?: string } = {}) {
+  // The chat screen posts multipart/form-data (it can attach images), so
+  // without a multipart interceptor @Body() is undefined and the send fails.
+  // The text arrives as `message` (not `body`) and the target as `receiver_id`.
+  @UseInterceptors(AnyFilesInterceptor({ limits: { fileSize: 10 * 1024 * 1024 } }))
+  async messageSend(
+    @Req() req: AuthedRequest,
+    @UploadedFiles() files: (Express.Multer.File[]) | undefined,
+    @Body() rawBody: {
+      conversation_id?: number | string; receiver_id?: number | string; user_id?: number | string;
+      receiver_type?: string; message?: string; body?: string;
+    } | undefined,
+  ) {
     if (!this.useMongo()) return { message: 'sent' };
     const dmId = Number(req.actor!.id);
-    if (!body.body || !body.body.trim()) return { errors: [{ code: 'body', message: 'message body required' }] };
-    let convId = body.conversation_id;
-    if (!convId && body.user_id) {
+    const body = rawBody ?? {};
+    const text = (body.message ?? body.body ?? '').toString();
+    // Persist any attached images durably (compress + disk + Mongo uploads).
+    const imageNames: string[] = [];
+    for (const f of files ?? []) {
+      const name = await this.saveImage(f, 'conversation');
+      if (name) imageNames.push(name);
+    }
+    if (!text.trim() && imageNames.length === 0) {
+      return { errors: [{ code: 'body', message: 'message body required' }] };
+    }
+    const counterpartUserId = body.receiver_id ?? body.user_id;
+    let convId = body.conversation_id != null && body.conversation_id !== '' ? Number(body.conversation_id) : undefined;
+    if (!convId && counterpartUserId != null && counterpartUserId !== '') {
+      const uid = Number(counterpartUserId);
       const existing = await this.mongo.findOne<{ mysql_id: number }>('conversations', {
-        user_id: Number(body.user_id), counterpart_type: 'delivery_man', counterpart_id: dmId,
+        user_id: uid, counterpart_type: 'delivery_man', counterpart_id: dmId,
       });
       if (existing) convId = Number(existing.mysql_id);
       else {
         convId = await this.mongo.nextMysqlId('conversations');
         await this.mongo.insertOne('conversations', {
-          mysql_id: convId, user_id: Number(body.user_id), counterpart_type: 'delivery_man', counterpart_id: dmId,
-          last_message: body.body, last_message_at: new Date(), unread: 0,
+          mysql_id: convId, user_id: uid, counterpart_type: 'delivery_man', counterpart_id: dmId,
+          last_message: text, last_message_at: new Date(), unread: 0,
         });
       }
     }
-    if (!convId) return { errors: [{ code: 'conversation', message: 'conversation_id or user_id required' }] };
+    if (!convId) return { errors: [{ code: 'conversation', message: 'conversation_id or receiver_id required' }] };
     const msgId = await this.mongo.nextMysqlId('messages');
     await this.mongo.insertOne('messages', {
       mysql_id: msgId, conversation_id: convId, sender_type: 'delivery_man', sender_id: dmId,
-      body: body.body, created_at: new Date(),
+      message: text, body: text, files: imageNames, created_at: new Date(),
     });
-    await this.mongo.updateOne('conversations', { mysql_id: convId }, { last_message: body.body, last_message_at: new Date() });
-    return { message: 'sent', conversation_id: convId };
+    await this.mongo.updateOne('conversations', { mysql_id: convId }, {
+      last_message: text || (imageNames.length ? 'Photo' : ''), last_message_at: new Date(),
+    });
+    return { message: 'sent', conversation_id: convId, id: msgId, files: imageNames };
   }
 }

@@ -658,12 +658,16 @@ export declare class DeliveryExtrasController {
         }[];
         total_size: number;
     }>;
-    messageDetails(req: AuthedRequest, convId?: string): Promise<{
+    messageDetails(req: AuthedRequest, convId?: string, userId?: string): Promise<{
         messages: {
             id: number;
+            conversation_id: number;
             sender_type: unknown;
             sender_id: number | null;
-            body: unknown;
+            message: string;
+            body: string;
+            file_full_url: string[];
+            is_seen: {};
             sent_by_me: boolean;
             created_at: {} | null;
         }[];
@@ -674,14 +678,19 @@ export declare class DeliveryExtrasController {
             name: {};
         }[];
     }>;
-    messageSend(req: AuthedRequest, body?: {
-        conversation_id?: number;
-        user_id?: number;
+    messageSend(req: AuthedRequest, files: (Express.Multer.File[]) | undefined, rawBody: {
+        conversation_id?: number | string;
+        receiver_id?: number | string;
+        user_id?: number | string;
+        receiver_type?: string;
+        message?: string;
         body?: string;
-    }): Promise<{
+    } | undefined): Promise<{
         message: string;
         errors?: undefined;
         conversation_id?: undefined;
+        id?: undefined;
+        files?: undefined;
     } | {
         errors: {
             code: string;
@@ -689,9 +698,13 @@ export declare class DeliveryExtrasController {
         }[];
         message?: undefined;
         conversation_id?: undefined;
+        id?: undefined;
+        files?: undefined;
     } | {
         message: string;
         conversation_id: number;
+        id: number;
+        files: string[];
         errors?: undefined;
     }>;
 }
