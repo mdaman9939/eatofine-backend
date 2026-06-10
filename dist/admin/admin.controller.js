@@ -380,6 +380,14 @@ let AdminController = class AdminController {
             restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
         });
     }
+    expenseDetails(from, to, zoneId, restaurantId) {
+        return this.admin.expenseDetails({
+            from: from || undefined,
+            to: to || undefined,
+            zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
+            restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
+        });
+    }
     transactionDetails(days, from, to, zoneId, restaurantId) {
         return this.admin.transactionDetails({
             days: toInt(days, 30),
@@ -1531,6 +1539,16 @@ __decorate([
     __metadata("design:paramtypes", [String, String, String, String, String]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "salesSummary", null);
+__decorate([
+    (0, common_1.Get)('reports/expense-details'),
+    __param(0, (0, common_1.Query)('from')),
+    __param(1, (0, common_1.Query)('to')),
+    __param(2, (0, common_1.Query)('zone_id')),
+    __param(3, (0, common_1.Query)('restaurant_id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, String, String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "expenseDetails", null);
 __decorate([
     (0, common_1.Get)('reports/transaction-details'),
     __param(0, (0, common_1.Query)('days')),

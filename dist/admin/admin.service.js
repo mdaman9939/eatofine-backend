@@ -3428,6 +3428,47 @@ let AdminService = class AdminService {
         });
         return { total: rows.length, rows };
     }
+    async expenseDetails(opts = {}) {
+        if (!this.useMongo())
+            return { total: 0, rows: [] };
+        const match = {
+            $or: [{ coupon_discount_amount: { $gt: 0 } }, { restaurant_discount_amount: { $gt: 0 } }],
+        };
+        if (opts.from || opts.to) {
+            const range = {};
+            if (opts.from)
+                range.$gte = new Date(opts.from);
+            if (opts.to)
+                range.$lte = new Date(`${opts.to}T23:59:59.999Z`);
+            match.created_at = range;
+        }
+        if (opts.zoneId)
+            match.mysql_zone_id = Number(opts.zoneId);
+        if (opts.restaurantId)
+            match.mysql_restaurant_id = Number(opts.restaurantId);
+        const orders = await this.mongo.findMany('orders', match, { sort: { mysql_id: -1 }, limit: 1000 });
+        const userIds = Array.from(new Set(orders.map((o) => Number(o.mysql_user_id ?? 0)).filter((n) => n > 0)));
+        const users = userIds.length
+            ? await this.mongo.findMany('users', { mysql_id: { $in: userIds } })
+            : [];
+        const userMap = new Map(users.map((u) => [Number(u.mysql_id), u]));
+        const num = (v) => (v == null ? 0 : Number(v) || 0);
+        const rows = [];
+        for (const o of orders) {
+            const user = userMap.get(Number(o.mysql_user_id ?? 0));
+            const customerName = user ? `${user.f_name ?? ''} ${user.l_name ?? ''}`.trim() || null : null;
+            const dt = o.created_at ?? o.created_at_legacy ?? null;
+            const oid = Number(o.mysql_id);
+            const coupon = num(o.coupon_discount_amount);
+            const prod = num(o.restaurant_discount_amount);
+            if (coupon > 0)
+                rows.push({ order_id: oid, date_time: dt, expense_type: 'Coupon Discount', customer_name: customerName, amount: coupon });
+            if (prod > 0)
+                rows.push({ order_id: oid, date_time: dt, expense_type: 'Discount On Product', customer_name: customerName, amount: prod });
+        }
+        const total = rows.reduce((s, r) => s + r.amount, 0);
+        return { total: rows.length, total_amount: Math.round(total * 100) / 100, rows };
+    }
     async restaurantEarnings(limit = 10, opts = {}) {
         if (this.useMongo()) {
             const rows = await this.mongo.aggregate('orders', [

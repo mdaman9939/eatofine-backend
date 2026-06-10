@@ -660,6 +660,21 @@ export class AdminController {
     });
   }
 
+  @Get('reports/expense-details')
+  expenseDetails(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('zone_id') zoneId?: string,
+    @Query('restaurant_id') restaurantId?: string,
+  ) {
+    return this.admin.expenseDetails({
+      from: from || undefined,
+      to: to || undefined,
+      zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
+      restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
+    });
+  }
+
   @Get('reports/transaction-details')
   transactionDetails(
     @Query('days') days?: string,

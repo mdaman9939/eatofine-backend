@@ -1639,6 +1639,21 @@ export declare class AdminService {
             payment_status: string;
         }[];
     }>;
+    expenseDetails(opts?: ReportFilterOpts): Promise<{
+        total: number;
+        rows: never[];
+        total_amount?: undefined;
+    } | {
+        total: number;
+        total_amount: number;
+        rows: {
+            order_id: number;
+            date_time: unknown;
+            expense_type: string;
+            customer_name: string | null;
+            amount: number;
+        }[];
+    }>;
     restaurantEarnings(limit?: number, opts?: ReportFilterOpts): Promise<{
         top_earners: {
             restaurant_id: number;

@@ -1408,6 +1408,21 @@ export declare class AdminController {
             delivery: number;
         }[];
     }>;
+    expenseDetails(from?: string, to?: string, zoneId?: string, restaurantId?: string): Promise<{
+        total: number;
+        rows: never[];
+        total_amount?: undefined;
+    } | {
+        total: number;
+        total_amount: number;
+        rows: {
+            order_id: number;
+            date_time: unknown;
+            expense_type: string;
+            customer_name: string | null;
+            amount: number;
+        }[];
+    }>;
     transactionDetails(days?: string, from?: string, to?: string, zoneId?: string, restaurantId?: string): Promise<{
         total: number;
         rows: {
