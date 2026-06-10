@@ -4390,17 +4390,24 @@ AdminService.prototype.listDisbursements = async function (opts) {
             this['mongo'].count('disbursements', filter),
         ]);
         const vendorNames = await nameMapFor(this['mongo'], 'vendors', rows.map((r) => readFk(r, 'vendor_id')), personLabel);
+        const dmNames = await nameMapFor(this['mongo'], 'delivery_men', rows.map((r) => readFk(r, 'delivery_man_id')), personLabel);
         return paginate(rows.map((r) => {
             const vendorId = readFk(r, 'vendor_id');
+            const dmId = readFk(r, 'delivery_man_id');
+            const isDm = dmId !== null;
             const amount = r.total_amount !== undefined && r.total_amount !== null ? Number(r.total_amount) : 0;
             return {
                 ...r,
                 id: Number(r.mysql_id),
                 vendor_id: vendorId,
+                delivery_man_id: dmId,
                 amount,
                 total_amount: amount,
-                recipient: vendorId !== null ? (vendorNames.get(vendorId) ?? null) : null,
-                type: r.type ?? 'restaurant',
+                recipient: isDm
+                    ? (dmNames.get(dmId) ?? null)
+                    : (vendorId !== null ? (vendorNames.get(vendorId) ?? null) : null),
+                type: isDm ? 'deliveryman' : 'restaurant',
+                payment_method: r.payment_method ?? 'cash',
             };
         }), total, limit, offset);
     }
