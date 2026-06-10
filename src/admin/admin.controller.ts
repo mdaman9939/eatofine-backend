@@ -677,6 +677,22 @@ export class AdminController {
     });
   }
 
+  @Get('reports/restaurant-report')
+  restaurantReport(
+    @Query('zone_id') zoneId?: string,
+    @Query('restaurant_id') restaurantId?: string,
+  ) {
+    return this.admin.restaurantReport({
+      zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
+      restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
+    });
+  }
+
+  @Get('reports/subscription-report')
+  subscriptionReport() {
+    return this.admin.subscriptionReport();
+  }
+
   @Get('reports/food-report')
   foodReport(
     @Query('zone_id') zoneId?: string,

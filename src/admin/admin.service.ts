@@ -3929,6 +3929,103 @@ export class AdminService {
     return { total: rows.length, rows, status_counts };
   }
 
+  /** Per-restaurant report (StackFood's "Restaurant Report Table"): food count,
+   *  order count, order amount, discount, admin commission, VAT, rating. */
+  async restaurantReport(opts: ReportFilterOpts = {}) {
+    if (!this.useMongo()) return { total: 0, rows: [], yearly: [] as Array<{ year: number; total: number }> };
+    const agg = await this.mongo.aggregate<{ _id: number; total_order: number; total_order_amount: number; total_vat: number; total_coupon: number; total_rest_discount: number }>(
+      'orders',
+      [
+        { $match: { order_status: { $ne: 'failed' } } },
+        {
+          $group: {
+            _id: '$mysql_restaurant_id',
+            total_order: { $sum: 1 },
+            total_order_amount: { $sum: { $toDouble: { $ifNull: ['$order_amount', 0] } } },
+            total_vat: { $sum: { $toDouble: { $ifNull: ['$total_tax_amount', 0] } } },
+            total_coupon: { $sum: { $toDouble: { $ifNull: ['$coupon_discount_amount', 0] } } },
+            total_rest_discount: { $sum: { $toDouble: { $ifNull: ['$restaurant_discount_amount', 0] } } },
+          },
+        },
+      ],
+    );
+    const restIds = agg.map((a) => Number(a._id)).filter((n) => n > 0);
+    const [rests, foodCounts] = await Promise.all([
+      restIds.length ? this.mongo.findMany<{ mysql_id: number; name?: string; logo?: string; comission?: number; avg_rating?: number; rating_count?: number; mysql_zone_id?: number }>('restaurants', { mysql_id: { $in: restIds } }) : Promise.resolve([] as Array<{ mysql_id: number; name?: string; logo?: string; comission?: number; avg_rating?: number; rating_count?: number; mysql_zone_id?: number }>),
+      restIds.length ? this.mongo.aggregate<{ _id: number; c: number }>('foods', [{ $match: { mysql_restaurant_id: { $in: restIds } } }, { $group: { _id: '$mysql_restaurant_id', c: { $sum: 1 } } }]) : Promise.resolve([] as Array<{ _id: number; c: number }>),
+    ]);
+    const restMap = new Map(rests.map((r) => [Number(r.mysql_id), r]));
+    const foodCountMap = new Map(foodCounts.map((f) => [Number(f._id), f.c]));
+    const num = (v: unknown) => (v == null ? 0 : Number(v) || 0);
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+
+    let rows = agg
+      .map((a) => {
+        const rid = Number(a._id);
+        const rest = restMap.get(rid);
+        if (!rest) return null;
+        const amount = r2(a.total_order_amount);
+        const commissionRate = num(rest.comission) || 10;
+        return {
+          restaurant_id: rid,
+          zone_id: Number(rest.mysql_zone_id ?? 0),
+          name: rest.name ?? null,
+          image_full_url: storageFullUrl('restaurant', rest.logo ?? null),
+          total_food: foodCountMap.get(rid) ?? 0,
+          total_order: a.total_order,
+          total_order_amount: amount,
+          total_discount: r2(a.total_coupon + a.total_rest_discount),
+          total_admin_commission: r2((amount * commissionRate) / 100),
+          total_vat: r2(a.total_vat),
+          avg_rating: num(rest.avg_rating),
+          rating_count: Number(rest.rating_count ?? 0),
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null);
+
+    if (opts.zoneId) rows = rows.filter((r) => r.zone_id === Number(opts.zoneId));
+    if (opts.restaurantId) rows = rows.filter((r) => r.restaurant_id === Number(opts.restaurantId));
+    rows.sort((a, b) => b.total_order_amount - a.total_order_amount);
+
+    const yearAgg = await this.mongo.aggregate<{ _id: number; total: number }>('orders', [
+      { $match: { order_status: 'delivered' } },
+      { $group: { _id: { $year: '$created_at' }, total: { $sum: { $toDouble: { $ifNull: ['$order_amount', 0] } } } } },
+      { $sort: { _id: 1 } },
+    ]).catch(() => [] as Array<{ _id: number; total: number }>);
+    const yearly = yearAgg.filter((y) => y._id).map((y) => ({ year: Number(y._id), total: r2(y.total) }));
+
+    return { total: rows.length, rows, yearly };
+  }
+
+  /** Restaurant subscription transactions (StackFood's "Subscription Report"). */
+  async subscriptionReport() {
+    if (!this.useMongo()) return { total: 0, rows: [] };
+    const subs = await this.mongo.findMany<Record<string, unknown>>('subscriptions', {}, { sort: { mysql_id: -1 }, limit: 300 });
+    const pkgIds = Array.from(new Set(subs.map((s) => Number(s.package_id ?? 0)).filter((n) => n > 0)));
+    const vendorIds = Array.from(new Set(subs.map((s) => Number(s.vendor_id ?? 0)).filter((n) => n > 0)));
+    const [pkgs, rests] = await Promise.all([
+      pkgIds.length ? this.mongo.findMany<{ mysql_id: number; package_name?: string; validity?: number }>('subscription_packages', { mysql_id: { $in: pkgIds } }) : Promise.resolve([] as Array<{ mysql_id: number; package_name?: string; validity?: number }>),
+      vendorIds.length ? this.mongo.findMany<{ mysql_id: number; name?: string; mysql_vendor_id?: number }>('restaurants', { mysql_vendor_id: { $in: vendorIds } }) : Promise.resolve([] as Array<{ mysql_id: number; name?: string; mysql_vendor_id?: number }>),
+    ]);
+    const pkgMap = new Map(pkgs.map((p) => [Number(p.mysql_id), p]));
+    const restByVendor = new Map(rests.map((r) => [Number(r.mysql_vendor_id ?? 0), r.name ?? null]));
+    const num = (v: unknown) => (v == null ? 0 : Number(v) || 0);
+    const rows = subs.map((s) => {
+      const pkg = pkgMap.get(Number(s.package_id ?? 0));
+      return {
+        transaction_id: (s.transaction_id as string) ?? `SUB-${Number(s.mysql_id)}`,
+        transaction_date: s.started_at ?? s.created_at ?? null,
+        restaurant_name: restByVendor.get(Number(s.vendor_id ?? 0)) ?? null,
+        package_name: pkg?.package_name ?? 'Plan',
+        duration: `${num(pkg?.validity) || 30} Days`,
+        pricing: num(s.amount),
+        payment_status: String(s.status ?? 'paid') === 'active' ? 'paid' : String(s.status ?? 'paid'),
+        payment_method: 'Manual Payment By Admin',
+      };
+    });
+    return { total: rows.length, rows };
+  }
+
   async restaurantEarnings(limit = 10, opts: ReportFilterOpts = {}) {
     if (this.useMongo()) {
       const rows = await this.mongo.aggregate<{

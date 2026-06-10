@@ -1703,6 +1703,40 @@ export declare class AdminService {
         }[];
         status_counts: Record<string, number>;
     }>;
+    restaurantReport(opts?: ReportFilterOpts): Promise<{
+        total: number;
+        rows: {
+            restaurant_id: number;
+            zone_id: number;
+            name: string | null;
+            image_full_url: string | null;
+            total_food: number;
+            total_order: number;
+            total_order_amount: number;
+            total_discount: number;
+            total_admin_commission: number;
+            total_vat: number;
+            avg_rating: number;
+            rating_count: number;
+        }[];
+        yearly: {
+            year: number;
+            total: number;
+        }[];
+    }>;
+    subscriptionReport(): Promise<{
+        total: number;
+        rows: {
+            transaction_id: string;
+            transaction_date: {} | null;
+            restaurant_name: string | null;
+            package_name: string;
+            duration: string;
+            pricing: number;
+            payment_status: string;
+            payment_method: string;
+        }[];
+    }>;
     restaurantEarnings(limit?: number, opts?: ReportFilterOpts): Promise<{
         top_earners: {
             restaurant_id: number;
