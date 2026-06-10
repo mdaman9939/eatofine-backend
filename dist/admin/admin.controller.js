@@ -389,6 +389,12 @@ let AdminController = class AdminController {
             restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
         });
     }
+    customerOverviewReport() {
+        return this.admin.customerOverviewReport();
+    }
+    customerWalletReport() {
+        return this.admin.customerWalletReport();
+    }
     restaurantReport(zoneId, restaurantId) {
         return this.admin.restaurantReport({
             zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
@@ -1575,6 +1581,18 @@ __decorate([
     __metadata("design:paramtypes", [String, String, String, String, String]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "orderReport", null);
+__decorate([
+    (0, common_1.Get)('reports/customer-report'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "customerOverviewReport", null);
+__decorate([
+    (0, common_1.Get)('reports/customer-wallet-report'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "customerWalletReport", null);
 __decorate([
     (0, common_1.Get)('reports/restaurant-report'),
     __param(0, (0, common_1.Query)('zone_id')),

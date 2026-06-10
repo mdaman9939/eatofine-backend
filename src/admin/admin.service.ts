@@ -4026,6 +4026,86 @@ export class AdminService {
     return { total: rows.length, rows };
   }
 
+  /** Customer Overview Report — per-customer order stats + customer counts. */
+  async customerOverviewReport(_opts: ReportFilterOpts = {}) {
+    if (!this.useMongo()) return { total: 0, rows: [], stats: { total_customers: 0, new_customers: 0, active: 0, inactive: 0, returning: 0 } };
+    const num = (v: unknown) => (v == null ? 0 : Number(v) || 0);
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    const [ordAgg, pmAgg, users] = await Promise.all([
+      this.mongo.aggregate<{ _id: number; total_order: number; total_spent: number; last_purchase: unknown }>('orders', [
+        { $group: { _id: '$mysql_user_id', total_order: { $sum: 1 }, total_spent: { $sum: { $toDouble: { $ifNull: ['$order_amount', 0] } } }, last_purchase: { $max: '$created_at' } } },
+      ]),
+      this.mongo.aggregate<{ _id: { u: number; pm: string }; c: number }>('orders', [
+        { $group: { _id: { u: '$mysql_user_id', pm: '$payment_method' }, c: { $sum: 1 } } },
+        { $sort: { c: -1 } },
+      ]),
+      this.mongo.findMany<{ mysql_id: number; f_name?: string; l_name?: string; email?: string; phone?: string; image?: string; created_at?: unknown; legacy?: { created_at?: unknown } }>('users', {}, { sort: { mysql_id: -1 }, limit: 1000 }),
+    ]);
+    const ordMap = new Map(ordAgg.map((o) => [Number(o._id), o]));
+    const pmMap = new Map<number, string>();
+    for (const p of pmAgg) { const uid = Number(p._id?.u); if (uid && !pmMap.has(uid)) pmMap.set(uid, p._id?.pm ?? 'cash_on_delivery'); }
+    const now = Date.now();
+
+    const rows = users.map((u) => {
+      const uid = Number(u.mysql_id);
+      const o = ordMap.get(uid);
+      const orders = o?.total_order ?? 0;
+      const spent = r2(o?.total_spent ?? 0);
+      return {
+        customer_id: uid,
+        name: `${u.f_name ?? ''} ${u.l_name ?? ''}`.trim() || null,
+        email: u.email ?? null,
+        phone: u.phone ?? null,
+        image_full_url: storageFullUrl('profile', u.image ?? null),
+        joining_date: u.created_at ?? u.legacy?.created_at ?? null,
+        total_order: orders,
+        total_spent: spent,
+        aov: orders ? r2(spent / orders) : 0,
+        last_purchase: o?.last_purchase ?? null,
+        most_used_payment_method: orders ? (pmMap.get(uid) ?? 'cash_on_delivery') : null,
+      };
+    });
+    rows.sort((a, b) => b.total_spent - a.total_spent);
+
+    const total_customers = users.length;
+    const new_customers = users.filter((u) => { const t = new Date(String(u.created_at ?? u.legacy?.created_at ?? 0)).getTime(); return t && now - t < 30 * 86_400_000; }).length;
+    const active = rows.filter((r) => r.total_order > 0).length;
+    const returning = rows.filter((r) => r.total_order > 1).length;
+    return { total: rows.length, rows, stats: { total_customers, new_customers, active, inactive: total_customers - active, returning } };
+  }
+
+  /** Customer Wallet Report — wallet transactions + debit/credit/balance totals. */
+  async customerWalletReport() {
+    if (!this.useMongo()) return { total: 0, rows: [], totals: { credit: 0, debit: 0, balance: 0 } };
+    const num = (v: unknown) => (v == null ? 0 : Number(v) || 0);
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    const txns = await this.mongo.findMany<Record<string, unknown>>('wallet_transactions', {}, { sort: { mysql_id: -1 }, limit: 500 });
+    const userIds = Array.from(new Set(txns.map((t) => Number(t.mysql_user_id ?? 0)).filter((n) => n > 0)));
+    const users = userIds.length
+      ? await this.mongo.findMany<{ mysql_id: number; f_name?: string; l_name?: string }>('users', { mysql_id: { $in: userIds } })
+      : [];
+    const userMap = new Map(users.map((u) => [Number(u.mysql_id), `${u.f_name ?? ''} ${u.l_name ?? ''}`.trim() || null]));
+    let totalCredit = 0;
+    let totalDebit = 0;
+    const rows = txns.map((t) => {
+      const credit = num(t.credit);
+      const debit = num(t.debit);
+      totalCredit += credit;
+      totalDebit += debit;
+      return {
+        transaction_id: (t.transaction_id as string) ?? `TXN-${Number(t.mysql_id)}`,
+        customer: userMap.get(Number(t.mysql_user_id ?? 0)) ?? null,
+        credit: r2(credit),
+        debit: r2(debit),
+        balance: r2(num(t.balance)),
+        transaction_type: String(t.transaction_type ?? '—'),
+        reference: (t.reference as string) ?? (t.mysql_order_id != null ? String(t.mysql_order_id) : '—'),
+        created_at: t.created_at ?? null,
+      };
+    });
+    return { total: rows.length, rows, totals: { credit: r2(totalCredit), debit: r2(totalDebit), balance: r2(totalCredit - totalDebit) } };
+  }
+
   async restaurantEarnings(limit = 10, opts: ReportFilterOpts = {}) {
     if (this.useMongo()) {
       const rows = await this.mongo.aggregate<{

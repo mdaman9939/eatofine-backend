@@ -1431,6 +1431,47 @@ export declare class AdminController {
         }[];
         status_counts: Record<string, number>;
     }>;
+    customerOverviewReport(): Promise<{
+        total: number;
+        rows: {
+            customer_id: number;
+            name: string | null;
+            email: string | null;
+            phone: string | null;
+            image_full_url: string | null;
+            joining_date: {} | null;
+            total_order: number;
+            total_spent: number;
+            aov: number;
+            last_purchase: {} | null;
+            most_used_payment_method: string | null;
+        }[];
+        stats: {
+            total_customers: number;
+            new_customers: number;
+            active: number;
+            inactive: number;
+            returning: number;
+        };
+    }>;
+    customerWalletReport(): Promise<{
+        total: number;
+        rows: {
+            transaction_id: string;
+            customer: string | null;
+            credit: number;
+            debit: number;
+            balance: number;
+            transaction_type: string;
+            reference: string;
+            created_at: {} | null;
+        }[];
+        totals: {
+            credit: number;
+            debit: number;
+            balance: number;
+        };
+    }>;
     restaurantReport(zoneId?: string, restaurantId?: string): Promise<{
         total: number;
         rows: {

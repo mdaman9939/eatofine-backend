@@ -677,6 +677,16 @@ export class AdminController {
     });
   }
 
+  @Get('reports/customer-report')
+  customerOverviewReport() {
+    return this.admin.customerOverviewReport();
+  }
+
+  @Get('reports/customer-wallet-report')
+  customerWalletReport() {
+    return this.admin.customerWalletReport();
+  }
+
   @Get('reports/restaurant-report')
   restaurantReport(
     @Query('zone_id') zoneId?: string,
