@@ -630,10 +630,22 @@ export class DeliveryExtrasController {
         { status: true },
         { sort: { mysql_id: -1 }, limit: 50 },
       );
-      return rows.map((r) => ({ id: Number(r.mysql_id), title: r.title, description: r.description }));
+      return rows.map((r) => {
+        // The app shows the date/time from created_at + updated_at, so they
+        // must be returned or the notification cards show no time.
+        const created = r.created_at ?? r.created_at_legacy ?? null;
+        return {
+          id: Number(r.mysql_id),
+          title: r.title,
+          description: r.description,
+          image_full_url: storageFullUrl('notification', (r.image as string | null | undefined) ?? null),
+          created_at: created,
+          updated_at: r.updated_at ?? created,
+        };
+      });
     }
     const rows = await this.prisma.notifications.findMany({ where: { status: true }, orderBy: { id: 'desc' }, take: 50 });
-    return rows.map((r) => ({ id: Number(r.id), title: r.title, description: r.description }));
+    return rows.map((r) => ({ id: Number(r.id), title: r.title, description: r.description, created_at: r.created_at, updated_at: r.updated_at ?? r.created_at }));
   }
 
   // ── Messaging (real, DB-backed) ───────────────────────────────────

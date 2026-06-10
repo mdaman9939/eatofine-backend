@@ -645,6 +645,15 @@ export declare class DeliveryExtrasController {
         id: number;
         title: unknown;
         description: unknown;
+        image_full_url: string | null;
+        created_at: {} | null;
+        updated_at: {} | null;
+    }[] | {
+        id: number;
+        title: string | null;
+        description: string | null;
+        created_at: Date | null;
+        updated_at: Date | null;
     }[]>;
     messageList(req: AuthedRequest, type?: string, offsetQ?: string, limitQ?: string): Promise<{
         conversation: {
