@@ -708,6 +708,32 @@ export declare class BrowseController {
         limit: string;
         offset: string;
         restaurants: {
+            foods_count: number;
+            foods: {
+                id: number;
+                name: string | null;
+                description: string | null;
+                image: string | null;
+                image_full_url: string | null;
+                category_id: number | null;
+                category_ids: unknown;
+                variations: unknown;
+                add_ons: unknown;
+                attributes: unknown;
+                choice_options: unknown;
+                price: number;
+                tax: number;
+                tax_type: string;
+                discount: number;
+                discount_type: string;
+                veg: number;
+                status: number;
+                restaurant_id: number;
+                restaurant_name: string | null;
+                avg_rating: number;
+                rating_count: number;
+                recommended: number;
+            }[];
             id: number;
             name: string | null;
             phone: string | null;
@@ -745,6 +771,7 @@ export declare class BrowseController {
         limit: string;
         offset: string;
         restaurants: {
+            foods_count: number;
             id: bigint;
             name: string;
             phone: string;

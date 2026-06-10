@@ -622,19 +622,23 @@ export class BrowseService {
 
   async getCategoryRestaurants(categoryId: number, limit = 10, offset = 1) {
     if (this.useMongo()) {
+      // Pull the category's FULL food docs (not just restaurant ids) so we can
+      // both (a) pick the restaurants that actually serve this category and
+      // (b) attach each restaurant's foods for the card preview. Without the
+      // foods array the customer app shows "No food available" on every card.
       const foods = await this.mongo.findMany<MongoFoodDoc>(
         'foods',
         { status: true, mysql_category_id: Number(categoryId) },
-        { projection: { mysql_restaurant_id: 1 } },
       );
-      const restaurantIds = Array.from(
-        new Set(
-          foods
-            .map((f) => f.mysql_restaurant_id)
-            .filter((rid): rid is number => rid != null)
-            .map((n) => Number(n)),
-        ),
-      );
+      const foodsByRestaurant = new Map<number, MongoFoodDoc[]>();
+      for (const f of foods) {
+        const rid = Number(f.mysql_restaurant_id ?? 0);
+        if (!rid) continue;
+        const arr = foodsByRestaurant.get(rid) ?? [];
+        arr.push(f);
+        foodsByRestaurant.set(rid, arr);
+      }
+      const restaurantIds = Array.from(foodsByRestaurant.keys());
       const filter: Record<string, unknown> = {
         status: true,
         mysql_id: { $in: restaurantIds },
@@ -644,17 +648,31 @@ export class BrowseService {
         limit,
         skip: Math.max(0, (offset - 1) * limit),
       });
+      const vendorImg = await this.vendorImageMap(rows);
       return {
         total_size: total,
         limit: String(limit),
         offset: String(offset),
-        restaurants: rows.map((r) => this.mapRestaurantMongo(r)),
+        restaurants: rows.map((r) => {
+          const rid = Number(r.mysql_id ?? 0);
+          const rFoods = foodsByRestaurant.get(rid) ?? [];
+          return {
+            ...this.mapRestaurantMongo(r, vendorImg.get(Number(r.mysql_vendor_id ?? 0))),
+            foods_count: rFoods.length,
+            foods: rFoods.slice(0, 10).map((f) => this.mapFoodMongo(f, r.name ?? undefined)),
+          };
+        }),
       };
     }
     const foods = await this.prisma.food.findMany({
       where: { status: true, category_id: BigInt(categoryId) },
       select: { restaurant_id: true },
     });
+    const countByRestaurant = new Map<string, number>();
+    for (const f of foods) {
+      const key = String(f.restaurant_id);
+      countByRestaurant.set(key, (countByRestaurant.get(key) ?? 0) + 1);
+    }
     const restaurantIds = Array.from(new Set(foods.map((f) => f.restaurant_id)));
     const where = { status: true, id: { in: restaurantIds } };
     const total = await this.prisma.restaurants.count({ where });
@@ -667,7 +685,10 @@ export class BrowseService {
       total_size: total,
       limit: String(limit),
       offset: String(offset),
-      restaurants: rows.map((r) => this.mapRestaurant(r)),
+      restaurants: rows.map((r) => ({
+        ...this.mapRestaurant(r),
+        foods_count: countByRestaurant.get(String(r.id)) ?? 0,
+      })),
     };
   }
 }
