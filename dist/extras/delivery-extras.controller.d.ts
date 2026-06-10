@@ -646,19 +646,42 @@ export declare class DeliveryExtrasController {
         title: unknown;
         description: unknown;
     }[]>;
-    messageList(req: AuthedRequest): Promise<{
-        conversations: {
+    messageList(req: AuthedRequest, type?: string, offsetQ?: string, limitQ?: string): Promise<{
+        conversation: {
             id: number;
-            type: string;
-            user_id: number | null;
-            name: string;
-            last_message: {} | null;
-            last_message_at: {} | null;
-            unread: {};
+            sender_id: number;
+            sender_type: string;
+            receiver_id: number;
+            receiver_type: string;
+            unread_message_count: number;
+            last_message_id: null;
+            last_message_time: {} | null;
+            created_at: {} | null;
+            updated_at: {} | null;
+            sender: {
+                id: number;
+                f_name: string | null;
+                l_name: string | null;
+                phone: string | null;
+                email: string | null;
+                image_full_url: string | null;
+                deliveryman_id: number;
+            };
+            receiver: Record<string, unknown>;
+            last_message: {
+                id: null;
+                conversation_id: number;
+                sender_id: number;
+                message: string;
+                is_seen: number;
+                files: never[];
+            };
         }[];
         total_size: number;
+        limit: number;
+        offset: number;
     }>;
-    messageDetails(req: AuthedRequest, convId?: string, userId?: string): Promise<{
+    messageDetails(req: AuthedRequest, convId?: string, userId?: string, vendorId?: string): Promise<{
         messages: {
             id: number;
             conversation_id: number;
