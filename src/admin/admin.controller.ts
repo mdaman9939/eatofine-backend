@@ -324,6 +324,17 @@ export class AdminController {
     return this.admin.listCategories(parentId !== undefined ? parseInt(parentId, 10) : undefined);
   }
 
+  @Get('categories/bulk-export')
+  bulkExportCategories() {
+    return this.admin.bulkExportCategories();
+  }
+
+  @Post('categories/bulk-import')
+  @HttpCode(200)
+  bulkImportCategories(@Body() body: { rows?: Array<Record<string, unknown>> }) {
+    return this.admin.bulkImportCategories(body.rows ?? []);
+  }
+
   @Post('categories')
   createCategory(@Body() body: Parameters<AdminService['createCategory']>[0]) {
     return this.admin.createCategory(body);

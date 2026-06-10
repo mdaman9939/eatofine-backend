@@ -937,6 +937,25 @@ export declare class AdminController {
             updated_at: Date | null;
         }[];
     }>;
+    bulkExportCategories(): Promise<{
+        total: number;
+        rows: {
+            id: number;
+            name: string;
+            parent_id: number;
+            position: number;
+            priority: number;
+            status: number;
+        }[];
+    }>;
+    bulkImportCategories(body: {
+        rows?: Array<Record<string, unknown>>;
+    }): Promise<{
+        ok: boolean;
+        created: number;
+        failed: number;
+        errors: string[];
+    }>;
     createCategory(body: Parameters<AdminService['createCategory']>[0]): Promise<{
         ok: boolean;
         id: number;

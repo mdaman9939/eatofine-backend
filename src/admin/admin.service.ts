@@ -1584,6 +1584,45 @@ export class AdminService {
     return { categories: rows.map((r) => ({ ...r, id: Number(r.id) })) };
   }
 
+  /** CSV export of every category (top-level + sub) for backup / editing. */
+  async bulkExportCategories() {
+    const { categories } = await this.listCategories();
+    return {
+      total: categories.length,
+      rows: categories.map((c) => ({
+        id: c.id,
+        name: c.name,
+        parent_id: c.parent_id ?? 0,
+        position: c.position ?? 1,
+        priority: c.priority ?? 0,
+        status: c.status ? 1 : 0,
+      })),
+    };
+  }
+
+  /** Create many categories from parsed CSV rows. parent_id>0 → sub-category. */
+  async bulkImportCategories(rows: Array<Record<string, unknown>>) {
+    let created = 0;
+    const errors: string[] = [];
+    for (const [i, row] of rows.entries()) {
+      const name = String(row.name ?? '').trim();
+      if (!name) { errors.push(`Row ${i + 1}: name is required`); continue; }
+      try {
+        await this.createCategory({
+          name,
+          parent_id: row.parent_id != null && row.parent_id !== '' ? Number(row.parent_id) : 0,
+          position: row.position != null && row.position !== '' ? Number(row.position) : 1,
+          priority: row.priority != null && row.priority !== '' ? Number(row.priority) : 0,
+          translations: [{ locale: 'default', key: 'name', value: name }],
+        });
+        created++;
+      } catch (e) {
+        errors.push(`Row ${i + 1}: ${(e as Error).message}`);
+      }
+    }
+    return { ok: true, created, failed: errors.length, errors };
+  }
+
   async createCategory(body: { name: string; parent_id?: number; position?: number; priority?: number; image?: string | null; translations?: Array<{ locale?: string; key?: string; value?: string }> }) {
     if (!body.name) throw new BadRequestException({ errors: [{ code: 'name', message: 'name is required' }] });
     const translations = Array.isArray(body.translations) ? body.translations : [];

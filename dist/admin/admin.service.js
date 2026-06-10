@@ -1481,6 +1481,45 @@ let AdminService = class AdminService {
         });
         return { categories: rows.map((r) => ({ ...r, id: Number(r.id) })) };
     }
+    async bulkExportCategories() {
+        const { categories } = await this.listCategories();
+        return {
+            total: categories.length,
+            rows: categories.map((c) => ({
+                id: c.id,
+                name: c.name,
+                parent_id: c.parent_id ?? 0,
+                position: c.position ?? 1,
+                priority: c.priority ?? 0,
+                status: c.status ? 1 : 0,
+            })),
+        };
+    }
+    async bulkImportCategories(rows) {
+        let created = 0;
+        const errors = [];
+        for (const [i, row] of rows.entries()) {
+            const name = String(row.name ?? '').trim();
+            if (!name) {
+                errors.push(`Row ${i + 1}: name is required`);
+                continue;
+            }
+            try {
+                await this.createCategory({
+                    name,
+                    parent_id: row.parent_id != null && row.parent_id !== '' ? Number(row.parent_id) : 0,
+                    position: row.position != null && row.position !== '' ? Number(row.position) : 1,
+                    priority: row.priority != null && row.priority !== '' ? Number(row.priority) : 0,
+                    translations: [{ locale: 'default', key: 'name', value: name }],
+                });
+                created++;
+            }
+            catch (e) {
+                errors.push(`Row ${i + 1}: ${e.message}`);
+            }
+        }
+        return { ok: true, created, failed: errors.length, errors };
+    }
     async createCategory(body) {
         if (!body.name)
             throw new common_1.BadRequestException({ errors: [{ code: 'name', message: 'name is required' }] });

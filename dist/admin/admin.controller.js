@@ -210,6 +210,12 @@ let AdminController = class AdminController {
     categories(parentId) {
         return this.admin.listCategories(parentId !== undefined ? parseInt(parentId, 10) : undefined);
     }
+    bulkExportCategories() {
+        return this.admin.bulkExportCategories();
+    }
+    bulkImportCategories(body) {
+        return this.admin.bulkImportCategories(body.rows ?? []);
+    }
     createCategory(body) {
         return this.admin.createCategory(body);
     }
@@ -1114,6 +1120,20 @@ __decorate([
     __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "categories", null);
+__decorate([
+    (0, common_1.Get)('categories/bulk-export'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "bulkExportCategories", null);
+__decorate([
+    (0, common_1.Post)('categories/bulk-import'),
+    (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "bulkImportCategories", null);
 __decorate([
     (0, common_1.Post)('categories'),
     __param(0, (0, common_1.Body)()),
