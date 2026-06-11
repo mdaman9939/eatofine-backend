@@ -1,8 +1,10 @@
-import { Body, Controller, Get, Post, Query, Param, HttpCode } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Param, HttpCode, Req, UseGuards } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { storageFullUrl } from '../common/storage-url';
+import { AuthGuard, RequireAuth } from '../auth/auth.guard';
+import type { AuthedRequest } from '../auth/auth.guard';
 
 // Public catalog endpoints that aren't under the existing CatalogController.
 // These mostly return seeded data or sensible empty arrays for the demo.
@@ -545,9 +547,13 @@ export class CatalogExtrasController {
     }));
   }
 
+  // Require customer auth so the reviewer is captured (the app doesn't send
+  // user_id) — otherwise every review showed "Reviewer Not Found".
   @HttpCode(200)
   @Post('products/reviews/submit')
-  async submitProductReview(@Body() body: Record<string, unknown> = {}) {
+  @UseGuards(AuthGuard)
+  @RequireAuth('customer')
+  async submitProductReview(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
     if (!this.useMongo()) return { message: 'review submitted' };
     const foodId = Number(body.food_id ?? body.product_id ?? 0);
     const rating = Math.max(1, Math.min(5, Math.round(Number(body.rating ?? 0))));
@@ -555,6 +561,11 @@ export class CatalogExtrasController {
     const food = await this.mongo.findByMysqlId<{ mysql_id: number; mysql_restaurant_id?: number | null }>('foods', foodId);
     if (!food) return { errors: [{ code: 'food', message: 'not found' }] };
     const restId = Number(food.mysql_restaurant_id ?? 0);
+    // The app sometimes sends order_id as the string "null" → Number() = NaN.
+    // Only keep a real, finite order id.
+    const oidRaw = Number(body.order_id);
+    const orderId = Number.isFinite(oidRaw) && oidRaw > 0 ? oidRaw : null;
+    const userId = Number(req.actor!.id) || (body.user_id ? Number(body.user_id) : null);
     const now = new Date();
     const nextId = await this.mongo.nextMysqlId('reviews');
     await this.mongo.insertOne('reviews', {
@@ -562,8 +573,11 @@ export class CatalogExtrasController {
       mysql_food_id: foodId,
       food_id: foodId,
       mysql_restaurant_id: restId || null,
-      mysql_user_id: body.user_id ? Number(body.user_id) : null,
-      order_id: body.order_id ? Number(body.order_id) : null,
+      mysql_user_id: userId,
+      user_id: userId,
+      mysql_order_id: orderId,
+      order_id: orderId,
+      status: true,
       comment: body.comment ? String(body.comment) : null,
       rating,
       created_at: now,

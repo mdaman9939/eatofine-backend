@@ -1,5 +1,6 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import type { AuthedRequest } from '../auth/auth.guard';
 export declare class CatalogExtrasController {
     private readonly prisma;
     private readonly mongo;
@@ -194,7 +195,7 @@ export declare class CatalogExtrasController {
         reply: unknown;
         reply_at: unknown;
     }[]>;
-    submitProductReview(body?: Record<string, unknown>): Promise<{
+    submitProductReview(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
         message: string;
         errors?: undefined;
     } | {

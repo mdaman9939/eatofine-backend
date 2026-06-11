@@ -18,6 +18,7 @@ const throttler_1 = require("@nestjs/throttler");
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
 const storage_url_1 = require("../common/storage-url");
+const auth_guard_1 = require("../auth/auth.guard");
 let CatalogExtrasController = class CatalogExtrasController {
     prisma;
     mongo;
@@ -467,7 +468,7 @@ let CatalogExtrasController = class CatalogExtrasController {
             reply_at: r.reply_at,
         }));
     }
-    async submitProductReview(body = {}) {
+    async submitProductReview(req, body = {}) {
         if (!this.useMongo())
             return { message: 'review submitted' };
         const foodId = Number(body.food_id ?? body.product_id ?? 0);
@@ -478,6 +479,9 @@ let CatalogExtrasController = class CatalogExtrasController {
         if (!food)
             return { errors: [{ code: 'food', message: 'not found' }] };
         const restId = Number(food.mysql_restaurant_id ?? 0);
+        const oidRaw = Number(body.order_id);
+        const orderId = Number.isFinite(oidRaw) && oidRaw > 0 ? oidRaw : null;
+        const userId = Number(req.actor.id) || (body.user_id ? Number(body.user_id) : null);
         const now = new Date();
         const nextId = await this.mongo.nextMysqlId('reviews');
         await this.mongo.insertOne('reviews', {
@@ -485,8 +489,11 @@ let CatalogExtrasController = class CatalogExtrasController {
             mysql_food_id: foodId,
             food_id: foodId,
             mysql_restaurant_id: restId || null,
-            mysql_user_id: body.user_id ? Number(body.user_id) : null,
-            order_id: body.order_id ? Number(body.order_id) : null,
+            mysql_user_id: userId,
+            user_id: userId,
+            mysql_order_id: orderId,
+            order_id: orderId,
+            status: true,
             comment: body.comment ? String(body.comment) : null,
             rating,
             created_at: now,
@@ -802,9 +809,12 @@ __decorate([
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('products/reviews/submit'),
-    __param(0, (0, common_1.Body)()),
+    (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
+    (0, auth_guard_1.RequireAuth)('customer'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
+    __metadata("design:paramtypes", [Object, Object]),
     __metadata("design:returntype", Promise)
 ], CatalogExtrasController.prototype, "submitProductReview", null);
 __decorate([
