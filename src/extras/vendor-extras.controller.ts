@@ -404,31 +404,61 @@ export class VendorExtrasController {
         // Without these the avatar + restaurant card stay grey placeholders even
         // when the filename is saved. Build them from STORAGE_BASE_URL.
         image_full_url: this.buildStorageUrl('profile', v.image),
-        restaurants: restaurants.map((r) => ({
-          id: Number(r.mysql_id),
-          name: r.name ?? null,
-          logo: r.logo ?? null,
-          logo_full_url: this.buildStorageUrl('restaurant', r.logo),
-          cover_photo: (r as { cover_photo?: string }).cover_photo ?? null,
-          cover_photo_full_url: this.buildStorageUrl('restaurant/cover', (r as { cover_photo?: string }).cover_photo),
-          status: r.status ?? null,
-          address: r.address ?? null,
-          phone: r.phone ?? null,
-          comission: r.comission !== null && r.comission !== undefined ? toNum(r.comission) : null,
-          minimum_order: toNum(r.minimum_order),
-          delivery: r.delivery ?? null,
-          take_away: r.take_away ?? null,
-          restaurant_model: r.restaurant_model ?? null,
-          // Schedule-mode radio state — without these the app reads null and
-          // resets "Always Open" back to "Specific Time" after every update.
-          opening_closing_status: (r as unknown as Record<string, unknown>).opening_closing_status ?? false,
-          same_time_for_every_day: (r as unknown as Record<string, unknown>).same_time_for_every_day ?? false,
-          // Food Type checkboxes — app reads veg/non_veg as int (== 1). Without
-          // these the boxes reset to unchecked after every save. Default 1
-          // (matches the DB default) when never explicitly set.
-          veg: vegNonVegFlag((r as unknown as Record<string, unknown>).veg),
-          non_veg: vegNonVegFlag((r as unknown as Record<string, unknown>).non_veg),
-        })),
+        restaurants: restaurants.map((r) => {
+          const rr = r as unknown as Record<string, unknown>;
+          return {
+            id: Number(r.mysql_id),
+            name: r.name ?? null,
+            logo: r.logo ?? null,
+            logo_full_url: this.buildStorageUrl('restaurant', r.logo),
+            cover_photo: (r as { cover_photo?: string }).cover_photo ?? null,
+            cover_photo_full_url: this.buildStorageUrl('restaurant/cover', (r as { cover_photo?: string }).cover_photo),
+            status: r.status ?? null,
+            address: r.address ?? null,
+            phone: r.phone ?? null,
+            comission: r.comission !== null && r.comission !== undefined ? toNum(r.comission) : null,
+            minimum_order: toNum(r.minimum_order),
+            delivery: rr.delivery ?? false,
+            take_away: rr.take_away ?? false,
+            restaurant_model: r.restaurant_model ?? null,
+            // Schedule-mode radio state — without these the app reads null and
+            // resets "Always Open" back to "Specific Time" after every update.
+            opening_closing_status: rr.opening_closing_status ?? false,
+            same_time_for_every_day: rr.same_time_for_every_day ?? false,
+            // Food Type checkboxes — app reads veg/non_veg as int (== 1).
+            veg: vegNonVegFlag(rr.veg),
+            non_veg: vegNonVegFlag(rr.non_veg),
+            // ── Full Restaurant Config round-trip — every toggle/number/list
+            //    the app reads back, so NO setting snaps back after Update. ──
+            free_delivery: rr.free_delivery ?? false,
+            schedule_order: rr.schedule_order ?? false,
+            instant_order: rr.instant_order ?? false,
+            order_subscription_active: rr.order_subscription_active ?? false,
+            cutlery: rr.cutlery ?? false,
+            halal_tag_status: rr.halal_tag_status ?? false,
+            gst_status: rr.gst_status ?? false,
+            gst_code: rr.gst_code ?? rr.gst ?? null,
+            self_delivery_system: rr.self_delivery_system ?? false,
+            is_dine_in_active: rr.is_dine_in_active ?? false,
+            is_extra_packaging_active: rr.is_extra_packaging_active ?? false,
+            extra_packaging_status: toNum(rr.extra_packaging_status),
+            extra_packaging_amount: toNum(rr.extra_packaging_amount),
+            schedule_advance_dine_in_booking_duration: toNum(rr.schedule_advance_dine_in_booking_duration),
+            schedule_advance_dine_in_booking_duration_time_format: rr.schedule_advance_dine_in_booking_duration_time_format ?? 'hours',
+            customer_date_order_sratus: rr.customer_date_order_sratus ?? false,
+            customer_order_date: toNum(rr.customer_order_date),
+            free_delivery_distance_status: rr.free_delivery_distance_status ?? false,
+            free_delivery_distance_value: toNum(rr.free_delivery_distance_value),
+            minimum_shipping_charge: toNum(rr.minimum_shipping_charge),
+            maximum_shipping_charge: toNum(rr.maximum_shipping_charge),
+            per_km_shipping_charge: toNum(rr.per_km_shipping_charge),
+            delivery_time: rr.delivery_time ?? '30-40',
+            characteristics: Array.isArray(rr.characteristics) ? rr.characteristics : [],
+            tags: Array.isArray(rr.tags) ? rr.tags : [],
+            cuisine: [],
+            schedules: Array.isArray(rr.schedules) ? rr.schedules : [],
+          };
+        }),
       };
     }
     const v = await this.prisma.vendors.findUnique({ where: { id: req.actor!.id } });
@@ -725,14 +755,57 @@ export class VendorExtrasController {
   async businessSetup(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
     const b = body ?? {};
     const data: Record<string, unknown> = {};
-    for (const k of ['minimum_order', 'minimum_shipping_charge'] as const) {
-      if (b[k] !== undefined) data[k] = Number(b[k]);
+    const has = (k: string) => b[k] !== undefined && b[k] !== '';
+
+    // Numbers — note the app's send-key may differ from the read-key, so map
+    // each to the field the profile endpoint returns (e.g. *_delivery_charge →
+    // *_shipping_charge, free_delivery_distance → free_delivery_distance_value).
+    const numMap: Record<string, string> = {
+      minimum_order: 'minimum_order',
+      minimum_shipping_charge: 'minimum_shipping_charge',
+      minimum_delivery_charge: 'minimum_shipping_charge',
+      maximum_delivery_charge: 'maximum_shipping_charge',
+      per_km_delivery_charge: 'per_km_shipping_charge',
+      extra_packaging_amount: 'extra_packaging_amount',
+      extra_packaging_status: 'extra_packaging_status',
+      schedule_advance_dine_in_booking_duration: 'schedule_advance_dine_in_booking_duration',
+      customer_order_date: 'customer_order_date',
+      free_delivery_distance: 'free_delivery_distance_value',
+    };
+    for (const [src, dest] of Object.entries(numMap)) {
+      if (has(src)) data[dest] = Number(b[src]);
     }
-    for (const k of ['delivery', 'take_away', 'free_delivery', 'veg', 'non_veg', 'self_delivery_system'] as const) {
-      if (b[k] !== undefined) data[k] = !!Number(b[k]);
+
+    // Booleans (every Order Type / Other Setup toggle).
+    for (const k of [
+      'delivery', 'take_away', 'free_delivery', 'veg', 'non_veg', 'self_delivery_system',
+      'gst_status', 'cutlery', 'halal_tag_status', 'instant_order', 'order_subscription_active',
+      'is_dine_in_active', 'is_extra_packaging_active', 'free_delivery_distance_status',
+      'customer_date_order_sratus', 'schedule_order',
+    ]) {
+      if (has(k)) data[k] = !!Number(b[k]);
     }
+
+    // Strings.
     if (b.restaurant_model !== undefined) data.restaurant_model = String(b.restaurant_model);
     if (b.delivery_time !== undefined) data.delivery_time = String(b.delivery_time);
+    if (b.gst !== undefined) data.gst_code = String(b.gst);
+    if (b.schedule_advance_dine_in_booking_duration_time_format !== undefined) {
+      data.schedule_advance_dine_in_booking_duration_time_format = String(b.schedule_advance_dine_in_booking_duration_time_format);
+    }
+
+    // List fields — characteristics/tags arrive comma-separated; cuisine_ids is
+    // a JSON array string. Store as arrays so the profile can echo them back.
+    const splitCsv = (s: unknown) => String(s ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+    if (b.characteristics !== undefined) data.characteristics = splitCsv(b.characteristics);
+    if (b.tags !== undefined) data.tags = splitCsv(b.tags);
+    if (b.cuisine_ids !== undefined) {
+      try {
+        const ids = JSON.parse(String(b.cuisine_ids));
+        if (Array.isArray(ids)) data.cuisine_ids = ids.map((x) => Number(x)).filter((n) => Number.isFinite(n));
+      } catch { /* ignore malformed cuisine_ids */ }
+    }
+
     if (Object.keys(data).length === 0) return { message: 'nothing to update' };
     data.updated_at = new Date();
     if (this.useMongo()) {
