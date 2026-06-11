@@ -110,9 +110,14 @@ let ConfigController = class ConfigController {
             take_away: await this.bs.getBool('take_away'),
             repeat_order_option: await this.bs.getBool('repeat_order_option'),
             home_delivery: await this.bs.getBool('home_delivery'),
-            active_payment_method_list: [],
+            active_payment_method_list: [
+                { gateway: 'razor_pay', gateway_title: 'Razorpay', gateway_image_full_url: 'https://images.unsplash.com/photo-1556742502-ec7c0e009f34?w=200&h=200&fit=crop&q=80' },
+                { gateway: 'stripe', gateway_title: 'Credit / Debit Card', gateway_image_full_url: 'https://images.unsplash.com/photo-1563013544-824ae1b704d3?w=200&h=200&fit=crop&q=80' },
+                { gateway: 'paystack', gateway_title: 'Paystack', gateway_image_full_url: 'https://images.unsplash.com/photo-1601597111158-2fceff292cdc?w=200&h=200&fit=crop&q=80' },
+            ],
+            min_amount_to_pay_restaurant: 100,
             digital_payment_info: {
-                digital_payment: await this.bs.getStatus('digital_payment'),
+                digital_payment: true,
                 plugin_payment_gateways: false,
                 default_payment_gateways: true,
             },

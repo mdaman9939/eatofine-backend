@@ -77,7 +77,12 @@ export declare class ConfigController {
         take_away: boolean;
         repeat_order_option: boolean;
         home_delivery: boolean;
-        active_payment_method_list: never[];
+        active_payment_method_list: {
+            gateway: string;
+            gateway_title: string;
+            gateway_image_full_url: string;
+        }[];
+        min_amount_to_pay_restaurant: number;
         digital_payment_info: {
             digital_payment: boolean;
             plugin_payment_gateways: boolean;
