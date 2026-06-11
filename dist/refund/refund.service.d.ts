@@ -62,5 +62,7 @@ export declare class RefundService {
     private stageOf;
     private moneyOf;
     private userIdFor;
+    private creditCustomerWallet;
+    private moveActorWallet;
     private writeLedger;
 }

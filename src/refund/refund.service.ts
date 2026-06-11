@@ -137,22 +137,25 @@ export class RefundService {
       ...(effects.final_order_status === 'refunded' ? { refunded: new Date() } : {}),
     });
 
-    // 2. Refund record (if money flowing back to user)
+    // 2. Refund record (if money flowing back to user) + actually CREDIT the
+    //    customer's wallet so the user gets their money back (not just a record).
     if (effects.refund_to_user && effects.refund_amount > 0) {
+      const userId = await this.userIdFor(orderId);
       const refundId = await this.mongo.nextMysqlId('refunds');
       await this.mongo.insertOne('refunds', {
         mysql_id: refundId,
         order_id: orderId,
-        user_id: preview.money ? (await this.userIdFor(orderId)) : null,
+        user_id: userId,
         customer_reason: scenario.label,
         customer_note: remarks,
         refund_amount: effects.refund_amount,
         refund_method: 'wallet',
-        refund_status: 'approved',
+        refund_status: 'completed',
         admin_note: `Auto-created by refund engine for scenario ${scenario.key}`,
         created_at: new Date(),
       });
       artefacts.refund_id = refundId;
+      await this.creditCustomerWallet(userId, effects.refund_amount, `Refund for order #${orderId} — ${scenario.label}`, orderId);
     }
 
     // 3. Credit note (if scenario requires)
@@ -170,11 +173,14 @@ export class RefundService {
       artefacts.credit_note_id = cnId;
     }
 
-    // 4. Wallet ledger — restaurant
+    const orderDoc = await this.mongo.findByMysqlId<OrderDoc>('orders', orderId);
+
+    // 4. Wallet ledger + actual balance move — restaurant
     if (effects.restaurant_wallet.direction !== 'none' && effects.restaurant_wallet.amount > 0) {
+      const restId = orderDoc?.mysql_restaurant_id ?? null;
       const id = await this.writeLedger({
         actor_type: 'restaurant',
-        actor_id: (await this.mongo.findByMysqlId<OrderDoc>('orders', orderId))?.mysql_restaurant_id ?? null,
+        actor_id: restId,
         order_id: orderId,
         direction: effects.restaurant_wallet.direction,
         amount: effects.restaurant_wallet.amount,
@@ -182,13 +188,15 @@ export class RefundService {
         scenario: scenario.key,
       });
       artefacts.wallet_ledger_ids.push(id);
+      await this.moveActorWallet('restaurant', restId, effects.restaurant_wallet.direction, effects.restaurant_wallet.amount);
     }
 
-    // 5. Wallet ledger — deliveryman
+    // 5. Wallet ledger + actual balance move — deliveryman
     if (effects.deliveryman_wallet.direction !== 'none' && effects.deliveryman_wallet.amount > 0) {
+      const dmId = orderDoc?.mysql_delivery_man_id ?? null;
       const id = await this.writeLedger({
         actor_type: 'deliveryman',
-        actor_id: (await this.mongo.findByMysqlId<OrderDoc>('orders', orderId))?.mysql_delivery_man_id ?? null,
+        actor_id: dmId,
         order_id: orderId,
         direction: effects.deliveryman_wallet.direction,
         amount: effects.deliveryman_wallet.amount,
@@ -196,6 +204,7 @@ export class RefundService {
         scenario: scenario.key,
       });
       artefacts.wallet_ledger_ids.push(id);
+      await this.moveActorWallet('deliveryman', dmId, effects.deliveryman_wallet.direction, effects.deliveryman_wallet.amount);
     }
 
     // 6. Audit row
@@ -277,6 +286,43 @@ export class RefundService {
     return o?.mysql_user_id ?? null;
   }
 
+  /** Credit the customer's wallet with the refund + write an audit transaction,
+   *  so the user actually sees the money back (PDF: "Refund to Whom = User"). */
+  private async creditCustomerWallet(userId: number | null, amount: number, reason: string, orderId: number): Promise<void> {
+    if (!userId || amount <= 0) return;
+    const existing = await this.mongo.findOne<Record<string, unknown>>('wallets', { $or: [{ user_id: userId }, { mysql_user_id: userId }] });
+    const newBalance = round2(safeNum(existing?.balance) + amount);
+    if (existing) {
+      await this.mongo.updateOne('wallets', { mysql_id: Number(existing.mysql_id) }, {
+        balance: newBalance, total_earning: round2(safeNum(existing.total_earning) + amount), updated_at: new Date(),
+      });
+    } else {
+      const wid = await this.mongo.nextMysqlId('wallets');
+      await this.mongo.insertOne('wallets', { mysql_id: wid, user_id: userId, mysql_user_id: userId, balance: newBalance, total_earning: amount, created_at: new Date() });
+    }
+    const txId = await this.mongo.nextMysqlId('wallet_transactions');
+    await this.mongo.insertOne('wallet_transactions', {
+      mysql_id: txId, user_id: userId, mysql_user_id: userId, transaction_id: `REFUND_${orderId}_${txId}`,
+      credit: amount, debit: 0, balance: newBalance, transaction_type: 'order_refund', reference: reason, created_at: new Date(),
+    });
+  }
+
+  /** Apply a credit/debit to a restaurant or deliveryman wallet balance. */
+  private async moveActorWallet(actorType: 'restaurant' | 'deliveryman', actorId: number | null, direction: 'credit' | 'debit', amount: number): Promise<void> {
+    if (!actorId || amount <= 0) return;
+    const coll = actorType === 'restaurant' ? 'restaurant_wallets' : 'delivery_man_wallets';
+    const idField = actorType === 'restaurant' ? 'restaurant_id' : 'delivery_man_id';
+    const existing = await this.mongo.findOne<Record<string, unknown>>(coll, { $or: [{ [idField]: actorId }, { [`mysql_${idField}`]: actorId }] });
+    const delta = direction === 'credit' ? amount : -amount;
+    const newBalance = round2(safeNum(existing?.balance) + delta);
+    if (existing) {
+      await this.mongo.updateOne(coll, { mysql_id: Number(existing.mysql_id) }, { balance: newBalance, updated_at: new Date() });
+    } else {
+      const wid = await this.mongo.nextMysqlId(coll);
+      await this.mongo.insertOne(coll, { mysql_id: wid, [idField]: actorId, [`mysql_${idField}`]: actorId, balance: newBalance, total_earning: direction === 'credit' ? amount : 0, created_at: new Date() });
+    }
+  }
+
   private async writeLedger(entry: {
     actor_type: 'restaurant' | 'deliveryman';
     actor_id: number | null;
@@ -298,4 +344,14 @@ export class RefundService {
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+/** Coerce a stored wallet value to a finite number. Some legacy wallet docs
+ *  hold Decimal128 / decimal.js objects that Number() turns into NaN — treat
+ *  those (and anything non-finite) as 0 so a refund never corrupts a balance. */
+function safeNum(v: unknown): number {
+  if (v == null) return 0;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  const n = Number(typeof v === 'object' ? String(v) : v);
+  return Number.isFinite(n) ? n : 0;
 }

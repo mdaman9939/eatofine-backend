@@ -70,20 +70,22 @@ let RefundService = class RefundService {
             ...(effects.final_order_status === 'refunded' ? { refunded: new Date() } : {}),
         });
         if (effects.refund_to_user && effects.refund_amount > 0) {
+            const userId = await this.userIdFor(orderId);
             const refundId = await this.mongo.nextMysqlId('refunds');
             await this.mongo.insertOne('refunds', {
                 mysql_id: refundId,
                 order_id: orderId,
-                user_id: preview.money ? (await this.userIdFor(orderId)) : null,
+                user_id: userId,
                 customer_reason: scenario.label,
                 customer_note: remarks,
                 refund_amount: effects.refund_amount,
                 refund_method: 'wallet',
-                refund_status: 'approved',
+                refund_status: 'completed',
                 admin_note: `Auto-created by refund engine for scenario ${scenario.key}`,
                 created_at: new Date(),
             });
             artefacts.refund_id = refundId;
+            await this.creditCustomerWallet(userId, effects.refund_amount, `Refund for order #${orderId} — ${scenario.label}`, orderId);
         }
         if (effects.generate_credit_note && effects.refund_amount > 0) {
             const cnId = await this.mongo.nextMysqlId('credit_notes');
@@ -98,10 +100,12 @@ let RefundService = class RefundService {
             });
             artefacts.credit_note_id = cnId;
         }
+        const orderDoc = await this.mongo.findByMysqlId('orders', orderId);
         if (effects.restaurant_wallet.direction !== 'none' && effects.restaurant_wallet.amount > 0) {
+            const restId = orderDoc?.mysql_restaurant_id ?? null;
             const id = await this.writeLedger({
                 actor_type: 'restaurant',
-                actor_id: (await this.mongo.findByMysqlId('orders', orderId))?.mysql_restaurant_id ?? null,
+                actor_id: restId,
                 order_id: orderId,
                 direction: effects.restaurant_wallet.direction,
                 amount: effects.restaurant_wallet.amount,
@@ -109,11 +113,13 @@ let RefundService = class RefundService {
                 scenario: scenario.key,
             });
             artefacts.wallet_ledger_ids.push(id);
+            await this.moveActorWallet('restaurant', restId, effects.restaurant_wallet.direction, effects.restaurant_wallet.amount);
         }
         if (effects.deliveryman_wallet.direction !== 'none' && effects.deliveryman_wallet.amount > 0) {
+            const dmId = orderDoc?.mysql_delivery_man_id ?? null;
             const id = await this.writeLedger({
                 actor_type: 'deliveryman',
-                actor_id: (await this.mongo.findByMysqlId('orders', orderId))?.mysql_delivery_man_id ?? null,
+                actor_id: dmId,
                 order_id: orderId,
                 direction: effects.deliveryman_wallet.direction,
                 amount: effects.deliveryman_wallet.amount,
@@ -121,6 +127,7 @@ let RefundService = class RefundService {
                 scenario: scenario.key,
             });
             artefacts.wallet_ledger_ids.push(id);
+            await this.moveActorWallet('deliveryman', dmId, effects.deliveryman_wallet.direction, effects.deliveryman_wallet.amount);
         }
         const decisionId = await this.mongo.nextMysqlId('refund_decisions');
         const decision = {
@@ -183,6 +190,42 @@ let RefundService = class RefundService {
         const o = await this.mongo.findByMysqlId('orders', orderId);
         return o?.mysql_user_id ?? null;
     }
+    async creditCustomerWallet(userId, amount, reason, orderId) {
+        if (!userId || amount <= 0)
+            return;
+        const existing = await this.mongo.findOne('wallets', { $or: [{ user_id: userId }, { mysql_user_id: userId }] });
+        const newBalance = round2(safeNum(existing?.balance) + amount);
+        if (existing) {
+            await this.mongo.updateOne('wallets', { mysql_id: Number(existing.mysql_id) }, {
+                balance: newBalance, total_earning: round2(safeNum(existing.total_earning) + amount), updated_at: new Date(),
+            });
+        }
+        else {
+            const wid = await this.mongo.nextMysqlId('wallets');
+            await this.mongo.insertOne('wallets', { mysql_id: wid, user_id: userId, mysql_user_id: userId, balance: newBalance, total_earning: amount, created_at: new Date() });
+        }
+        const txId = await this.mongo.nextMysqlId('wallet_transactions');
+        await this.mongo.insertOne('wallet_transactions', {
+            mysql_id: txId, user_id: userId, mysql_user_id: userId, transaction_id: `REFUND_${orderId}_${txId}`,
+            credit: amount, debit: 0, balance: newBalance, transaction_type: 'order_refund', reference: reason, created_at: new Date(),
+        });
+    }
+    async moveActorWallet(actorType, actorId, direction, amount) {
+        if (!actorId || amount <= 0)
+            return;
+        const coll = actorType === 'restaurant' ? 'restaurant_wallets' : 'delivery_man_wallets';
+        const idField = actorType === 'restaurant' ? 'restaurant_id' : 'delivery_man_id';
+        const existing = await this.mongo.findOne(coll, { $or: [{ [idField]: actorId }, { [`mysql_${idField}`]: actorId }] });
+        const delta = direction === 'credit' ? amount : -amount;
+        const newBalance = round2(safeNum(existing?.balance) + delta);
+        if (existing) {
+            await this.mongo.updateOne(coll, { mysql_id: Number(existing.mysql_id) }, { balance: newBalance, updated_at: new Date() });
+        }
+        else {
+            const wid = await this.mongo.nextMysqlId(coll);
+            await this.mongo.insertOne(coll, { mysql_id: wid, [idField]: actorId, [`mysql_${idField}`]: actorId, balance: newBalance, total_earning: direction === 'credit' ? amount : 0, created_at: new Date() });
+        }
+    }
     async writeLedger(entry) {
         const id = await this.mongo.nextMysqlId('wallet_ledger');
         await this.mongo.insertOne('wallet_ledger', {
@@ -200,5 +243,13 @@ exports.RefundService = RefundService = __decorate([
 ], RefundService);
 function round2(n) {
     return Math.round(n * 100) / 100;
+}
+function safeNum(v) {
+    if (v == null)
+        return 0;
+    if (typeof v === 'number')
+        return Number.isFinite(v) ? v : 0;
+    const n = Number(typeof v === 'object' ? String(v) : v);
+    return Number.isFinite(n) ? n : 0;
 }
 //# sourceMappingURL=refund.service.js.map
