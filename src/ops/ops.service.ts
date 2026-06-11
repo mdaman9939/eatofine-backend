@@ -4,7 +4,10 @@ import { MongoDataService } from '../mongo/mongo-data.service';
 import { storageBaseUrl } from '../common/storage-url';
 
 const VENDOR_STATUSES = ['accepted', 'confirmed', 'processing', 'handover'] as const;
-const DM_STATUSES = ['picked_up', 'delivered'] as const;
+// The delivery app drives the full pickup→deliver flow and sends 'confirmed'
+// (accept handover), 'picked_up', 'delivered', and 'canceled'. The old 2-item
+// list rejected the others with "must be one of picked_up, delivered".
+const DM_STATUSES = ['confirmed', 'processing', 'handover', 'picked_up', 'delivered', 'canceled'] as const;
 
 type MongoOrderDoc = {
   mysql_id: number;

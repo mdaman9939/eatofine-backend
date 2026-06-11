@@ -15,7 +15,7 @@ const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
 const storage_url_1 = require("../common/storage-url");
 const VENDOR_STATUSES = ['accepted', 'confirmed', 'processing', 'handover'];
-const DM_STATUSES = ['picked_up', 'delivered'];
+const DM_STATUSES = ['confirmed', 'processing', 'handover', 'picked_up', 'delivered', 'canceled'];
 let OpsService = class OpsService {
     prisma;
     mongo;
