@@ -103,6 +103,8 @@ export declare class VendorExtrasController {
             restaurant_model: string | null;
             opening_closing_status: {};
             same_time_for_every_day: {};
+            veg: number;
+            non_veg: number;
         }[];
     } | {
         id: number;

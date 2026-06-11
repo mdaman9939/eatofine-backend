@@ -144,6 +144,14 @@ const toNum = (v: unknown): number => {
   return Number(v) || 0;
 };
 
+// Normalize a stored veg/non_veg flag (boolean | number | string) to the int
+// 0/1 the restaurant app compares against (`restaurant.veg == 1`). Defaults to
+// 1 when never set, matching the DB column default (true).
+const vegNonVegFlag = (v: unknown): number => {
+  if (v === null || v === undefined) return 1;
+  return Number(v) ? 1 : 0;
+};
+
 // Vendor (restaurant app) endpoints beyond order management. For the demo
 // we expose the resources the app reads and stub the writes/reports so the
 // restaurant Flutter app can navigate every screen without 404s.
@@ -415,6 +423,11 @@ export class VendorExtrasController {
           // resets "Always Open" back to "Specific Time" after every update.
           opening_closing_status: (r as unknown as Record<string, unknown>).opening_closing_status ?? false,
           same_time_for_every_day: (r as unknown as Record<string, unknown>).same_time_for_every_day ?? false,
+          // Food Type checkboxes — app reads veg/non_veg as int (== 1). Without
+          // these the boxes reset to unchecked after every save. Default 1
+          // (matches the DB default) when never explicitly set.
+          veg: vegNonVegFlag((r as unknown as Record<string, unknown>).veg),
+          non_veg: vegNonVegFlag((r as unknown as Record<string, unknown>).non_veg),
         })),
       };
     }

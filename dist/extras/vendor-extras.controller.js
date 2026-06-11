@@ -65,6 +65,11 @@ const toNum = (v) => {
         return Number(v) || 0;
     return Number(v) || 0;
 };
+const vegNonVegFlag = (v) => {
+    if (v === null || v === undefined)
+        return 1;
+    return Number(v) ? 1 : 0;
+};
 let VendorExtrasController = class VendorExtrasController {
     static { VendorExtrasController_1 = this; }
     prisma;
@@ -278,6 +283,8 @@ let VendorExtrasController = class VendorExtrasController {
                     restaurant_model: r.restaurant_model ?? null,
                     opening_closing_status: r.opening_closing_status ?? false,
                     same_time_for_every_day: r.same_time_for_every_day ?? false,
+                    veg: vegNonVegFlag(r.veg),
+                    non_veg: vegNonVegFlag(r.non_veg),
                 })),
             };
         }
