@@ -639,9 +639,42 @@ export class DeliveryExtrasController {
     return { topic: `zone_${req.actor!.id}_delivery_man` };
   }
 
+  // The CUSTOMER (not the delivery man) submits this review of their rider, so
+  // override the controller-level @RequireAuth('deliveryman') with 'customer' —
+  // otherwise the customer's token is rejected with "Unauthenticated.". Was also
+  // a stub that never saved the rating.
   @HttpCode(200)
   @Post('reviews/submit')
-  submitReview() { return { message: 'review submitted' }; }
+  @RequireAuth('customer')
+  async submitReview(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
+    if (!this.useMongo()) return { message: 'review submitted' };
+    const dmId = Number(body.delivery_man_id ?? body.delivery_man ?? 0);
+    const rating = Math.max(1, Math.min(5, Math.round(Number(body.rating ?? 0))));
+    if (!dmId || !rating) return { errors: [{ code: 'input', message: 'delivery_man_id and rating are required' }] };
+    const now = new Date();
+    const nextId = await this.mongo.nextMysqlId('delivery_man_reviews');
+    await this.mongo.insertOne('delivery_man_reviews', {
+      mysql_id: nextId,
+      delivery_man_id: dmId,
+      mysql_delivery_man_id: dmId,
+      user_id: Number(req.actor!.id),
+      mysql_user_id: Number(req.actor!.id),
+      order_id: body.order_id != null && body.order_id !== '' ? Number(body.order_id) : null,
+      comment: body.comment ? String(body.comment) : null,
+      rating,
+      created_at: now,
+      updated_at: now,
+    });
+    // Refresh the rider's aggregate rating so it shows up immediately.
+    const agg = await this.mongo.aggregate<{ _id: null; avg: number; count: number }>('delivery_man_reviews', [
+      { $match: { mysql_delivery_man_id: dmId } },
+      { $group: { _id: null, avg: { $avg: '$rating' }, count: { $sum: 1 } } },
+    ]).catch(() => [] as Array<{ _id: null; avg: number; count: number }>);
+    const avg = agg[0]?.avg ?? rating;
+    const count = agg[0]?.count ?? 1;
+    await this.mongo.updateOne('delivery_men', { mysql_id: dmId }, { avg_rating: Math.round(avg * 10) / 10, rating_count: count, updated_at: now }).catch(() => undefined);
+    return { message: 'review submitted' };
+  }
 
   // ── Notifications + messages ─────────────────────────────────────
   @Get('notifications')

@@ -552,7 +552,36 @@ let DeliveryExtrasController = class DeliveryExtrasController {
     dmTopic(req) {
         return { topic: `zone_${req.actor.id}_delivery_man` };
     }
-    submitReview() { return { message: 'review submitted' }; }
+    async submitReview(req, body = {}) {
+        if (!this.useMongo())
+            return { message: 'review submitted' };
+        const dmId = Number(body.delivery_man_id ?? body.delivery_man ?? 0);
+        const rating = Math.max(1, Math.min(5, Math.round(Number(body.rating ?? 0))));
+        if (!dmId || !rating)
+            return { errors: [{ code: 'input', message: 'delivery_man_id and rating are required' }] };
+        const now = new Date();
+        const nextId = await this.mongo.nextMysqlId('delivery_man_reviews');
+        await this.mongo.insertOne('delivery_man_reviews', {
+            mysql_id: nextId,
+            delivery_man_id: dmId,
+            mysql_delivery_man_id: dmId,
+            user_id: Number(req.actor.id),
+            mysql_user_id: Number(req.actor.id),
+            order_id: body.order_id != null && body.order_id !== '' ? Number(body.order_id) : null,
+            comment: body.comment ? String(body.comment) : null,
+            rating,
+            created_at: now,
+            updated_at: now,
+        });
+        const agg = await this.mongo.aggregate('delivery_man_reviews', [
+            { $match: { mysql_delivery_man_id: dmId } },
+            { $group: { _id: null, avg: { $avg: '$rating' }, count: { $sum: 1 } } },
+        ]).catch(() => []);
+        const avg = agg[0]?.avg ?? rating;
+        const count = agg[0]?.count ?? 1;
+        await this.mongo.updateOne('delivery_men', { mysql_id: dmId }, { avg_rating: Math.round(avg * 10) / 10, rating_count: count, updated_at: now }).catch(() => undefined);
+        return { message: 'review submitted' };
+    }
     async notifications() {
         if (this.useMongo()) {
             const rows = await this.mongo.findMany('notifications', { status: true }, { sort: { mysql_id: -1 }, limit: 50 });
@@ -916,9 +945,12 @@ __decorate([
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('reviews/submit'),
+    (0, auth_guard_1.RequireAuth)('customer'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], DeliveryExtrasController.prototype, "submitReview", null);
 __decorate([
     (0, common_1.Get)('notifications'),

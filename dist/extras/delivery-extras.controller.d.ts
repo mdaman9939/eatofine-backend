@@ -638,9 +638,16 @@ export declare class DeliveryExtrasController {
     dmTopic(req: AuthedRequest): {
         topic: string;
     };
-    submitReview(): {
+    submitReview(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
         message: string;
-    };
+        errors?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+    }>;
     notifications(): Promise<{
         id: number;
         title: unknown;
