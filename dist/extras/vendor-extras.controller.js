@@ -132,6 +132,12 @@ let VendorExtrasController = class VendorExtrasController {
             let cashInHands = toNum(wallet?.collected_cash);
             const alreadyWithdrawn = toNum(wallet?.total_withdrawn);
             const pendingWithdraw = toNum(wallet?.pending_withdraw);
+            const [productCount, reviewCount] = restaurantIds.length > 0
+                ? await Promise.all([
+                    this.mongo.count('foods', { $or: [{ mysql_restaurant_id: { $in: restaurantIds } }, { restaurant_id: { $in: restaurantIds } }] }),
+                    this.mongo.count('reviews', { $or: [{ mysql_restaurant_id: { $in: restaurantIds } }, { restaurant_id: { $in: restaurantIds } }] }),
+                ])
+                : [0, 0];
             const commissionMap = new Map(restaurants.map((r) => [Number(r.mysql_id), Number(r.comission ?? 0) || 10]));
             let todaysCount = 0, weekCount = 0, monthCount = 0, totalOrders = 0;
             let todaysEarn = 0, weekEarn = 0, monthEarn = 0;
@@ -251,8 +257,8 @@ let VendorExtrasController = class VendorExtrasController {
                 dynamic_balance_type: 'positive',
                 show_pay_now_button: false,
                 order_count: totalOrders,
-                product_count: 0,
-                review_count: 0,
+                product_count: productCount,
+                review_count: reviewCount,
                 todays_order_count: todaysCount,
                 this_week_order_count: weekCount,
                 this_month_order_count: monthCount,

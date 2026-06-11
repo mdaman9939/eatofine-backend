@@ -251,6 +251,15 @@ export class VendorExtrasController {
       const alreadyWithdrawn = toNum(wallet?.total_withdrawn);
       const pendingWithdraw = toNum(wallet?.pending_withdraw);
 
+      // Products + reviews tiles on "My Restaurant" — were hardcoded 0 even
+      // when the restaurant clearly had foods + reviews.
+      const [productCount, reviewCount] = restaurantIds.length > 0
+        ? await Promise.all([
+            this.mongo.count('foods', { $or: [{ mysql_restaurant_id: { $in: restaurantIds } }, { restaurant_id: { $in: restaurantIds } }] }),
+            this.mongo.count('reviews', { $or: [{ mysql_restaurant_id: { $in: restaurantIds } }, { restaurant_id: { $in: restaurantIds } }] }),
+          ])
+        : [0, 0];
+
       // Per-restaurant commission rate, used to derive the restaurant's net
       // earning per delivered order (StackFood: vendor take = item − commission).
       const commissionMap = new Map(
@@ -379,8 +388,8 @@ export class VendorExtrasController {
         show_pay_now_button: false,
         // ── Dashboard stats ──────────────────────────────────────────
         order_count: totalOrders,
-        product_count: 0,
-        review_count: 0,
+        product_count: productCount,
+        review_count: reviewCount,
         todays_order_count: todaysCount,
         this_week_order_count: weekCount,
         this_month_order_count: monthCount,
