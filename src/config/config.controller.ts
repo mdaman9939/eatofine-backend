@@ -51,7 +51,7 @@ export class ConfigController {
     ]);
 
     const fullUrl = (folder: string, file?: string | null) =>
-      file ? `${base}/${folder}/${file}` : null;
+      file ? (/^https?:\/\//i.test(file) ? file : `${base}/${folder}/${file}`) : null;
 
     return {
       business_name: await this.bs.get('business_name'),

@@ -46,7 +46,7 @@ let ConfigController = class ConfigController {
                 return this.prisma.currencies.findFirst({ where: { currency_code: code } });
             })(),
         ]);
-        const fullUrl = (folder, file) => file ? `${base}/${folder}/${file}` : null;
+        const fullUrl = (folder, file) => file ? (/^https?:\/\//i.test(file) ? file : `${base}/${folder}/${file}`) : null;
         return {
             business_name: await this.bs.get('business_name'),
             logo,
