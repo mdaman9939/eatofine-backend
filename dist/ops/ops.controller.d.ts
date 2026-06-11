@@ -202,8 +202,8 @@ export declare class OpsController {
         canceled: Date | null;
         created_at: Date | null;
     }>;
-    vendorUpdateStatus(req: AuthedRequest, body: {
-        order_id?: number;
+    vendorUpdateStatus(req: AuthedRequest, body?: {
+        order_id?: number | string;
         order_status?: string;
     }): Promise<{
         message: string;
@@ -301,8 +301,8 @@ export declare class OpsController {
         canceled: Date | null;
         created_at: Date | null;
     }>;
-    dmUpdate(req: AuthedRequest, body: {
-        order_id?: number;
+    dmUpdate(req: AuthedRequest, body?: {
+        order_id?: number | string;
         order_status?: string;
     }): Promise<{
         message: string;

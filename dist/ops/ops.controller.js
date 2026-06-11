@@ -14,6 +14,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.OpsController = void 0;
 const common_1 = require("@nestjs/common");
+const platform_express_1 = require("@nestjs/platform-express");
 const auth_guard_1 = require("../auth/auth.guard");
 const ops_service_1 = require("./ops.service");
 let OpsController = class OpsController {
@@ -30,8 +31,9 @@ let OpsController = class OpsController {
     vendorOrderDetail(req, orderId) {
         return this.ops.vendorOrderDetail(req.actor.id, orderId);
     }
-    vendorUpdateStatus(req, body) {
-        return this.ops.vendorUpdateStatus(req.actor.id, body.order_id ?? 0, body.order_status ?? '');
+    vendorUpdateStatus(req, body = {}) {
+        const b = body ?? {};
+        return this.ops.vendorUpdateStatus(req.actor.id, Number(b.order_id ?? 0), String(b.order_status ?? ''));
     }
     vendorAssignDM(req, body) {
         return this.ops.vendorAssignDeliveryMan(req.actor.id, body.order_id ?? 0, body.delivery_man_id ?? 0);
@@ -42,8 +44,9 @@ let OpsController = class OpsController {
     dmDetail(req, orderId) {
         return this.ops.dmOrderDetail(req.actor.id, orderId);
     }
-    dmUpdate(req, body) {
-        return this.ops.dmUpdateStatus(req.actor.id, body.order_id ?? 0, body.order_status ?? '');
+    dmUpdate(req, body = {}) {
+        const b = body ?? {};
+        return this.ops.dmUpdateStatus(req.actor.id, Number(b.order_id ?? 0), String(b.order_status ?? ''));
     }
 };
 exports.OpsController = OpsController;
@@ -81,6 +84,7 @@ __decorate([
     (0, common_1.Post)('vendor/update-order-status'),
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
     (0, auth_guard_1.RequireAuth)('vendor'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.AnyFilesInterceptor)()),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -120,6 +124,7 @@ __decorate([
     (0, common_1.Post)('delivery-man/update-order-status'),
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
     (0, auth_guard_1.RequireAuth)('deliveryman'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.AnyFilesInterceptor)()),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),

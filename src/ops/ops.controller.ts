@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Post, Query, Req, UseGuards, UseInterceptors } from '@nestjs/common';
+import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import { AuthGuard, RequireAuth } from '../auth/auth.guard';
 import type { AuthedRequest } from '../auth/auth.guard';
 import { OpsService } from './ops.service';
@@ -28,11 +29,17 @@ export class OpsController {
     return this.ops.vendorOrderDetail(req.actor!.id, orderId);
   }
 
+  // The apps POST this as multipart/form-data (with an optional proof image),
+  // so without a multipart interceptor @Body() is undefined → "Cannot read
+  // properties of undefined (reading 'order_id')". AnyFilesInterceptor parses
+  // the form fields (and is a no-op for plain JSON requests).
   @Post('vendor/update-order-status')
   @UseGuards(AuthGuard)
   @RequireAuth('vendor')
-  vendorUpdateStatus(@Req() req: AuthedRequest, @Body() body: { order_id?: number; order_status?: string }) {
-    return this.ops.vendorUpdateStatus(req.actor!.id, body.order_id ?? 0, body.order_status ?? '');
+  @UseInterceptors(AnyFilesInterceptor())
+  vendorUpdateStatus(@Req() req: AuthedRequest, @Body() body: { order_id?: number | string; order_status?: string } = {}) {
+    const b = body ?? {};
+    return this.ops.vendorUpdateStatus(req.actor!.id, Number(b.order_id ?? 0), String(b.order_status ?? ''));
   }
 
   @Post('vendor/order/assign-delivery-man')
@@ -66,7 +73,9 @@ export class OpsController {
   @Post('delivery-man/update-order-status')
   @UseGuards(AuthGuard)
   @RequireAuth('deliveryman')
-  dmUpdate(@Req() req: AuthedRequest, @Body() body: { order_id?: number; order_status?: string }) {
-    return this.ops.dmUpdateStatus(req.actor!.id, body.order_id ?? 0, body.order_status ?? '');
+  @UseInterceptors(AnyFilesInterceptor())
+  dmUpdate(@Req() req: AuthedRequest, @Body() body: { order_id?: number | string; order_status?: string } = {}) {
+    const b = body ?? {};
+    return this.ops.dmUpdateStatus(req.actor!.id, Number(b.order_id ?? 0), String(b.order_status ?? ''));
   }
 }
