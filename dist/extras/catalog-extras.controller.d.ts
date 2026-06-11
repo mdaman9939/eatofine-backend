@@ -177,16 +177,11 @@ export declare class CatalogExtrasController {
         }[];
     }>;
     productReviewsByPath(idStr: string): Promise<{
-        id: number;
-        food_id: number;
-        user_id: number;
-        comment: unknown;
-        rating: unknown;
-        attachment: unknown;
-        created_at: unknown;
-        reply: unknown;
-        reply_at: unknown;
-    }[]>;
+        rating_count: number;
+        avg_rating: number;
+        rating: number[];
+        reviews: unknown[];
+    }>;
     productReviews(idStr?: string): Promise<{
         id: number;
         food_id: number;

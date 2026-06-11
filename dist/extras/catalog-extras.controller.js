@@ -376,7 +376,53 @@ let CatalogExtrasController = class CatalogExtrasController {
         };
     }
     async productReviewsByPath(idStr) {
-        return this.productReviews(idStr);
+        const id = parseInt(idStr, 10);
+        const empty = { rating_count: 0, avg_rating: 0, rating: [0, 0, 0, 0, 0], reviews: [] };
+        if (!Number.isFinite(id) || !this.useMongo())
+            return empty;
+        const rows = await this.mongo.findMany('reviews', { $or: [{ food_id: id }, { mysql_food_id: id }], status: { $ne: false } }, { sort: { mysql_id: -1 }, limit: 100 });
+        if (rows.length === 0)
+            return empty;
+        const userIds = Array.from(new Set(rows.map((r) => Number(r.mysql_user_id ?? r.user_id ?? 0)).filter((n) => n > 0)));
+        const users = userIds.length
+            ? await this.mongo.findMany('users', { mysql_id: { $in: userIds } })
+            : [];
+        const userMap = new Map(users.map((u) => [Number(u.mysql_id), u]));
+        const dist = [0, 0, 0, 0, 0];
+        let sum = 0, n = 0;
+        for (const r of rows) {
+            const rt = Math.max(0, Math.min(5, Math.round(Number(r.rating ?? 0))));
+            if (rt >= 1) {
+                dist[5 - rt] += 1;
+                sum += rt;
+                n += 1;
+            }
+        }
+        const avg = n ? Math.round((sum / n) * 10) / 10 : 0;
+        const reviews = rows.map((r) => {
+            const uid = Number(r.mysql_user_id ?? r.user_id ?? 0);
+            const u = userMap.get(uid);
+            const orderId = r.mysql_order_id ?? r.order_id ?? null;
+            return {
+                id: Number(r.mysql_id),
+                comment: r.comment ?? null,
+                rating: Number(r.rating ?? 0),
+                order_id: orderId != null ? Number(orderId) : null,
+                created_at: r.created_at ?? null,
+                updated_at: r.updated_at ?? r.created_at ?? null,
+                reply: r.reply ?? null,
+                customer_name: u ? `${u.f_name ?? ''} ${u.l_name ?? ''}`.trim() || null : null,
+                customer_phone: u?.phone ?? null,
+                customer: u ? {
+                    id: uid,
+                    f_name: u.f_name ?? null,
+                    l_name: u.l_name ?? null,
+                    phone: u.phone ?? null,
+                    image_full_url: (0, storage_url_1.storageFullUrl)('profile', u.image ?? null),
+                } : null,
+            };
+        });
+        return { rating_count: rows.length, avg_rating: avg, rating: dist, reviews };
     }
     async productReviews(idStr) {
         const id = parseInt(idStr ?? '', 10);
