@@ -1217,13 +1217,11 @@ export declare class VendorExtrasController {
         data: never[];
         total: number;
     };
-    expenseReport(req: AuthedRequest): Promise<{
-        data: {
-            order_id: number;
-            order_amount: number;
-            commission_amount: number;
-            created_at: {} | null;
-        }[];
+    expenseReport(req: AuthedRequest, limitQ?: string, offsetQ?: string, from?: string, to?: string, search?: string): Promise<{
+        total_size: number;
+        limit: number;
+        offset: string;
+        expense: unknown[];
         total: number;
     }>;
     transactionReport(req: AuthedRequest): Promise<{

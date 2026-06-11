@@ -2278,23 +2278,83 @@ export class VendorExtrasController {
   }
   @Get('get-disbursement-report')
   disbursementReport() { return { data: [], total: 0 }; }
+  // The restaurant app's Expense Report expects a PAGINATED wrapper
+  // { total_size, limit, offset, expense:[ { id,type,amount,description,
+  //   created_at,order:{ id,user_id,customer:{...} } } ] }. Returning the old
+  // { data, total } shape left `expense` null → the screen span forever.
   @Get('get-expense')
-  async expenseReport(@Req() req: AuthedRequest) {
+  async expenseReport(
+    @Req() req: AuthedRequest,
+    @Query('limit') limitQ?: string,
+    @Query('offset') offsetQ?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('search') search?: string,
+  ) {
+    const limit = parseInt(limitQ ?? '10', 10) || 10;
+    const offset = parseInt(offsetQ ?? '1', 10) || 1;
+    const empty = { total_size: 0, limit, offset: String(offset), expense: [] as unknown[], total: 0 };
+    if (!this.useMongo()) return empty;
+
     const orders = await this.vendorOrdersForReports(req);
-    let total = 0;
-    const data = orders
+    const delivered = orders
       .filter((o) => o.order_status === 'delivered')
-      .map((o) => {
-        const commission = Number(o.order_amount ?? 0) * 0.10; // demo 10%
-        total += commission;
-        return {
-          order_id: Number(o.mysql_id),
-          order_amount: Number(o.order_amount ?? 0),
-          commission_amount: +commission.toFixed(2),
-          created_at: o.created_at ?? null,
-        };
-      });
-    return { data, total: +total.toFixed(2) };
+      .sort((a, b) => Number(b.mysql_id ?? 0) - Number(a.mysql_id ?? 0));
+
+    const restIds = Array.from(new Set(delivered.map((o) => Number(o.mysql_restaurant_id ?? 0)).filter((n) => n > 0)));
+    const rests = restIds.length ? await this.mongo.findMany<{ mysql_id: number; comission?: number }>('restaurants', { mysql_id: { $in: restIds } }) : [];
+    const commissionMap = new Map(rests.map((r) => [Number(r.mysql_id), Number(r.comission ?? 0) || 10]));
+
+    const userIds = Array.from(new Set(delivered.map((o) => Number(o.mysql_user_id ?? 0)).filter((n) => n > 0)));
+    const users = userIds.length ? await this.mongo.findMany<{ mysql_id: number; f_name?: string; l_name?: string; image?: string }>('users', { mysql_id: { $in: userIds } }) : [];
+    const userMap = new Map(users.map((u) => [Number(u.mysql_id), u]));
+
+    const fromT = from && from !== 'null' ? Date.parse(from) : NaN;
+    const toT = to && to !== 'null' ? Date.parse(to) + 86_400_000 : NaN; // inclusive end-of-day
+    const q = (search ?? '').trim().toLowerCase();
+    const num = (v: unknown) => (v == null ? 0 : Number(v) || 0);
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+
+    const expenses: Array<Record<string, unknown>> = [];
+    let eid = 1, total = 0;
+    for (const o of delivered) {
+      const oid = Number(o.mysql_id);
+      if (q && !String(oid).includes(q)) continue;
+      const ts = o.created_at ? new Date(o.created_at as string).getTime() : 0;
+      if (Number.isFinite(fromT) && ts && ts < fromT) continue;
+      if (Number.isFinite(toT) && ts && ts > toT) continue;
+
+      const orderAmount = num(o.order_amount), tax = num(o.total_tax_amount), delivery = num(o.delivery_charge);
+      const coupon = num(o.coupon_discount_amount), restDisc = num(o.restaurant_discount_amount), extra = num(o.additional_charge);
+      let item = orderAmount + coupon + restDisc - tax - delivery - extra;
+      if (item <= 0) item = Math.max(0, orderAmount - tax - delivery) || orderAmount;
+      const rate = commissionMap.get(Number(o.mysql_restaurant_id ?? 0)) ?? 10;
+      const commission = r2((item * rate) / 100);
+
+      const u = userMap.get(Number(o.mysql_user_id ?? 0));
+      const orderObj = {
+        id: oid,
+        user_id: Number(o.mysql_user_id ?? 0) || null,
+        customer: u ? { id: Number(u.mysql_id), f_name: u.f_name ?? null, l_name: u.l_name ?? null, image_full_url: storageFullUrl('profile', u.image ?? null) } : null,
+      };
+      const restId = Number(o.mysql_restaurant_id ?? 0) || null;
+      const createdAt = o.created_at ?? null;
+      const push = (type: string, amount: number, description: string) => {
+        if (amount <= 0) return;
+        total += amount;
+        expenses.push({
+          id: eid++, type, amount: r2(amount), description,
+          created_at: createdAt, updated_at: o.updated_at ?? createdAt, created_by: 'vendor',
+          restaurant_id: restId, order_id: oid, order: orderObj,
+        });
+      };
+      push('commission', commission, 'Admin commission on order');
+      push('coupon_discount', coupon, 'Coupon discount given');
+      push('discount_on_product', restDisc, 'Discount on product');
+    }
+
+    const page = expenses.slice((offset - 1) * limit, (offset - 1) * limit + limit);
+    return { total_size: expenses.length, limit, offset: String(offset), expense: page, total: r2(total) };
   }
   @Get('get-transaction-report')
   async transactionReport(@Req() req: AuthedRequest) {
