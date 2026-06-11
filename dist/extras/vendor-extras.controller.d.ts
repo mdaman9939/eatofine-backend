@@ -1224,16 +1224,14 @@ export declare class VendorExtrasController {
         expense: unknown[];
         total: number;
     }>;
-    transactionReport(req: AuthedRequest): Promise<{
-        data: {
-            order_id: number;
-            order_amount: number;
-            payment_method: {} | null;
-            payment_status: {} | null;
-            order_status: {} | null;
-            created_at: {} | null;
-        }[];
-        total: number;
+    transactionReport(req: AuthedRequest, limitQ?: string, offsetQ?: string, from?: string, to?: string): Promise<{
+        total_size: number;
+        limit: number;
+        offset: string;
+        on_hold: number;
+        canceled: number;
+        completed_transactions: number;
+        order_transactions: unknown[];
     }>;
     generateStatement(): {
         message: string;

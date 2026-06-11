@@ -2370,23 +2370,98 @@ export class VendorExtrasController {
     const page = expenses.slice((offset - 1) * limit, (offset - 1) * limit + limit);
     return { total_size: expenses.length, limit, offset: String(offset), expense: page, total: r2(total) };
   }
+  // The app's Transaction Report expects { total_size, limit, offset, on_hold,
+  // canceled, completed_transactions, order_transactions:[ per-order financial
+  // breakdown ] }. The old { data, total } shape left order_transactions null
+  // → "No Transaction Found" + 0 summary cards.
   @Get('get-transaction-report')
-  async transactionReport(@Req() req: AuthedRequest) {
-    const orders = await this.vendorOrdersForReports(req);
-    let total = 0;
-    const data = orders.map((o) => {
-      const amt = Number(o.order_amount ?? 0);
-      total += amt;
+  async transactionReport(
+    @Req() req: AuthedRequest,
+    @Query('limit') limitQ?: string,
+    @Query('offset') offsetQ?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    const limit = parseInt(limitQ ?? '10', 10) || 10;
+    const offset = parseInt(offsetQ ?? '1', 10) || 1;
+    const empty = { total_size: 0, limit, offset: String(offset), on_hold: 0, canceled: 0, completed_transactions: 0, order_transactions: [] as unknown[] };
+    if (!this.useMongo()) return empty;
+
+    const all = (await this.vendorOrdersForReports(req))
+      .sort((a, b) => Number(b.mysql_id ?? 0) - Number(a.mysql_id ?? 0));
+
+    const restIds = Array.from(new Set(all.map((o) => Number(o.mysql_restaurant_id ?? 0)).filter((n) => n > 0)));
+    const rests = restIds.length ? await this.mongo.findMany<{ mysql_id: number; name?: string; comission?: number }>('restaurants', { mysql_id: { $in: restIds } }) : [];
+    const restMap = new Map(rests.map((r) => [Number(r.mysql_id), r]));
+    const userIds = Array.from(new Set(all.map((o) => Number(o.mysql_user_id ?? 0)).filter((n) => n > 0)));
+    const users = userIds.length ? await this.mongo.findMany<{ mysql_id: number; f_name?: string; l_name?: string }>('users', { mysql_id: { $in: userIds } }) : [];
+    const userMap = new Map(users.map((u) => [Number(u.mysql_id), u]));
+
+    const fromT = from && from !== 'null' ? Date.parse(from) : NaN;
+    const toT = to && to !== 'null' ? Date.parse(to) + 86_400_000 : NaN;
+    const num = (v: unknown) => (v == null ? 0 : Number(v) || 0);
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+
+    let completed = 0, onHold = 0, canceled = 0;
+    const rows = all.filter((o) => {
+      const ts = o.created_at ? new Date(o.created_at as string).getTime() : 0;
+      if (Number.isFinite(fromT) && ts && ts < fromT) return false;
+      if (Number.isFinite(toT) && ts && ts > toT) return false;
+      return true;
+    });
+
+    const txns = rows.map((o) => {
+      const rest = restMap.get(Number(o.mysql_restaurant_id ?? 0));
+      const u = userMap.get(Number(o.mysql_user_id ?? 0));
+      const orderAmount = num(o.order_amount), vat = num(o.total_tax_amount), delivery = num(o.delivery_charge);
+      const coupon = num(o.coupon_discount_amount), restDisc = num(o.restaurant_discount_amount), extra = num(o.additional_charge);
+      let item = orderAmount + coupon + restDisc - vat - delivery - extra;
+      if (item <= 0) item = Math.max(0, orderAmount - vat - delivery) || orderAmount;
+      const rate = Number(rest?.comission ?? 0) || 10;
+      const adminCommission = r2((item * rate) / 100);
+      const restaurantNet = r2(item - adminCommission);
+      const status = String(o.order_status ?? '');
+      const paid = String(o.payment_status ?? '') === 'paid';
+      const isCompleted = status === 'delivered' && paid;
+      const isCanceled = ['canceled', 'refunded', 'failed'].includes(status);
+      if (isCanceled) canceled += restaurantNet;
+      else if (isCompleted) completed += restaurantNet;
+      else onHold += restaurantNet;
+      const cod = String(o.payment_method ?? '') === 'cash_on_delivery';
       return {
         order_id: Number(o.mysql_id),
-        order_amount: amt,
-        payment_method: o.payment_method ?? null,
-        payment_status: o.payment_status ?? null,
-        order_status: o.order_status ?? null,
-        created_at: o.created_at ?? null,
+        restaurant: rest?.name ?? null,
+        customer_name: u ? `${u.f_name ?? ''} ${u.l_name ?? ''}`.trim() || null : null,
+        total_item_amount: r2(item),
+        item_discount: 0,
+        coupon_discount: r2(coupon),
+        discounted_amount: r2(coupon + restDisc),
+        vat: r2(vat),
+        delivery_charge: r2(delivery),
+        order_amount: r2(orderAmount),
+        admin_discount: 0,
+        restaurant_discount: r2(restDisc),
+        admin_commission: adminCommission,
+        additional_charge: r2(extra),
+        commission_on_delivery_charge: 0,
+        admin_net_income: adminCommission,
+        restaurant_net_income: restaurantNet,
+        amount_received_by: cod ? 'Restaurant' : 'Admin',
+        payment_method: cod ? 'Cash On Delivery' : String(o.payment_method ?? 'Digital Payment'),
+        payment_status: isCompleted ? 'Completed' : isCanceled ? 'Canceled' : 'On Hold',
       };
     });
-    return { data, total };
+
+    const page = txns.slice((offset - 1) * limit, (offset - 1) * limit + limit);
+    return {
+      total_size: txns.length,
+      limit,
+      offset: String(offset),
+      on_hold: r2(onHold),
+      canceled: r2(canceled),
+      completed_transactions: r2(completed),
+      order_transactions: page,
+    };
   }
   @HttpCode(200)
   @Post('generate-transaction-statement')
