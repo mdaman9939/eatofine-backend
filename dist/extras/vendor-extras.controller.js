@@ -1939,9 +1939,65 @@ let VendorExtrasController = class VendorExtrasController {
     messageDetails() { return { messages: [] }; }
     messageSearch() { return { conversations: [] }; }
     messageSend() { return { message: 'sent' }; }
-    basicCampaigns() { return []; }
-    campaignJoin() { return { message: 'joined' }; }
-    campaignLeave() { return { message: 'left' }; }
+    async basicCampaigns(req) {
+        if (!this.useMongo())
+            return [];
+        const restaurant = await this.vendorRestaurant(req);
+        const restId = restaurant ? Number(restaurant.mysql_id) : 0;
+        const camps = await this.mongo.findMany('campaigns', { $or: [{ status: true }, { status: 1 }, { status: { $exists: false } }] }, { sort: { mysql_id: -1 } });
+        const joins = restId
+            ? await this.mongo.findMany('restaurant_campaigns', { restaurant_id: restId })
+            : [];
+        const joinedSet = new Set(joins.map((j) => Number(j.campaign_id)));
+        const fallbackImg = 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=700&h=400&fit=crop&q=80';
+        return camps.map((c) => {
+            const cid = Number(c.mysql_id);
+            const stored = c.image ? (0, storage_url_1.storageFullUrl)('campaign', c.image) : null;
+            const joined = joinedSet.has(cid);
+            return {
+                id: cid,
+                title: c.title ?? null,
+                image_full_url: stored ?? fallbackImg,
+                description: c.description ?? null,
+                created_at: c.created_at ?? null,
+                updated_at: c.updated_at ?? null,
+                start_time: c.start_time ?? '00:00:00',
+                end_time: c.end_time ?? '23:59:59',
+                available_date_starts: c.start_date ?? null,
+                available_date_ends: c.end_date ?? null,
+                vendor_status: joined ? 'confirmed' : null,
+                is_joined: joined,
+            };
+        });
+    }
+    async campaignJoin(req, body = {}) {
+        if (this.useMongo()) {
+            const restaurant = await this.vendorRestaurant(req);
+            const cid = Number(body.campaign_id ?? body.id ?? 0);
+            if (restaurant && cid) {
+                const restId = Number(restaurant.mysql_id);
+                const exists = await this.mongo.findOne('restaurant_campaigns', { campaign_id: cid, restaurant_id: restId });
+                if (!exists) {
+                    const nextId = await this.mongo.nextMysqlId('restaurant_campaigns');
+                    await this.mongo.insertOne('restaurant_campaigns', {
+                        mysql_id: nextId, campaign_id: cid, restaurant_id: restId, mysql_restaurant_id: restId,
+                        status: 'confirmed', created_at: new Date(), updated_at: new Date(),
+                    });
+                }
+            }
+        }
+        return { message: 'joined' };
+    }
+    async campaignLeave(req, body = {}) {
+        if (this.useMongo()) {
+            const restaurant = await this.vendorRestaurant(req);
+            const cid = Number(body.campaign_id ?? body.id ?? 0);
+            if (restaurant && cid) {
+                await this.mongo.deleteOne('restaurant_campaigns', { campaign_id: cid, restaurant_id: Number(restaurant.mysql_id) });
+            }
+        }
+        return { message: 'left' };
+    }
     shapeAd(row) {
         const r = row;
         const img = (f) => {
@@ -2969,23 +3025,30 @@ __decorate([
 ], VendorExtrasController.prototype, "messageSend", null);
 __decorate([
     (0, common_1.Get)('get-basic-campaigns'),
+    __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "basicCampaigns", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('campaign-join'),
+    (0, common_1.Put)('campaign-join'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "campaignJoin", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('campaign-leave'),
+    (0, common_1.Put)('campaign-leave'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "campaignLeave", null);
 __decorate([
     (0, common_1.Get)('advertisement'),

@@ -2429,14 +2429,82 @@ export class VendorExtrasController {
   messageSend() { return { message: 'sent' }; }
 
   // ── Campaigns / advertisements / business plan ───────────────────
+  // Basic (admin-run) campaigns the restaurant can join. Was a stub returning
+  // [] → "No campaign available". Returns the BARE ARRAY shape the app parses,
+  // with is_joined/vendor_status reflecting this restaurant's membership.
   @Get('get-basic-campaigns')
-  basicCampaigns() { return []; }
+  async basicCampaigns(@Req() req: AuthedRequest) {
+    if (!this.useMongo()) return [];
+    const restaurant = await this.vendorRestaurant(req);
+    const restId = restaurant ? Number(restaurant.mysql_id) : 0;
+    const camps = await this.mongo.findMany<Record<string, unknown>>(
+      'campaigns',
+      { $or: [{ status: true }, { status: 1 }, { status: { $exists: false } }] },
+      { sort: { mysql_id: -1 } },
+    );
+    const joins = restId
+      ? await this.mongo.findMany<{ campaign_id: number }>('restaurant_campaigns', { restaurant_id: restId })
+      : [];
+    const joinedSet = new Set(joins.map((j) => Number(j.campaign_id)));
+    // Most seed campaigns have no image — fall back to a tasteful banner so
+    // the cards aren't blank grey boxes.
+    const fallbackImg = 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=700&h=400&fit=crop&q=80';
+    return camps.map((c) => {
+      const cid = Number(c.mysql_id);
+      const stored = c.image ? storageFullUrl('campaign', c.image as string) : null;
+      const joined = joinedSet.has(cid);
+      return {
+        id: cid,
+        title: c.title ?? null,
+        image_full_url: stored ?? fallbackImg,
+        description: c.description ?? null,
+        created_at: c.created_at ?? null,
+        updated_at: c.updated_at ?? null,
+        start_time: c.start_time ?? '00:00:00',
+        end_time: c.end_time ?? '23:59:59',
+        available_date_starts: c.start_date ?? null,
+        available_date_ends: c.end_date ?? null,
+        vendor_status: joined ? 'confirmed' : null,
+        is_joined: joined,
+      };
+    });
+  }
+
   @HttpCode(200)
   @Post('campaign-join')
-  campaignJoin() { return { message: 'joined' }; }
+  @Put('campaign-join')
+  async campaignJoin(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
+    if (this.useMongo()) {
+      const restaurant = await this.vendorRestaurant(req);
+      const cid = Number(body.campaign_id ?? body.id ?? 0);
+      if (restaurant && cid) {
+        const restId = Number(restaurant.mysql_id);
+        const exists = await this.mongo.findOne('restaurant_campaigns', { campaign_id: cid, restaurant_id: restId });
+        if (!exists) {
+          const nextId = await this.mongo.nextMysqlId('restaurant_campaigns');
+          await this.mongo.insertOne('restaurant_campaigns', {
+            mysql_id: nextId, campaign_id: cid, restaurant_id: restId, mysql_restaurant_id: restId,
+            status: 'confirmed', created_at: new Date(), updated_at: new Date(),
+          });
+        }
+      }
+    }
+    return { message: 'joined' };
+  }
+
   @HttpCode(200)
   @Post('campaign-leave')
-  campaignLeave() { return { message: 'left' }; }
+  @Put('campaign-leave')
+  async campaignLeave(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
+    if (this.useMongo()) {
+      const restaurant = await this.vendorRestaurant(req);
+      const cid = Number(body.campaign_id ?? body.id ?? 0);
+      if (restaurant && cid) {
+        await this.mongo.deleteOne('restaurant_campaigns', { campaign_id: cid, restaurant_id: Number(restaurant.mysql_id) });
+      }
+    }
+    return { message: 'left' };
+  }
 
   /** Map a Mongo advertisement doc to the exact shape AdvertisementModel.Adds
    *  / AdsDetailsModel expect in the restaurant app. Image URLs come from

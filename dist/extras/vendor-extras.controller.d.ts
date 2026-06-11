@@ -1259,13 +1259,26 @@ export declare class VendorExtrasController {
     messageSend(): {
         message: string;
     };
-    basicCampaigns(): never[];
-    campaignJoin(): {
+    basicCampaigns(req: AuthedRequest): Promise<{
+        id: number;
+        title: {} | null;
+        image_full_url: string;
+        description: {} | null;
+        created_at: {} | null;
+        updated_at: {} | null;
+        start_time: {};
+        end_time: {};
+        available_date_starts: {} | null;
+        available_date_ends: {} | null;
+        vendor_status: string | null;
+        is_joined: boolean;
+    }[]>;
+    campaignJoin(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
         message: string;
-    };
-    campaignLeave(): {
+    }>;
+    campaignLeave(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
         message: string;
-    };
+    }>;
     private shapeAd;
     private parseAdTranslations;
     private createAdvertisement;
