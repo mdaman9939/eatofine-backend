@@ -296,6 +296,55 @@ export class VendorExtrasController {
         ? Math.max(0, Math.floor((Date.now() - new Date(vCreatedAt as string | number | Date).getTime()) / 86_400_000))
         : 30;
 
+      // Restaurant subscription — drives the "My Business Plan" screen. Built
+      // from the restaurant's subscription_id + the package template so the app
+      // shows the active plan + features instead of "No subscription found".
+      let subscription: Record<string, unknown> | null = null;
+      let subscriptionOtherData: Record<string, unknown> | null = null;
+      const subResto = restaurants.find(
+        (r) => Number((r as unknown as Record<string, unknown>).subscription_id ?? 0) > 0,
+      );
+      if (subResto) {
+        const sr = subResto as unknown as Record<string, unknown>;
+        const pkgId = Number(sr.subscription_id);
+        const pkg = await this.mongo.findByMysqlId<Record<string, unknown>>('subscription_packages', pkgId);
+        if (pkg) {
+          const feat = (k: string) => (Number(pkg[k] ?? 0) ? 1 : 0);
+          const packagePayload = {
+            id: pkgId,
+            package_name: pkg.package_name ?? 'Plan',
+            price: toNum(pkg.price),
+            validity: Number(pkg.validity ?? 30),
+            max_order: pkg.max_order ?? 'unlimited',
+            max_product: pkg.max_product ?? 'unlimited',
+            pos: feat('pos'), mobile_app: feat('mobile_app'), chat: feat('chat'),
+            review: feat('review'), self_delivery: feat('self_delivery'),
+            status: 1,
+            default: Number(pkg.default ?? 0) ? 1 : 0,
+            colour: pkg.colour ?? null,
+            text: pkg.text ?? null,
+            created_at: pkg.created_at ?? null,
+            updated_at: pkg.updated_at ?? null,
+          };
+          subscription = {
+            id: pkgId,
+            package_id: pkgId,
+            restaurant_id: Number(sr.mysql_id),
+            expiry_date: sr.subscription_expiry_date ?? null,
+            max_order: pkg.max_order ?? 'unlimited',
+            max_product: pkg.max_product ?? 'unlimited',
+            pos: feat('pos'), mobile_app: feat('mobile_app'), chat: feat('chat'),
+            review: feat('review'), self_delivery: feat('self_delivery'),
+            status: 1, is_trial: 0, total_package_renewed: 0,
+            created_at: sr.created_at ?? null, updated_at: sr.updated_at ?? null,
+            renewed_at: null, is_canceled: 0, canceled_by: null,
+            validity: Number(pkg.validity ?? 30),
+            package: packagePayload,
+          };
+          subscriptionOtherData = { total_bill: toNum(pkg.price), max_product_uploads: 0, pending_bill: 0 };
+        }
+      }
+
       return {
         id: vendorId,
         f_name: v.f_name ?? null,
@@ -331,9 +380,9 @@ export class VendorExtrasController {
         this_week_earning: weekEarn,
         this_month_earning: monthEarn,
         member_since_days: memberSince,
-        // ── Subscriptions (defaults — feature not wired up) ──────────
-        subscription: null,
-        subscription_other_data: null,
+        // ── Subscriptions — real plan from the restaurant's subscription_id ──
+        subscription,
+        subscription_other_data: subscriptionOtherData,
         subscription_transactions: false,
         // ── Role / permissions ───────────────────────────────────────
         // CRITICAL: empty roles → ProfileController._allowPermission grants
@@ -2511,8 +2560,60 @@ export class VendorExtrasController {
    *  stub silently 404'd. Returns paginated empty list with metadata so
    *  the page renders "No transactions yet" instead of spinning. */
   @Get('subscription-transaction')
-  subscriptionTransactionsList() {
-    return { transactions: [], total_size: 0, limit: 10, offset: 1 };
+  async subscriptionTransactionsList(@Req() req: AuthedRequest, @Query('offset') offsetQ?: string, @Query('limit') limitQ?: string) {
+    if (!this.useMongo()) return { transactions: [], total_size: 0, limit: 10, offset: 1 };
+    const vendorId = Number(req.actor!.id);
+    const restaurants = await this.mongo.findMany<{ mysql_id: number; name?: string; logo?: string }>('restaurants', { mysql_vendor_id: vendorId });
+    const restIds = restaurants.map((r) => Number(r.mysql_id));
+    if (restIds.length === 0) return { transactions: [], total_size: 0, limit: 10, offset: 1 };
+    const restMap = new Map(restaurants.map((r) => [Number(r.mysql_id), r]));
+
+    const limit = parseInt(limitQ ?? '10', 10) || 10;
+    const offset = parseInt(offsetQ ?? '1', 10) || 1;
+    const rows = await this.mongo.findMany<Record<string, unknown>>(
+      'subscription_transactions', { restaurant_id: { $in: restIds } }, { sort: { mysql_id: -1 } },
+    );
+    const pkgIds = Array.from(new Set(rows.map((t) => Number(t.package_id ?? 0)).filter((n) => n > 0)));
+    const pkgs = pkgIds.length ? await this.mongo.findMany<Record<string, unknown>>('subscription_packages', { mysql_id: { $in: pkgIds } }) : [];
+    const pkgMap = new Map(pkgs.map((p) => [Number(p.mysql_id), p]));
+
+    const shaped = rows.map((t) => {
+      const pkg = pkgMap.get(Number(t.package_id ?? 0));
+      const rest = restMap.get(Number(t.restaurant_id ?? 0));
+      const feat = (k: string) => (pkg ? (Number(pkg[k] ?? 0) ? 1 : 0) : 0);
+      return {
+        id: String(t.transaction_id ?? t.id ?? t.mysql_id),
+        package_id: Number(t.package_id ?? 0),
+        restaurant_id: Number(t.restaurant_id ?? 0),
+        restaurant_subscription_id: Number(t.restaurant_subscription_id ?? 0) || null,
+        price: toNum(t.price),
+        validity: Number(t.validity ?? pkg?.validity ?? 30),
+        payment_method: String(t.payment_method ?? 'wallet'),
+        payment_status: String(t.payment_status ?? 'success'),
+        reference: (t.reference as string) ?? null,
+        paid_amount: toNum(t.paid_amount ?? t.price),
+        discount: toNum(t.discount),
+        package_details: {
+          pos: feat('pos'), review: feat('review'), self_delivery: feat('self_delivery'),
+          chat: feat('chat'), mobile_app: feat('mobile_app'),
+          max_order: pkg?.max_order ?? 'unlimited', max_product: pkg?.max_product ?? 'unlimited',
+        },
+        created_by: String(t.created_by ?? 'vendor'),
+        is_trial: Number(t.is_trial ?? 0) ? 1 : 0,
+        transaction_status: 1,
+        plan_type: String(t.plan_type ?? 'new_plan'),
+        created_at: t.created_at ?? null,
+        updated_at: t.updated_at ?? t.created_at ?? null,
+        restaurant: rest ? { id: Number(rest.mysql_id), name: rest.name ?? null, logo_full_url: storageFullUrl('restaurant', rest.logo ?? null) } : null,
+        package: pkg ? {
+          id: Number(pkg.mysql_id), package_name: pkg.package_name ?? 'Plan', price: toNum(pkg.price),
+          validity: Number(pkg.validity ?? 30), max_order: pkg.max_order ?? 'unlimited', max_product: pkg.max_product ?? 'unlimited',
+          pos: feat('pos'), mobile_app: feat('mobile_app'), chat: feat('chat'), review: feat('review'), self_delivery: feat('self_delivery'), status: 1,
+        } : null,
+      };
+    });
+    const page = shaped.slice(Math.max(0, (offset - 1) * limit), Math.max(0, (offset - 1) * limit) + limit);
+    return { transactions: page, total_size: shaped.length, limit, offset: String(offset) };
   }
   @HttpCode(200)
   @Post('subscription-transaction')

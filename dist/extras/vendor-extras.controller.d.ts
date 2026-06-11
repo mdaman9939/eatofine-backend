@@ -80,8 +80,8 @@ export declare class VendorExtrasController {
         this_week_earning: number;
         this_month_earning: number;
         member_since_days: number;
-        subscription: null;
-        subscription_other_data: null;
+        subscription: Record<string, unknown> | null;
+        subscription_other_data: Record<string, unknown> | null;
         subscription_transactions: boolean;
         roles: never[];
         employee_info: null;
@@ -1392,12 +1392,63 @@ export declare class VendorExtrasController {
     packageView(): Promise<{
         packages: Record<string, unknown>[];
     }>;
-    subscriptionTransactionsList(): {
+    subscriptionTransactionsList(req: AuthedRequest, offsetQ?: string, limitQ?: string): Promise<{
         transactions: never[];
         total_size: number;
         limit: number;
         offset: number;
-    };
+    } | {
+        transactions: {
+            id: string;
+            package_id: number;
+            restaurant_id: number;
+            restaurant_subscription_id: number | null;
+            price: number;
+            validity: number;
+            payment_method: string;
+            payment_status: string;
+            reference: string;
+            paid_amount: number;
+            discount: number;
+            package_details: {
+                pos: number;
+                review: number;
+                self_delivery: number;
+                chat: number;
+                mobile_app: number;
+                max_order: {};
+                max_product: {};
+            };
+            created_by: string;
+            is_trial: number;
+            transaction_status: number;
+            plan_type: string;
+            created_at: {} | null;
+            updated_at: {} | null;
+            restaurant: {
+                id: number;
+                name: string | null;
+                logo_full_url: string | null;
+            } | null;
+            package: {
+                id: number;
+                package_name: {};
+                price: number;
+                validity: number;
+                max_order: {};
+                max_product: {};
+                pos: number;
+                mobile_app: number;
+                chat: number;
+                review: number;
+                self_delivery: number;
+                status: number;
+            } | null;
+        }[];
+        total_size: number;
+        limit: number;
+        offset: string;
+    }>;
     subscriptionTransaction(): {
         message: string;
     };
