@@ -623,19 +623,39 @@ export class CatalogExtrasController {
     const id = parseInt(idStr ?? '', 10);
     if (!Number.isFinite(id)) return [];
     if (this.useMongo()) {
+      // status:{$ne:false} keeps reviews migrated/created WITHOUT a status field
+      // (status:true silently dropped them → "No review found").
       const rows = await this.mongo.findMany<Record<string, unknown>>(
         'reviews',
-        { $or: [{ restaurant_id: id }, { mysql_restaurant_id: id }], status: true },
+        { $or: [{ restaurant_id: id }, { mysql_restaurant_id: id }], status: { $ne: false } },
         { sort: { mysql_id: -1 }, limit: 50 },
       );
-      return rows.map((r) => ({
-        id: Number(r.mysql_id),
-        food_id: Number(r.food_id ?? r.mysql_food_id ?? 0),
-        user_id: Number(r.user_id ?? r.mysql_user_id ?? 0),
-        comment: r.comment,
-        rating: r.rating,
-        created_at: r.created_at,
-      }));
+      // The customer app's ReviewModel reads customer_name + food_name +
+      // food_image_full_url, so enrich each review.
+      const foodIds = Array.from(new Set(rows.map((r) => Number(r.mysql_food_id ?? r.food_id ?? 0)).filter((n) => n > 0)));
+      const userIds = Array.from(new Set(rows.map((r) => Number(r.mysql_user_id ?? r.user_id ?? 0)).filter((n) => n > 0)));
+      const [foods, users] = await Promise.all([
+        foodIds.length ? this.mongo.findMany<{ mysql_id: number; name?: string; image?: string }>('foods', { mysql_id: { $in: foodIds } }) : Promise.resolve([]),
+        userIds.length ? this.mongo.findMany<{ mysql_id: number; f_name?: string; l_name?: string }>('users', { mysql_id: { $in: userIds } }) : Promise.resolve([]),
+      ]);
+      const foodMap = new Map(foods.map((f) => [Number(f.mysql_id), f]));
+      const userMap = new Map(users.map((u) => [Number(u.mysql_id), u]));
+      return rows.map((r) => {
+        const food = foodMap.get(Number(r.mysql_food_id ?? r.food_id ?? 0));
+        const u = userMap.get(Number(r.mysql_user_id ?? r.user_id ?? 0));
+        return {
+          id: Number(r.mysql_id),
+          food_id: Number(r.food_id ?? r.mysql_food_id ?? 0),
+          food_name: food?.name ?? null,
+          food_image_full_url: storageFullUrl('product', (food?.image as string | null | undefined) ?? null),
+          customer_name: u ? `${u.f_name ?? ''} ${u.l_name ?? ''}`.trim() || 'Customer' : 'Customer',
+          comment: r.comment ?? null,
+          rating: r.rating ?? 0,
+          reply: r.reply ?? null,
+          created_at: r.created_at ?? null,
+          updated_at: r.updated_at ?? r.created_at ?? null,
+        };
+      });
     }
     const rows = await this.prisma.reviews.findMany({ where: { restaurant_id: BigInt(id), status: true }, orderBy: { id: 'desc' }, take: 50 });
     return rows.map((r) => ({

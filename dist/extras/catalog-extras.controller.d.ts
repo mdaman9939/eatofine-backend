@@ -218,10 +218,21 @@ export declare class CatalogExtrasController {
     restaurantReviews(idStr?: string): Promise<{
         id: number;
         food_id: number;
+        food_name: string | null;
+        food_image_full_url: string | null;
+        customer_name: string;
+        comment: {} | null;
+        rating: {};
+        reply: {} | null;
+        created_at: {} | null;
+        updated_at: {} | null;
+    }[] | {
+        id: number;
+        food_id: number;
         user_id: number;
-        comment: unknown;
-        rating: unknown;
-        created_at: unknown;
+        comment: string | null;
+        rating: number;
+        created_at: Date | null;
     }[]>;
     dineInRestaurants(): {
         restaurants: never[];
