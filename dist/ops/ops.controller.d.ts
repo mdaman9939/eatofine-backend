@@ -204,6 +204,7 @@ export declare class OpsController {
     }>;
     vendorUpdateStatus(req: AuthedRequest, body?: {
         order_id?: number | string;
+        status?: string;
         order_status?: string;
     }): Promise<{
         message: string;
@@ -303,6 +304,7 @@ export declare class OpsController {
     }>;
     dmUpdate(req: AuthedRequest, body?: {
         order_id?: number | string;
+        status?: string;
         order_status?: string;
     }): Promise<{
         message: string;
