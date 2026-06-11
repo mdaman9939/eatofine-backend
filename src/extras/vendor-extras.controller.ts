@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Post, Put, Query, Req, UseGuards, HttpCode, UseInterceptors, UploadedFiles } from '@nestjs/common';
-import { FileFieldsInterceptor } from '@nestjs/platform-express';
+import { FileFieldsInterceptor, AnyFilesInterceptor } from '@nestjs/platform-express';
+import { resolveParticipant, findOrCreateConversation, participantProfile, type PartySlot } from './messaging.helper';
 import * as fs from 'fs';
 import * as path from 'path';
 import { AuthGuard, RequireAuth } from '../auth/auth.guard';
@@ -2502,15 +2503,83 @@ export class VendorExtrasController {
     const rows = await this.prisma.notifications.findMany({ where: { status: true }, orderBy: { id: 'desc' }, take: 50 });
     return rows.map((r) => ({ id: Number(r.id), title: r.title, description: r.description }));
   }
+  // ── Messaging (real, DB-backed) — vendor is the `vendor_id` participant ──
   @Get('message/list')
-  messageList() { return { conversations: [], total_size: 0 }; }
+  async messageList(@Req() req: AuthedRequest, @Query('type') type?: string, @Query('offset') offsetQ?: string, @Query('limit') limitQ?: string) {
+    if (!this.useMongo()) return { conversation: [], total_size: 0, limit: 10, offset: 1 };
+    const vendorId = Number(req.actor!.id);
+    const limit = parseInt(limitQ ?? '10', 10) || 10;
+    const offset = parseInt(offsetQ ?? '1', 10) || 1;
+    const cpSlot: PartySlot = String(type ?? '').toLowerCase().includes('deliver') ? 'delivery_man_id' : 'user_id';
+    const cpType = cpSlot === 'delivery_man_id' ? 'delivery_man' : 'user';
+    const rows = await this.mongo.findMany<Record<string, unknown>>('conversations', { vendor_id: vendorId, [cpSlot]: { $ne: null } }, { sort: { last_message_at: -1 }, limit: 200 });
+    const myProfile = await participantProfile(this.mongo, 'vendor_id', vendorId, storageFullUrl);
+    const paged = rows.slice((offset - 1) * limit, offset * limit);
+    const conversation = await Promise.all(paged.map(async (c) => {
+      const cpId = Number(c[cpSlot] ?? 0);
+      const receiver = await participantProfile(this.mongo, cpSlot, cpId, storageFullUrl);
+      return {
+        id: Number(c.mysql_id),
+        sender_id: vendorId, sender_type: 'vendor', receiver_id: cpId, receiver_type: cpType,
+        unread_message_count: Number(c.unread ?? 0), last_message_id: null,
+        last_message_time: c.last_message_at ?? c.created_at ?? null,
+        created_at: c.created_at ?? null, updated_at: c.last_message_at ?? null,
+        sender: myProfile, receiver,
+        last_message: { id: null, conversation_id: Number(c.mysql_id), sender_id: vendorId, message: (c.last_message as string) ?? '', is_seen: 1, files: [] },
+      };
+    }));
+    return { conversation, total_size: rows.length, limit, offset };
+  }
+
   @Get('message/details')
-  messageDetails() { return { messages: [] }; }
+  async messageDetails(@Req() req: AuthedRequest, @Query('conversation_id') convId?: string, @Query('user_id') userId?: string, @Query('delivery_man_id') dmId?: string) {
+    if (!this.useMongo()) return { messages: [] };
+    const vendorId = Number(req.actor!.id);
+    let conversationId = convId ? Number(convId) : undefined;
+    if (!conversationId && (userId || dmId)) {
+      const cpSlot: PartySlot = dmId ? 'delivery_man_id' : 'user_id';
+      const conv = await this.mongo.findOne<{ mysql_id: number }>('conversations', { vendor_id: vendorId, [cpSlot]: Number(dmId ?? userId) });
+      if (conv) conversationId = Number(conv.mysql_id);
+    }
+    if (!conversationId) return { messages: [] };
+    const rows = await this.mongo.findMany<Record<string, unknown>>('messages', { conversation_id: conversationId }, { sort: { mysql_id: 1 }, limit: 100 });
+    return {
+      messages: rows.map((m) => ({
+        id: Number(m.mysql_id), conversation_id: conversationId,
+        sender_type: m.sender_type, sender_id: m.sender_id != null ? Number(m.sender_id) : null,
+        message: (m.message ?? m.body ?? '') as string, body: (m.message ?? m.body ?? '') as string,
+        file_full_url: Array.isArray(m.files) ? (m.files as string[]).map((f) => storageFullUrl('conversation', f)).filter((u): u is string => !!u) : [],
+        is_seen: m.is_seen ?? 1, sent_by_me: m.sender_type === 'vendor' && Number(m.sender_id) === vendorId,
+        created_at: m.created_at ?? null,
+      })),
+    };
+  }
+
   @Get('message/search-list')
   messageSearch() { return { conversations: [] }; }
+
   @HttpCode(200)
   @Post('message/send')
-  messageSend() { return { message: 'sent' }; }
+  @UseInterceptors(AnyFilesInterceptor({ limits: { fileSize: 10 * 1024 * 1024 } }))
+  async messageSend(@Req() req: AuthedRequest, @UploadedFiles() files: Express.Multer.File[] | undefined, @Body() rawBody: Record<string, unknown> = {}) {
+    if (!this.useMongo()) return { message: 'sent' };
+    const vendorId = Number(req.actor!.id);
+    const body = rawBody ?? {};
+    const text = String(body.message ?? body.body ?? '');
+    const imageNames: string[] = [];
+    for (const f of files ?? []) { const n = await this.saveUploaded(f, 'conversation'); if (n) imageNames.push(n); }
+    if (!text.trim() && imageNames.length === 0) return { errors: [{ code: 'body', message: 'message body required' }] };
+    let convId = body.conversation_id != null && body.conversation_id !== '' ? Number(body.conversation_id) : undefined;
+    if (!convId) {
+      const cp = await resolveParticipant(this.mongo, String(body.receiver_type ?? 'user'), Number(body.receiver_id ?? body.user_id ?? 0));
+      if (!cp) return { errors: [{ code: 'receiver', message: 'receiver_id required' }] };
+      convId = await findOrCreateConversation(this.mongo, { slot: 'vendor_id', id: vendorId }, cp, text);
+    }
+    const msgId = await this.mongo.nextMysqlId('messages');
+    await this.mongo.insertOne('messages', { mysql_id: msgId, conversation_id: convId, sender_type: 'vendor', sender_id: vendorId, message: text, body: text, files: imageNames, created_at: new Date() });
+    await this.mongo.updateOne('conversations', { mysql_id: convId }, { last_message: text || (imageNames.length ? 'Photo' : ''), last_message_at: new Date() });
+    return { message: 'sent', conversation_id: convId, id: msgId, files: imageNames };
+  }
 
   // ── Campaigns / advertisements / business plan ───────────────────
   // Basic (admin-run) campaigns the restaurant can join. Was a stub returning

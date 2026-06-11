@@ -674,15 +674,7 @@ export declare class DeliveryExtrasController {
             last_message_time: {} | null;
             created_at: {} | null;
             updated_at: {} | null;
-            sender: {
-                id: number;
-                f_name: string | null;
-                l_name: string | null;
-                phone: string | null;
-                email: string | null;
-                image_full_url: string | null;
-                deliveryman_id: number;
-            };
+            sender: Record<string, unknown>;
             receiver: Record<string, unknown>;
             last_message: {
                 id: null;

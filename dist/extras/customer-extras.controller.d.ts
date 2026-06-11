@@ -180,18 +180,32 @@ export declare class CustomerExtrasController {
         loyalty_balance: number;
         errors?: undefined;
     }>;
-    messageList(req: AuthedRequest, type?: string): Promise<{
+    messageList(req: AuthedRequest, type?: string, offsetQ?: string, limitQ?: string): Promise<{
         conversations: {
             id: number;
-            type: string;
-            counterpart_id: number;
-            name: string;
-            avatar: string | null;
-            last_message: string | null;
-            last_message_at: string | Date | null;
-            unread: number;
+            sender_id: number;
+            sender_type: string;
+            receiver_id: number;
+            receiver_type: string;
+            unread_message_count: number;
+            last_message_id: null;
+            last_message_time: {} | null;
+            created_at: {} | null;
+            updated_at: {} | null;
+            sender: Record<string, unknown>;
+            receiver: Record<string, unknown>;
+            last_message: {
+                id: null;
+                conversation_id: number;
+                sender_id: number;
+                message: string;
+                is_seen: number;
+                files: never[];
+            };
         }[];
         total_size: number;
+        limit: number;
+        offset: number;
     }>;
     messageDetails(req: AuthedRequest, convId?: string): Promise<{
         messages: {

@@ -49,6 +49,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.VendorExtrasController = void 0;
 const common_1 = require("@nestjs/common");
 const platform_express_1 = require("@nestjs/platform-express");
+const messaging_helper_1 = require("./messaging.helper");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const auth_guard_1 = require("../auth/auth.guard");
@@ -2007,10 +2008,84 @@ let VendorExtrasController = class VendorExtrasController {
         const rows = await this.prisma.notifications.findMany({ where: { status: true }, orderBy: { id: 'desc' }, take: 50 });
         return rows.map((r) => ({ id: Number(r.id), title: r.title, description: r.description }));
     }
-    messageList() { return { conversations: [], total_size: 0 }; }
-    messageDetails() { return { messages: [] }; }
+    async messageList(req, type, offsetQ, limitQ) {
+        if (!this.useMongo())
+            return { conversation: [], total_size: 0, limit: 10, offset: 1 };
+        const vendorId = Number(req.actor.id);
+        const limit = parseInt(limitQ ?? '10', 10) || 10;
+        const offset = parseInt(offsetQ ?? '1', 10) || 1;
+        const cpSlot = String(type ?? '').toLowerCase().includes('deliver') ? 'delivery_man_id' : 'user_id';
+        const cpType = cpSlot === 'delivery_man_id' ? 'delivery_man' : 'user';
+        const rows = await this.mongo.findMany('conversations', { vendor_id: vendorId, [cpSlot]: { $ne: null } }, { sort: { last_message_at: -1 }, limit: 200 });
+        const myProfile = await (0, messaging_helper_1.participantProfile)(this.mongo, 'vendor_id', vendorId, storage_url_1.storageFullUrl);
+        const paged = rows.slice((offset - 1) * limit, offset * limit);
+        const conversation = await Promise.all(paged.map(async (c) => {
+            const cpId = Number(c[cpSlot] ?? 0);
+            const receiver = await (0, messaging_helper_1.participantProfile)(this.mongo, cpSlot, cpId, storage_url_1.storageFullUrl);
+            return {
+                id: Number(c.mysql_id),
+                sender_id: vendorId, sender_type: 'vendor', receiver_id: cpId, receiver_type: cpType,
+                unread_message_count: Number(c.unread ?? 0), last_message_id: null,
+                last_message_time: c.last_message_at ?? c.created_at ?? null,
+                created_at: c.created_at ?? null, updated_at: c.last_message_at ?? null,
+                sender: myProfile, receiver,
+                last_message: { id: null, conversation_id: Number(c.mysql_id), sender_id: vendorId, message: c.last_message ?? '', is_seen: 1, files: [] },
+            };
+        }));
+        return { conversation, total_size: rows.length, limit, offset };
+    }
+    async messageDetails(req, convId, userId, dmId) {
+        if (!this.useMongo())
+            return { messages: [] };
+        const vendorId = Number(req.actor.id);
+        let conversationId = convId ? Number(convId) : undefined;
+        if (!conversationId && (userId || dmId)) {
+            const cpSlot = dmId ? 'delivery_man_id' : 'user_id';
+            const conv = await this.mongo.findOne('conversations', { vendor_id: vendorId, [cpSlot]: Number(dmId ?? userId) });
+            if (conv)
+                conversationId = Number(conv.mysql_id);
+        }
+        if (!conversationId)
+            return { messages: [] };
+        const rows = await this.mongo.findMany('messages', { conversation_id: conversationId }, { sort: { mysql_id: 1 }, limit: 100 });
+        return {
+            messages: rows.map((m) => ({
+                id: Number(m.mysql_id), conversation_id: conversationId,
+                sender_type: m.sender_type, sender_id: m.sender_id != null ? Number(m.sender_id) : null,
+                message: (m.message ?? m.body ?? ''), body: (m.message ?? m.body ?? ''),
+                file_full_url: Array.isArray(m.files) ? m.files.map((f) => (0, storage_url_1.storageFullUrl)('conversation', f)).filter((u) => !!u) : [],
+                is_seen: m.is_seen ?? 1, sent_by_me: m.sender_type === 'vendor' && Number(m.sender_id) === vendorId,
+                created_at: m.created_at ?? null,
+            })),
+        };
+    }
     messageSearch() { return { conversations: [] }; }
-    messageSend() { return { message: 'sent' }; }
+    async messageSend(req, files, rawBody = {}) {
+        if (!this.useMongo())
+            return { message: 'sent' };
+        const vendorId = Number(req.actor.id);
+        const body = rawBody ?? {};
+        const text = String(body.message ?? body.body ?? '');
+        const imageNames = [];
+        for (const f of files ?? []) {
+            const n = await this.saveUploaded(f, 'conversation');
+            if (n)
+                imageNames.push(n);
+        }
+        if (!text.trim() && imageNames.length === 0)
+            return { errors: [{ code: 'body', message: 'message body required' }] };
+        let convId = body.conversation_id != null && body.conversation_id !== '' ? Number(body.conversation_id) : undefined;
+        if (!convId) {
+            const cp = await (0, messaging_helper_1.resolveParticipant)(this.mongo, String(body.receiver_type ?? 'user'), Number(body.receiver_id ?? body.user_id ?? 0));
+            if (!cp)
+                return { errors: [{ code: 'receiver', message: 'receiver_id required' }] };
+            convId = await (0, messaging_helper_1.findOrCreateConversation)(this.mongo, { slot: 'vendor_id', id: vendorId }, cp, text);
+        }
+        const msgId = await this.mongo.nextMysqlId('messages');
+        await this.mongo.insertOne('messages', { mysql_id: msgId, conversation_id: convId, sender_type: 'vendor', sender_id: vendorId, message: text, body: text, files: imageNames, created_at: new Date() });
+        await this.mongo.updateOne('conversations', { mysql_id: convId }, { last_message: text || (imageNames.length ? 'Photo' : ''), last_message_at: new Date() });
+        return { message: 'sent', conversation_id: convId, id: msgId, files: imageNames };
+    }
     async basicCampaigns(req) {
         if (!this.useMongo())
             return [];
@@ -3076,15 +3151,23 @@ __decorate([
 ], VendorExtrasController.prototype, "vendorNotifications", null);
 __decorate([
     (0, common_1.Get)('message/list'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('type')),
+    __param(2, (0, common_1.Query)('offset')),
+    __param(3, (0, common_1.Query)('limit')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, String, String, String]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "messageList", null);
 __decorate([
     (0, common_1.Get)('message/details'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('conversation_id')),
+    __param(2, (0, common_1.Query)('user_id')),
+    __param(3, (0, common_1.Query)('delivery_man_id')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, String, String, String]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "messageDetails", null);
 __decorate([
     (0, common_1.Get)('message/search-list'),
@@ -3095,9 +3178,13 @@ __decorate([
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('message/send'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.AnyFilesInterceptor)({ limits: { fileSize: 10 * 1024 * 1024 } })),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.UploadedFiles)()),
+    __param(2, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object, Object]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "messageSend", null);
 __decorate([
     (0, common_1.Get)('get-basic-campaigns'),

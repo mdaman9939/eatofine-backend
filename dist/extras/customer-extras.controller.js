@@ -55,6 +55,7 @@ const auth_guard_1 = require("../auth/auth.guard");
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
 const storage_url_1 = require("../common/storage-url");
+const messaging_helper_1 = require("./messaging.helper");
 const STORAGE_ROOT = (() => {
     if (process.env.STORAGE_ROOT)
         return process.env.STORAGE_ROOT;
@@ -380,25 +381,29 @@ let CustomerExtrasController = class CustomerExtrasController {
         });
         return { message: 'Points transferred to wallet', wallet_balance: newBalance, loyalty_balance: loyaltyBalance - points };
     }
-    async messageList(req, type) {
+    async messageList(req, type, offsetQ, limitQ) {
         const userId = Number(req.actor.id);
-        const filter = { user_id: userId };
-        if (type === 'restaurant' || type === 'delivery_man')
-            filter.counterpart_type = type;
-        const rows = await this.mongo.findMany('conversations', filter, { sort: { last_message_at: -1 }, limit: 50 });
-        return {
-            conversations: rows.map((c) => ({
+        const limit = parseInt(limitQ ?? '50', 10) || 50;
+        const offset = parseInt(offsetQ ?? '1', 10) || 1;
+        const cpSlot = String(type ?? '').toLowerCase().includes('deliver') ? 'delivery_man_id' : 'vendor_id';
+        const cpType = cpSlot === 'delivery_man_id' ? 'delivery_man' : 'vendor';
+        const rows = await this.mongo.findMany('conversations', { user_id: userId, [cpSlot]: { $ne: null } }, { sort: { last_message_at: -1 }, limit: 200 });
+        const myProfile = await (0, messaging_helper_1.participantProfile)(this.mongo, 'user_id', userId, storage_url_1.storageFullUrl);
+        const paged = rows.slice((offset - 1) * limit, offset * limit);
+        const conversations = await Promise.all(paged.map(async (c) => {
+            const cpId = Number(c[cpSlot] ?? 0);
+            const receiver = await (0, messaging_helper_1.participantProfile)(this.mongo, cpSlot, cpId, storage_url_1.storageFullUrl);
+            return {
                 id: Number(c.mysql_id),
-                type: c.counterpart_type,
-                counterpart_id: Number(c.counterpart_id),
-                name: c.counterpart_name ?? `${c.counterpart_type} #${c.counterpart_id}`,
-                avatar: c.counterpart_avatar ?? null,
-                last_message: c.last_message ?? null,
-                last_message_at: c.last_message_at ?? null,
-                unread: c.unread ?? 0,
-            })),
-            total_size: rows.length,
-        };
+                sender_id: userId, sender_type: 'user', receiver_id: cpId, receiver_type: cpType,
+                unread_message_count: Number(c.unread ?? 0), last_message_id: null,
+                last_message_time: c.last_message_at ?? c.created_at ?? null,
+                created_at: c.created_at ?? null, updated_at: c.last_message_at ?? null,
+                sender: myProfile, receiver,
+                last_message: { id: null, conversation_id: Number(c.mysql_id), sender_id: userId, message: c.last_message ?? '', is_seen: 1, files: [] },
+            };
+        }));
+        return { conversations, total_size: rows.length, limit, offset };
     }
     async messageDetails(req, convId) {
         if (!convId)
@@ -448,27 +453,9 @@ let CustomerExtrasController = class CustomerExtrasController {
         const counterpartId = counterpartIdRaw != null ? Number(counterpartIdRaw) : null;
         let convId = body.conversation_id != null ? Number(body.conversation_id) : undefined;
         if (!convId && counterpartType && counterpartId) {
-            const existing = await this.mongo.findOne('conversations', {
-                user_id: userId,
-                counterpart_type: counterpartType,
-                counterpart_id: counterpartId,
-            });
-            if (existing) {
-                convId = Number(existing.mysql_id);
-            }
-            else {
-                convId = await this.mongo.nextMysqlId('conversations');
-                await this.mongo.insertOne('conversations', {
-                    mysql_id: convId,
-                    user_id: userId,
-                    counterpart_type: counterpartType,
-                    counterpart_id: counterpartId,
-                    counterpart_name: null,
-                    last_message: text,
-                    last_message_at: new Date(),
-                    unread: 0,
-                });
-            }
+            const cp = await (0, messaging_helper_1.resolveParticipant)(this.mongo, counterpartType, counterpartId);
+            if (cp)
+                convId = await (0, messaging_helper_1.findOrCreateConversation)(this.mongo, { slot: 'user_id', id: userId }, cp, text);
         }
         if (!convId)
             return { message: 'conversation_id or counterpart required' };
@@ -1007,8 +994,10 @@ __decorate([
     (0, common_1.Get)('message/list'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Query)('type')),
+    __param(2, (0, common_1.Query)('offset')),
+    __param(3, (0, common_1.Query)('limit')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:paramtypes", [Object, String, String, String]),
     __metadata("design:returntype", Promise)
 ], CustomerExtrasController.prototype, "messageList", null);
 __decorate([

@@ -1244,19 +1244,72 @@ export declare class VendorExtrasController {
         title: string | null;
         description: string | null;
     }[]>;
-    messageList(): {
-        conversations: never[];
+    messageList(req: AuthedRequest, type?: string, offsetQ?: string, limitQ?: string): Promise<{
+        conversation: {
+            id: number;
+            sender_id: number;
+            sender_type: string;
+            receiver_id: number;
+            receiver_type: string;
+            unread_message_count: number;
+            last_message_id: null;
+            last_message_time: {} | null;
+            created_at: {} | null;
+            updated_at: {} | null;
+            sender: Record<string, unknown>;
+            receiver: Record<string, unknown>;
+            last_message: {
+                id: null;
+                conversation_id: number;
+                sender_id: number;
+                message: string;
+                is_seen: number;
+                files: never[];
+            };
+        }[];
         total_size: number;
-    };
-    messageDetails(): {
-        messages: never[];
-    };
+        limit: number;
+        offset: number;
+    }>;
+    messageDetails(req: AuthedRequest, convId?: string, userId?: string, dmId?: string): Promise<{
+        messages: {
+            id: number;
+            conversation_id: number;
+            sender_type: unknown;
+            sender_id: number | null;
+            message: string;
+            body: string;
+            file_full_url: string[];
+            is_seen: {};
+            sent_by_me: boolean;
+            created_at: {} | null;
+        }[];
+    }>;
     messageSearch(): {
         conversations: never[];
     };
-    messageSend(): {
+    messageSend(req: AuthedRequest, files: Express.Multer.File[] | undefined, rawBody?: Record<string, unknown>): Promise<{
         message: string;
-    };
+        errors?: undefined;
+        conversation_id?: undefined;
+        id?: undefined;
+        files?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+        conversation_id?: undefined;
+        id?: undefined;
+        files?: undefined;
+    } | {
+        message: string;
+        conversation_id: number;
+        id: number;
+        files: string[];
+        errors?: undefined;
+    }>;
     basicCampaigns(req: AuthedRequest): Promise<{
         id: number;
         title: {} | null;

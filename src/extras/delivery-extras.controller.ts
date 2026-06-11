@@ -7,6 +7,7 @@ import type { AuthedRequest } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { storageFullUrl } from '../common/storage-url';
+import { resolveParticipant, findOrCreateConversation, participantProfile, type PartySlot } from './messaging.helper';
 import { compressImage } from '../common/image-compress';
 
 // Delivery-man app endpoints beyond the existing core ops. All return
@@ -716,54 +717,29 @@ export class DeliveryExtrasController {
     const dmId = Number(req.actor!.id);
     const limit = parseInt(limitQ ?? '10', 10) || 10;
     const offset = parseInt(offsetQ ?? '1', 10) || 1;
-    const wantVendor = type === 'vendor';
+    const wantVendor = type === 'vendor' || String(type ?? '').toLowerCase().includes('rest');
+    const cpSlot: PartySlot = wantVendor ? 'vendor_id' : 'user_id';
+    const cpType = wantVendor ? 'vendor' : 'user';
     const rows = await this.mongo.findMany<Record<string, unknown>>(
-      'conversations', { counterpart_type: 'delivery_man', counterpart_id: dmId },
+      'conversations', { delivery_man_id: dmId, [cpSlot]: { $ne: null } },
       { sort: { last_message_at: -1 }, limit: 200 },
     );
-    // The Customer tab shows DM↔customer threads, the Restaurant tab DM↔vendor.
-    const ofType = rows.filter((c) => (wantVendor ? String(c.party_type) === 'vendor' : String(c.party_type ?? 'user') !== 'vendor'));
-
-    const dm = await this.mongo.findByMysqlId<{ mysql_id: number; f_name?: string; l_name?: string; phone?: string; email?: string; image?: string }>('delivery_men', dmId);
-    const dmUser = {
-      id: dmId, f_name: dm?.f_name ?? null, l_name: dm?.l_name ?? null, phone: dm?.phone ?? null, email: dm?.email ?? null,
-      image_full_url: storageFullUrl('delivery-man', dm?.image ?? null), deliveryman_id: dmId,
-    };
-    // Resolve the other party (customer or restaurant) for each thread.
-    const partyIds = Array.from(new Set(ofType.map((c) => Number(c.party_id ?? c.user_id ?? 0)).filter((n) => n > 0)));
-    const partyMap = new Map<number, Record<string, unknown>>();
-    if (wantVendor) {
-      const rests = partyIds.length ? await this.mongo.findMany<{ mysql_id: number; name?: string; logo?: string; phone?: string; mysql_vendor_id?: number }>('restaurants', { mysql_id: { $in: partyIds } }) : [];
-      for (const r of rests) partyMap.set(Number(r.mysql_id), {
-        id: Number(r.mysql_id), f_name: r.name ?? 'Restaurant', l_name: '', phone: r.phone ?? null, email: null,
-        image_full_url: storageFullUrl('restaurant', r.logo ?? null), vendor_id: Number(r.mysql_vendor_id ?? r.mysql_id),
-      });
-    } else {
-      const users = partyIds.length ? await this.mongo.findMany<{ mysql_id: number; f_name?: string; l_name?: string; phone?: string; email?: string; image?: string }>('users', { mysql_id: { $in: partyIds } }) : [];
-      for (const u of users) partyMap.set(Number(u.mysql_id), {
-        id: Number(u.mysql_id), f_name: u.f_name ?? null, l_name: u.l_name ?? null, phone: u.phone ?? null, email: u.email ?? null,
-        image_full_url: storageFullUrl('profile', u.image ?? null), user_id: Number(u.mysql_id),
-      });
-    }
-    const paged = ofType.slice((offset - 1) * limit, offset * limit);
-    const conversation = paged.map((c) => {
-      const pid = Number(c.party_id ?? c.user_id ?? 0);
-      const other = partyMap.get(pid) ?? { id: pid, f_name: wantVendor ? 'Restaurant' : 'Customer', l_name: '', image_full_url: null, ...(wantVendor ? { vendor_id: pid } : { user_id: pid }) };
+    const myProfile = await participantProfile(this.mongo, 'delivery_man_id', dmId, storageFullUrl);
+    const paged = rows.slice((offset - 1) * limit, offset * limit);
+    const conversation = await Promise.all(paged.map(async (c) => {
+      const cpId = Number(c[cpSlot] ?? 0);
+      const receiver = await participantProfile(this.mongo, cpSlot, cpId, storageFullUrl);
       return {
         id: Number(c.mysql_id),
-        sender_id: dmId, sender_type: 'delivery_man',
-        receiver_id: pid, receiver_type: wantVendor ? 'vendor' : 'user',
-        unread_message_count: Number(c.unread ?? 0),
-        last_message_id: null,
+        sender_id: dmId, sender_type: 'delivery_man', receiver_id: cpId, receiver_type: cpType,
+        unread_message_count: Number(c.unread ?? 0), last_message_id: null,
         last_message_time: c.last_message_at ?? c.created_at ?? null,
-        created_at: c.created_at ?? null,
-        updated_at: c.last_message_at ?? null,
-        sender: dmUser,
-        receiver: other,
+        created_at: c.created_at ?? null, updated_at: c.last_message_at ?? null,
+        sender: myProfile, receiver,
         last_message: { id: null, conversation_id: Number(c.mysql_id), sender_id: dmId, message: (c.last_message as string) ?? '', is_seen: 1, files: [] },
       };
-    });
-    return { conversation, total_size: ofType.length, limit, offset };
+    }));
+    return { conversation, total_size: rows.length, limit, offset };
   }
 
   @Get('message/details')
@@ -779,11 +755,8 @@ export class DeliveryExtrasController {
     // (customer chat) / vendor_id (restaurant chat).
     let conversationId = convId ? Number(convId) : undefined;
     if (!conversationId && (userId || vendorId)) {
-      const partyType = vendorId ? 'vendor' : 'user';
-      const partyId = Number(vendorId ?? userId);
-      const conv = await this.mongo.findOne<{ mysql_id: number }>('conversations', {
-        counterpart_type: 'delivery_man', counterpart_id: dmId, party_type: partyType, party_id: partyId,
-      });
+      const cp = await resolveParticipant(this.mongo, vendorId ? 'vendor' : 'user', Number(vendorId ?? userId));
+      const conv = cp ? await this.mongo.findOne<{ mysql_id: number }>('conversations', { delivery_man_id: dmId, [cp.slot]: cp.id }) : null;
       if (conv) conversationId = Number(conv.mysql_id);
     }
     if (!conversationId) return { messages: [] };
@@ -850,22 +823,11 @@ export class DeliveryExtrasController {
       return { errors: [{ code: 'body', message: 'message body required' }] };
     }
     const counterpartUserId = body.receiver_id ?? body.user_id;
-    const partyType = body.receiver_type === 'vendor' ? 'vendor' : 'user';
     let convId = body.conversation_id != null && body.conversation_id !== '' ? Number(body.conversation_id) : undefined;
     if (!convId && counterpartUserId != null && counterpartUserId !== '') {
-      const pid = Number(counterpartUserId);
-      const existing = await this.mongo.findOne<{ mysql_id: number }>('conversations', {
-        counterpart_type: 'delivery_man', counterpart_id: dmId, party_type: partyType, party_id: pid,
-      });
-      if (existing) convId = Number(existing.mysql_id);
-      else {
-        convId = await this.mongo.nextMysqlId('conversations');
-        await this.mongo.insertOne('conversations', {
-          mysql_id: convId, counterpart_type: 'delivery_man', counterpart_id: dmId,
-          party_type: partyType, party_id: pid, user_id: partyType === 'user' ? pid : null,
-          last_message: text, last_message_at: new Date(), unread: 0, created_at: new Date(),
-        });
-      }
+      // Unified participant-slot conversation so the customer/vendor apps find it.
+      const cp = await resolveParticipant(this.mongo, String(body.receiver_type ?? 'user'), Number(counterpartUserId));
+      if (cp) convId = await findOrCreateConversation(this.mongo, { slot: 'delivery_man_id', id: dmId }, cp, text);
     }
     if (!convId) return { errors: [{ code: 'conversation', message: 'conversation_id or receiver_id required' }] };
     const msgId = await this.mongo.nextMysqlId('messages');

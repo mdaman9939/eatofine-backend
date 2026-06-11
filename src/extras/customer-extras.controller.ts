@@ -20,6 +20,7 @@ import type { AuthedRequest } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { storageFullUrl } from '../common/storage-url';
+import { resolveParticipant, findOrCreateConversation, participantProfile, type PartySlot } from './messaging.helper';
 
 interface MulterFile {
   buffer: Buffer;
@@ -510,29 +511,29 @@ export class CustomerExtrasController {
   // Each conversation row stores participant identities (user/restaurant/dm)
   // and a last-message snapshot so the list view doesn't need a second join.
   @Get('message/list')
-  async messageList(@Req() req: AuthedRequest, @Query('type') type?: string) {
+  async messageList(@Req() req: AuthedRequest, @Query('type') type?: string, @Query('offset') offsetQ?: string, @Query('limit') limitQ?: string) {
     const userId = Number(req.actor!.id);
-    const filter: Record<string, unknown> = { user_id: userId };
-    if (type === 'restaurant' || type === 'delivery_man') filter.counterpart_type = type;
-    const rows = await this.mongo.findMany<{
-      mysql_id: number; user_id: number; counterpart_type: string;
-      counterpart_id: number; counterpart_name?: string | null;
-      counterpart_avatar?: string | null; last_message?: string | null;
-      last_message_at?: Date | string | null; unread?: number;
-    }>('conversations', filter, { sort: { last_message_at: -1 }, limit: 50 });
-    return {
-      conversations: rows.map((c) => ({
+    const limit = parseInt(limitQ ?? '50', 10) || 50;
+    const offset = parseInt(offsetQ ?? '1', 10) || 1;
+    const cpSlot: PartySlot = String(type ?? '').toLowerCase().includes('deliver') ? 'delivery_man_id' : 'vendor_id';
+    const cpType = cpSlot === 'delivery_man_id' ? 'delivery_man' : 'vendor';
+    const rows = await this.mongo.findMany<Record<string, unknown>>('conversations', { user_id: userId, [cpSlot]: { $ne: null } }, { sort: { last_message_at: -1 }, limit: 200 });
+    const myProfile = await participantProfile(this.mongo, 'user_id', userId, storageFullUrl);
+    const paged = rows.slice((offset - 1) * limit, offset * limit);
+    const conversations = await Promise.all(paged.map(async (c) => {
+      const cpId = Number(c[cpSlot] ?? 0);
+      const receiver = await participantProfile(this.mongo, cpSlot, cpId, storageFullUrl);
+      return {
         id: Number(c.mysql_id),
-        type: c.counterpart_type,
-        counterpart_id: Number(c.counterpart_id),
-        name: c.counterpart_name ?? `${c.counterpart_type} #${c.counterpart_id}`,
-        avatar: c.counterpart_avatar ?? null,
-        last_message: c.last_message ?? null,
-        last_message_at: c.last_message_at ?? null,
-        unread: c.unread ?? 0,
-      })),
-      total_size: rows.length,
-    };
+        sender_id: userId, sender_type: 'user', receiver_id: cpId, receiver_type: cpType,
+        unread_message_count: Number(c.unread ?? 0), last_message_id: null,
+        last_message_time: c.last_message_at ?? c.created_at ?? null,
+        created_at: c.created_at ?? null, updated_at: c.last_message_at ?? null,
+        sender: myProfile, receiver,
+        last_message: { id: null, conversation_id: Number(c.mysql_id), sender_id: userId, message: (c.last_message as string) ?? '', is_seen: 1, files: [] },
+      };
+    }));
+    return { conversations, total_size: rows.length, limit, offset };
   }
 
   @Get('message/details')
@@ -615,27 +616,9 @@ export class CustomerExtrasController {
 
     let convId = body.conversation_id != null ? Number(body.conversation_id) : undefined;
     if (!convId && counterpartType && counterpartId) {
-      // Find-or-create a conversation row for the (user, counterpart) pair.
-      const existing = await this.mongo.findOne<{ mysql_id: number }>('conversations', {
-        user_id: userId,
-        counterpart_type: counterpartType,
-        counterpart_id: counterpartId,
-      });
-      if (existing) {
-        convId = Number(existing.mysql_id);
-      } else {
-        convId = await this.mongo.nextMysqlId('conversations');
-        await this.mongo.insertOne('conversations', {
-          mysql_id: convId,
-          user_id: userId,
-          counterpart_type: counterpartType,
-          counterpart_id: counterpartId,
-          counterpart_name: null,
-          last_message: text,
-          last_message_at: new Date(),
-          unread: 0,
-        });
-      }
+      // Unified participant-slot conversation so the restaurant/DM apps find it.
+      const cp = await resolveParticipant(this.mongo, counterpartType, counterpartId);
+      if (cp) convId = await findOrCreateConversation(this.mongo, { slot: 'user_id', id: userId }, cp, text);
     }
     if (!convId) return { message: 'conversation_id or counterpart required' };
     const msgId = await this.mongo.nextMysqlId('messages');
