@@ -751,18 +751,20 @@ let CustomerExtrasController = class CustomerExtrasController {
     }
     async refundReasons() {
         if (this.useMongo()) {
-            const rows = await this.mongo.findMany('refund_reasons', { status: true });
-            return rows.map((r) => ({ id: Number(r.mysql_id), reason: r.reason ?? null }));
+            const rows = await this.mongo.findMany('refund_reasons', { status: { $ne: false } }, { sort: { mysql_id: 1 } });
+            return { refund_reasons: rows.map((r) => ({ id: Number(r.mysql_id), reason: r.reason ?? null, status: 1 })) };
         }
         const rows = await this.prisma.refund_reasons.findMany({ where: { status: true } });
-        return rows.map((r) => ({ id: Number(r.id), reason: r.reason }));
+        return { refund_reasons: rows.map((r) => ({ id: Number(r.id), reason: r.reason, status: 1 })) };
     }
-    async refundRequest(req, body) {
-        if (!body.order_id)
-            return { message: 'order_id required' };
+    async refundRequest(req, body = {}) {
+        const b = body ?? {};
+        const orderId = Number(b.order_id ?? 0);
+        if (!orderId)
+            return { errors: [{ code: 'order_id', message: 'order_id required' }] };
         if (this.useMongo()) {
             const order = await this.mongo.findOne('orders', {
-                mysql_id: Number(body.order_id),
+                mysql_id: orderId,
                 mysql_user_id: Number(req.actor.id),
             });
             if (!order)
@@ -774,8 +776,8 @@ let CustomerExtrasController = class CustomerExtrasController {
                 mysql_order_id: order.mysql_id,
                 mysql_user_id: Number(req.actor.id),
                 order_status: order.order_status ?? null,
-                customer_reason: body.customer_reason ?? null,
-                customer_note: body.customer_note ?? null,
+                customer_reason: b.customer_reason ?? null,
+                customer_note: b.customer_note ?? null,
                 refund_amount: toNum(order.order_amount),
                 refund_status: 'pending',
                 refund_method: 'wallet',
@@ -784,7 +786,7 @@ let CustomerExtrasController = class CustomerExtrasController {
             });
             return { message: 'Refund request submitted' };
         }
-        const order = await this.prisma.orders.findFirst({ where: { id: BigInt(body.order_id), user_id: req.actor.id } });
+        const order = await this.prisma.orders.findFirst({ where: { id: BigInt(orderId), user_id: req.actor.id } });
         if (!order)
             return { message: 'order not found' };
         await this.prisma.refunds.create({
@@ -792,8 +794,8 @@ let CustomerExtrasController = class CustomerExtrasController {
                 order_id: order.id,
                 user_id: req.actor.id,
                 order_status: order.order_status,
-                customer_reason: body.customer_reason ?? null,
-                customer_note: body.customer_note ?? null,
+                customer_reason: b.customer_reason ?? null,
+                customer_note: b.customer_note ?? null,
                 refund_amount: order.order_amount,
                 refund_status: 'pending',
                 refund_method: 'wallet',
@@ -1118,6 +1120,7 @@ __decorate([
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('order/refund-request'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.AnyFilesInterceptor)({ limits: { fileSize: 10 * 1024 * 1024 } })),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),

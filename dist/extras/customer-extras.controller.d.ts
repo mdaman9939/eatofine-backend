@@ -468,15 +468,25 @@ export declare class CustomerExtrasController {
         message: string;
     };
     refundReasons(): Promise<{
-        id: number;
-        reason: string | null;
-    }[]>;
-    refundRequest(req: AuthedRequest, body: {
-        order_id?: number;
+        refund_reasons: {
+            id: number;
+            reason: string | null;
+            status: number;
+        }[];
+    }>;
+    refundRequest(req: AuthedRequest, body?: {
+        order_id?: number | string;
         customer_reason?: string;
         customer_note?: string;
     }): Promise<{
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+    } | {
         message: string;
+        errors?: undefined;
     }>;
     getOrderTax(): {
         total_tax_amount: number;

@@ -993,27 +993,34 @@ export class CustomerExtrasController {
     return { message: 'Payment method updated' };
   }
 
+  // The customer app's RefundModel parses json['refund_reasons'] — a BARE array
+  // left the dropdown empty ("Select an option" with nothing to pick).
   @Get('order/refund-reasons')
   async refundReasons() {
     if (this.useMongo()) {
-      const rows = await this.mongo.findMany<MongoRefundReasonDoc>('refund_reasons', { status: true });
-      return rows.map((r) => ({ id: Number(r.mysql_id), reason: r.reason ?? null }));
+      const rows = await this.mongo.findMany<MongoRefundReasonDoc>('refund_reasons', { status: { $ne: false } }, { sort: { mysql_id: 1 } });
+      return { refund_reasons: rows.map((r) => ({ id: Number(r.mysql_id), reason: r.reason ?? null, status: 1 })) };
     }
     const rows = await this.prisma.refund_reasons.findMany({ where: { status: true } });
-    return rows.map((r) => ({ id: Number(r.id), reason: r.reason }));
+    return { refund_reasons: rows.map((r) => ({ id: Number(r.id), reason: r.reason, status: 1 })) };
   }
 
+  // The app POSTs this as multipart/form-data (with an image[] proof), so
+  // without a multipart interceptor @Body() is undefined and order_id is lost.
   @HttpCode(200)
   @Post('order/refund-request')
+  @UseInterceptors(AnyFilesInterceptor({ limits: { fileSize: 10 * 1024 * 1024 } }))
   async refundRequest(
     @Req() req: AuthedRequest,
-    @Body() body: { order_id?: number; customer_reason?: string; customer_note?: string },
+    @Body() body: { order_id?: number | string; customer_reason?: string; customer_note?: string } = {},
   ) {
-    if (!body.order_id) return { message: 'order_id required' };
+    const b = body ?? {};
+    const orderId = Number(b.order_id ?? 0);
+    if (!orderId) return { errors: [{ code: 'order_id', message: 'order_id required' }] };
 
     if (this.useMongo()) {
       const order = await this.mongo.findOne<MongoOrderDoc>('orders', {
-        mysql_id: Number(body.order_id),
+        mysql_id: orderId,
         mysql_user_id: Number(req.actor!.id),
       });
       if (!order) return { message: 'order not found' };
@@ -1024,8 +1031,8 @@ export class CustomerExtrasController {
         mysql_order_id: order.mysql_id,
         mysql_user_id: Number(req.actor!.id),
         order_status: order.order_status ?? null,
-        customer_reason: body.customer_reason ?? null,
-        customer_note: body.customer_note ?? null,
+        customer_reason: b.customer_reason ?? null,
+        customer_note: b.customer_note ?? null,
         refund_amount: toNum(order.order_amount),
         refund_status: 'pending',
         refund_method: 'wallet',
@@ -1035,15 +1042,15 @@ export class CustomerExtrasController {
       return { message: 'Refund request submitted' };
     }
 
-    const order = await this.prisma.orders.findFirst({ where: { id: BigInt(body.order_id), user_id: req.actor!.id } });
+    const order = await this.prisma.orders.findFirst({ where: { id: BigInt(orderId), user_id: req.actor!.id } });
     if (!order) return { message: 'order not found' };
     await this.prisma.refunds.create({
       data: {
         order_id: order.id,
         user_id: req.actor!.id,
         order_status: order.order_status,
-        customer_reason: body.customer_reason ?? null,
-        customer_note: body.customer_note ?? null,
+        customer_reason: b.customer_reason ?? null,
+        customer_note: b.customer_note ?? null,
         refund_amount: order.order_amount,
         refund_status: 'pending',
         refund_method: 'wallet',
