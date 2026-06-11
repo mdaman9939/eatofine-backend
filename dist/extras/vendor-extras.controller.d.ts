@@ -1002,10 +1002,27 @@ export declare class VendorExtrasController {
         message: string;
     }>;
     vendorCouponView(idStr?: string): Promise<{}>;
-    walletPaymentList(): {
-        data: never[];
+    walletPaymentList(req: AuthedRequest, offsetQ?: string, limitQ?: string): Promise<{
         total_size: number;
-    };
+        limit: number;
+        offset: number;
+        transactions: {
+            id: number;
+            from_type: string;
+            from_id: number;
+            current_balance: number;
+            amount: number;
+            method: string;
+            ref: string;
+            created_at: string | null;
+            updated_at: string | null;
+            type: string;
+            created_by: string;
+            payment_method: string;
+            status: string;
+            payment_time: string | null;
+        }[];
+    }>;
     collectedCash(): {
         message: string;
     };
@@ -1086,8 +1103,12 @@ export declare class VendorExtrasController {
             id: number;
             amount: number;
             approved: {};
-            withdraw_method_id: {} | null;
-            created_at: {} | null;
+            status: string;
+            bank_name: string;
+            withdraw_method_id: number | null;
+            requested_at: string | null;
+            created_at: string | null;
+            updated_at: string | null;
         }[];
         total_size: number;
     }>;

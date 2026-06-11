@@ -122,13 +122,15 @@ let VendorExtrasController = class VendorExtrasController {
                     { mysql_vendor_id: vendorId },
                     ...(restaurantIds.length > 0 ? [{ mysql_restaurant_id: { $in: restaurantIds } }] : []),
                 ] });
-            const totalEarning = toNum(wallet?.total_earning) ?? 0;
-            const balance = toNum(wallet?.balance) ?? 0;
-            const cashInHands = toNum(wallet?.collected_cash) ?? 0;
-            const alreadyWithdrawn = toNum(wallet?.total_withdrawn) ?? 0;
-            const pendingWithdraw = toNum(wallet?.pending_withdraw) ?? 0;
+            let totalEarning = toNum(wallet?.total_earning);
+            let balance = toNum(wallet?.balance);
+            let cashInHands = toNum(wallet?.collected_cash);
+            const alreadyWithdrawn = toNum(wallet?.total_withdrawn);
+            const pendingWithdraw = toNum(wallet?.pending_withdraw);
+            const commissionMap = new Map(restaurants.map((r) => [Number(r.mysql_id), Number(r.comission ?? 0) || 10]));
             let todaysCount = 0, weekCount = 0, monthCount = 0, totalOrders = 0;
             let todaysEarn = 0, weekEarn = 0, monthEarn = 0;
+            let computedEarning = 0, computedCash = 0;
             if (restaurantIds.length > 0) {
                 const now = Date.now();
                 const dayMs = 86_400_000;
@@ -136,26 +138,44 @@ let VendorExtrasController = class VendorExtrasController {
                 totalOrders = orders.length;
                 for (const o of orders) {
                     const ts = o.created_at ? new Date(o.created_at).getTime() : 0;
-                    if (!Number.isFinite(ts))
+                    const delivered = o.order_status === 'delivered';
+                    const amount = toNum(o.order_amount);
+                    if (delivered) {
+                        const tax = toNum(o.total_tax_amount), delivery = toNum(o.delivery_charge);
+                        const coupon = toNum(o.coupon_discount_amount), restDisc = toNum(o.restaurant_discount_amount), extra = toNum(o.additional_charge);
+                        let item = amount + coupon + restDisc - tax - delivery - extra;
+                        if (item <= 0)
+                            item = Math.max(0, amount - tax - delivery) || amount;
+                        const rate = commissionMap.get(Number(o.mysql_restaurant_id)) ?? 10;
+                        computedEarning += item - (item * rate) / 100;
+                        if (String(o.payment_method) === 'cash_on_delivery')
+                            computedCash += amount;
+                    }
+                    if (!Number.isFinite(ts) || ts === 0)
                         continue;
                     const age = now - ts;
-                    const amount = toNum(o.order_amount) ?? 0;
                     if (age <= dayMs) {
                         todaysCount++;
-                        if (o.order_status === 'delivered')
+                        if (delivered)
                             todaysEarn += amount;
                     }
                     if (age <= 7 * dayMs) {
                         weekCount++;
-                        if (o.order_status === 'delivered')
+                        if (delivered)
                             weekEarn += amount;
                     }
                     if (age <= 30 * dayMs) {
                         monthCount++;
-                        if (o.order_status === 'delivered')
+                        if (delivered)
                             monthEarn += amount;
                     }
                 }
+            }
+            const round2 = (n) => Math.round(n * 100) / 100;
+            if (totalEarning <= 0 && computedEarning > 0) {
+                totalEarning = round2(computedEarning);
+                cashInHands = round2(computedCash);
+                balance = round2(Math.max(0, computedEarning - alreadyWithdrawn - pendingWithdraw));
             }
             const vCreatedAt = v.created_at;
             const memberSince = vCreatedAt
@@ -1366,7 +1386,52 @@ let VendorExtrasController = class VendorExtrasController {
         const c = await this.mongo.findByMysqlId('coupons', id);
         return c ? this.shapeCoupon(c) : {};
     }
-    walletPaymentList() { return { data: [], total_size: 0 }; }
+    async walletPaymentList(req, offsetQ, limitQ) {
+        if (!this.useMongo())
+            return { total_size: 0, limit: 10, offset: 1, transactions: [] };
+        const vendorId = Number(req.actor.id);
+        const restaurants = await this.mongo.findMany('restaurants', { mysql_vendor_id: vendorId });
+        const restaurantIds = restaurants.map((r) => Number(r.mysql_id));
+        if (restaurantIds.length === 0)
+            return { total_size: 0, limit: 10, offset: 1, transactions: [] };
+        const commissionMap = new Map(restaurants.map((r) => [Number(r.mysql_id), Number(r.comission ?? 0) || 10]));
+        const limit = parseInt(limitQ ?? '25', 10) || 25;
+        const offset = parseInt(offsetQ ?? '1', 10) || 1;
+        const orders = await this.mongo.findMany('orders', { mysql_restaurant_id: { $in: restaurantIds }, order_status: 'delivered' }, { sort: { mysql_id: -1 } });
+        const round2 = (n) => Math.round(n * 100) / 100;
+        let running = 0;
+        const all = orders.map((o) => {
+            const amount = toNum(o.order_amount);
+            const tax = toNum(o.total_tax_amount), delivery = toNum(o.delivery_charge);
+            const coupon = toNum(o.coupon_discount_amount), restDisc = toNum(o.restaurant_discount_amount), extra = toNum(o.additional_charge);
+            let item = amount + coupon + restDisc - tax - delivery - extra;
+            if (item <= 0)
+                item = Math.max(0, amount - tax - delivery) || amount;
+            const rate = commissionMap.get(Number(o.mysql_restaurant_id)) ?? 10;
+            const earn = round2(item - (item * rate) / 100);
+            running = round2(running + earn);
+            const created = (o.created_at ?? o.delivered ?? null);
+            const method = String(o.payment_method ?? 'cash_on_delivery');
+            return {
+                id: Number(o.mysql_id),
+                from_type: 'order',
+                from_id: Number(o.mysql_id),
+                current_balance: running,
+                amount: earn,
+                method,
+                ref: `#${Number(o.mysql_id)}`,
+                created_at: created,
+                updated_at: created,
+                type: 'credit',
+                created_by: 'order',
+                payment_method: method,
+                status: 'success',
+                payment_time: created,
+            };
+        });
+        const page = all.slice(Math.max(0, (offset - 1) * limit), Math.max(0, (offset - 1) * limit) + limit);
+        return { total_size: all.length, limit, offset, transactions: page };
+    }
     collectedCash() { return { message: 'recorded' }; }
     walletAdjustment() { return { message: 'recorded' }; }
     async activeWithdrawalMethods() {
@@ -1467,14 +1532,31 @@ let VendorExtrasController = class VendorExtrasController {
             return { data: [], total_size: 0 };
         const filter = { mysql_vendor_id: Number(req.actor.id) };
         const rows = await this.mongo.findMany('withdraw_requests', filter, { sort: { mysql_id: -1 }, limit: 100 });
+        const methods = await this.mongo.findMany('withdrawal_methods', {});
+        const methodMap = new Map(methods.map((m) => [Number(m.mysql_id), m.method_name ?? null]));
+        const statusOf = (a) => {
+            if (a === true || a === 1 || a === '1')
+                return 'approved';
+            if (a === 2 || a === '2')
+                return 'denied';
+            return 'pending';
+        };
         return {
-            data: rows.map((r) => ({
-                id: Number(r.mysql_id),
-                amount: toNum(r.amount),
-                approved: r.approved ?? 0,
-                withdraw_method_id: r.mysql_withdraw_method_id ?? r.withdraw_method_id ?? null,
-                created_at: r.created_at ?? null,
-            })),
+            data: rows.map((r) => {
+                const methodId = Number(r.mysql_withdraw_method_id ?? r.withdrawal_method_id ?? r.withdraw_method_id ?? 0);
+                const created = (r.created_at ?? null);
+                return {
+                    id: Number(r.mysql_id),
+                    amount: toNum(r.amount),
+                    approved: r.approved ?? 0,
+                    status: statusOf(r.approved),
+                    bank_name: methodMap.get(methodId) ?? 'Bank Transfer',
+                    withdraw_method_id: methodId || null,
+                    requested_at: created,
+                    created_at: created,
+                    updated_at: (r.updated_at ?? created),
+                };
+            }),
             total_size: rows.length,
         };
     }
@@ -2456,9 +2538,12 @@ __decorate([
 ], VendorExtrasController.prototype, "vendorCouponView", null);
 __decorate([
     (0, common_1.Get)('wallet-payment-list'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('offset')),
+    __param(2, (0, common_1.Query)('limit')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, String, String]),
+    __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "walletPaymentList", null);
 __decorate([
     (0, common_1.HttpCode)(200),
