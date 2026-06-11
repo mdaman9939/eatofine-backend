@@ -101,6 +101,8 @@ export declare class VendorExtrasController {
             delivery: boolean | null;
             take_away: boolean | null;
             restaurant_model: string | null;
+            opening_closing_status: {};
+            same_time_for_every_day: {};
         }[];
     } | {
         id: number;
@@ -167,11 +169,8 @@ export declare class VendorExtrasController {
         message: string;
     }>;
     toggleOpen(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
+        active?: {} | null | undefined;
         message: string;
-        active: boolean;
-    } | {
-        message: string;
-        active?: undefined;
     }>;
     announce(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
         message: string;

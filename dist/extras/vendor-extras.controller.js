@@ -276,6 +276,8 @@ let VendorExtrasController = class VendorExtrasController {
                     delivery: r.delivery ?? null,
                     take_away: r.take_away ?? null,
                     restaurant_model: r.restaurant_model ?? null,
+                    opening_closing_status: r.opening_closing_status ?? false,
+                    same_time_for_every_day: r.same_time_for_every_day ?? false,
                 })),
             };
         }
@@ -342,11 +344,21 @@ let VendorExtrasController = class VendorExtrasController {
         if (this.useMongo()) {
             const r = await this.vendorRestaurant(req);
             if (r) {
-                const next = body.active !== undefined ? !!Number(body.active)
-                    : body.status !== undefined ? !!Number(body.status)
-                        : !(r.active ?? true);
-                await this.mongo.updateOne('restaurants', { mysql_id: r.mysql_id }, { active: next, updated_at: new Date() });
-                return { message: 'updated', active: next };
+                const update = { updated_at: new Date() };
+                if (body.opening_closing_status !== undefined) {
+                    update.opening_closing_status = !!Number(body.opening_closing_status);
+                }
+                if (body.same_time_for_every_day !== undefined) {
+                    update.same_time_for_every_day = !!Number(body.same_time_for_every_day);
+                }
+                if (body.active !== undefined || body.status !== undefined) {
+                    update.active = body.active !== undefined ? !!Number(body.active) : !!Number(body.status);
+                }
+                if (Object.keys(update).length === 1) {
+                    update.active = !(r.active ?? true);
+                }
+                await this.mongo.updateOne('restaurants', { mysql_id: r.mysql_id }, update);
+                return { message: 'updated', ...(update.active !== undefined ? { active: update.active } : {}) };
             }
         }
         return { message: 'updated' };

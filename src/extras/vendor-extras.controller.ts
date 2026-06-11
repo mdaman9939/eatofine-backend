@@ -411,6 +411,10 @@ export class VendorExtrasController {
           delivery: r.delivery ?? null,
           take_away: r.take_away ?? null,
           restaurant_model: r.restaurant_model ?? null,
+          // Schedule-mode radio state — without these the app reads null and
+          // resets "Always Open" back to "Specific Time" after every update.
+          opening_closing_status: (r as unknown as Record<string, unknown>).opening_closing_status ?? false,
+          same_time_for_every_day: (r as unknown as Record<string, unknown>).same_time_for_every_day ?? false,
         })),
       };
     }
@@ -501,12 +505,26 @@ export class VendorExtrasController {
     if (this.useMongo()) {
       const r = await this.vendorRestaurant(req);
       if (r) {
-        // Accept either an explicit `active`/`status` value or a plain toggle.
-        const next = body.active !== undefined ? !!Number(body.active)
-          : body.status !== undefined ? !!Number(body.status)
-          : !(r.active ?? true);
-        await this.mongo.updateOne('restaurants', { mysql_id: r.mysql_id }, { active: next, updated_at: new Date() });
-        return { message: 'updated', active: next };
+        const update: Record<string, unknown> = { updated_at: new Date() };
+        // Schedule mode radio — "Always Open" (1) vs "Specific Time" (0). The
+        // app POSTs opening_closing_status here; storing + returning it (see
+        // profile) is what makes the choice stick instead of snapping back.
+        if (body.opening_closing_status !== undefined) {
+          update.opening_closing_status = !!Number(body.opening_closing_status);
+        }
+        if (body.same_time_for_every_day !== undefined) {
+          update.same_time_for_every_day = !!Number(body.same_time_for_every_day);
+        }
+        // Manual availability toggle (top "Status" switch) — active/status.
+        if (body.active !== undefined || body.status !== undefined) {
+          update.active = body.active !== undefined ? !!Number(body.active) : !!Number(body.status);
+        }
+        // Nothing recognized → plain availability toggle (legacy behavior).
+        if (Object.keys(update).length === 1) {
+          update.active = !(r.active ?? true);
+        }
+        await this.mongo.updateOne('restaurants', { mysql_id: r.mysql_id }, update);
+        return { message: 'updated', ...(update.active !== undefined ? { active: update.active } : {}) };
       }
     }
     return { message: 'updated' };
