@@ -1427,7 +1427,19 @@ let VendorExtrasController = class VendorExtrasController {
         const restaurant = await this.vendorRestaurant(req);
         if (!restaurant)
             return { errors: [{ code: 'restaurant', message: 'restaurant not found' }] };
-        if (!body.title || !body.code) {
+        let title = body.title ? String(body.title) : '';
+        if (!title && body.translations !== undefined) {
+            try {
+                const arr = typeof body.translations === 'string' ? JSON.parse(body.translations) : body.translations;
+                if (Array.isArray(arr)) {
+                    const en = arr.find((t) => t && t.key === 'title' && (t.locale === 'en' || !t.locale) && t.value);
+                    const any = arr.find((t) => t && t.key === 'title' && t.value);
+                    title = String((en?.value ?? any?.value) ?? '');
+                }
+            }
+            catch { }
+        }
+        if (!title || !body.code) {
             return { errors: [{ code: 'input', message: 'title and code are required' }] };
         }
         const dup = await this.mongo.findOne('coupons', { code: String(body.code) });
@@ -1437,7 +1449,7 @@ let VendorExtrasController = class VendorExtrasController {
         const now = new Date();
         await this.mongo.insertOne('coupons', {
             mysql_id: nextId,
-            title: String(body.title),
+            title,
             code: String(body.code),
             coupon_type: body.coupon_type ? String(body.coupon_type) : 'default',
             mysql_restaurant_id: Number(restaurant.mysql_id),

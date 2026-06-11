@@ -1826,7 +1826,21 @@ export class VendorExtrasController {
     if (!this.useMongo()) return { message: 'coupon created' };
     const restaurant = await this.vendorRestaurant(req);
     if (!restaurant) return { errors: [{ code: 'restaurant', message: 'restaurant not found' }] };
-    if (!body.title || !body.code) {
+    // The restaurant app sends the title INSIDE a `translations` JSON string
+    // ([{locale,key:'title',value}]), not as a plain `title` — so the coupon
+    // silently never saved. Derive the title from there when `title` is absent.
+    let title = body.title ? String(body.title) : '';
+    if (!title && body.translations !== undefined) {
+      try {
+        const arr = typeof body.translations === 'string' ? JSON.parse(body.translations) : body.translations;
+        if (Array.isArray(arr)) {
+          const en = arr.find((t) => t && t.key === 'title' && (t.locale === 'en' || !t.locale) && t.value);
+          const any = arr.find((t) => t && t.key === 'title' && t.value);
+          title = String((en?.value ?? any?.value) ?? '');
+        }
+      } catch { /* ignore malformed translations */ }
+    }
+    if (!title || !body.code) {
       return { errors: [{ code: 'input', message: 'title and code are required' }] };
     }
     const dup = await this.mongo.findOne<{ mysql_id: number }>('coupons', { code: String(body.code) });
@@ -1835,7 +1849,7 @@ export class VendorExtrasController {
     const now = new Date();
     await this.mongo.insertOne('coupons', {
       mysql_id: nextId,
-      title: String(body.title),
+      title,
       code: String(body.code),
       coupon_type: body.coupon_type ? String(body.coupon_type) : 'default',
       // Tie the coupon to BOTH the restaurant and the owning vendor so the
