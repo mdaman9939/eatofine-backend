@@ -159,10 +159,22 @@ let CatalogExtrasController = class CatalogExtrasController {
     async cuisineAlias() {
         if (this.useMongo()) {
             const rows = await this.mongo.findMany('cuisines', { status: true });
-            return rows.map((r) => ({ id: Number(r.mysql_id), name: r.name, image: r.image, slug: r.slug }));
+            return rows.map((r) => ({
+                id: Number(r.mysql_id),
+                name: r.name,
+                image: r.image,
+                image_full_url: (0, storage_url_1.storageFullUrl)('cuisine', r.image ?? null),
+                slug: r.slug,
+            }));
         }
         const rows = await this.prisma.cuisines.findMany({ where: { status: true } });
-        return rows.map((r) => ({ id: Number(r.id), name: r.name, image: r.image, slug: r.slug }));
+        return rows.map((r) => ({
+            id: Number(r.id),
+            name: r.name,
+            image: r.image,
+            image_full_url: (0, storage_url_1.storageFullUrl)('cuisine', r.image ?? null),
+            slug: r.slug,
+        }));
     }
     async cuisineRestaurants(idStr) {
         const id = parseInt(idStr ?? '', 10);

@@ -163,12 +163,26 @@ export class CatalogExtrasController {
   // ── Cuisines (alias) ─────────────────────────────────────────────
   @Get('cuisine')
   async cuisineAlias() {
+    // The customer app's CuisineModel reads `image_full_url` — returning only
+    // the raw `image` left every cuisine showing a grey placeholder.
     if (this.useMongo()) {
       const rows = await this.mongo.findMany<Record<string, unknown>>('cuisines', { status: true });
-      return rows.map((r) => ({ id: Number(r.mysql_id), name: r.name, image: r.image, slug: r.slug }));
+      return rows.map((r) => ({
+        id: Number(r.mysql_id),
+        name: r.name,
+        image: r.image,
+        image_full_url: storageFullUrl('cuisine', (r.image as string | null | undefined) ?? null),
+        slug: r.slug,
+      }));
     }
     const rows = await this.prisma.cuisines.findMany({ where: { status: true } });
-    return rows.map((r) => ({ id: Number(r.id), name: r.name, image: r.image, slug: r.slug }));
+    return rows.map((r) => ({
+      id: Number(r.id),
+      name: r.name,
+      image: r.image,
+      image_full_url: storageFullUrl('cuisine', r.image ?? null),
+      slug: r.slug,
+    }));
   }
 
   @Get('cuisine/get_restaurants')

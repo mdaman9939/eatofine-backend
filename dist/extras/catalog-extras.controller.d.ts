@@ -43,6 +43,7 @@ export declare class CatalogExtrasController {
         id: number;
         name: unknown;
         image: unknown;
+        image_full_url: string | null;
         slug: unknown;
     }[]>;
     cuisineRestaurants(idStr?: string): Promise<{
