@@ -225,6 +225,11 @@ export class AdminController {
     return this.admin.listPendingDeliveryMen();
   }
 
+  @Get('delivery-men/denied')
+  deliveryMenDenied() {
+    return this.admin.listDeniedDeliveryMen();
+  }
+
   @Get('delivery-men/:id')
   deliveryManDetail(@Param('id', ParseIntPipe) id: number) {
     return this.admin.getDeliveryMan(id);

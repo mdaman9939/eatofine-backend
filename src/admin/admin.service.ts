@@ -1272,6 +1272,7 @@ export class AdminService {
         vehicle_id: d.vehicle_id ?? null,
         shift_id: d.shift_id ?? null,
         dob: d.dob ?? null,
+        image_full_url: storageFullUrl('delivery-man', (d.image as string | null | undefined) ?? null),
       },
     };
   }
@@ -2883,6 +2884,38 @@ export class AdminService {
         vehicle_id: r.vehicle_id ?? null,
         submitted_at: r.created_at ?? null,
         status: r.application_status ?? 'pending',
+      })),
+    };
+  }
+
+  /** Delivery men whose application was denied/rejected — for the admin
+   *  "Denied Deliveryman" tab. Matches both wordings the codebase produces
+   *  ('rejected' from the reject button, 'denied' from the approval endpoint). */
+  async listDeniedDeliveryMen() {
+    if (!this.useMongo()) return { items: [], total: 0 };
+    const rows = await this.mongo.findMany<{
+      mysql_id: number; f_name?: string | null; l_name?: string | null;
+      phone?: string | null; email?: string | null;
+      application_status?: string | null; vehicle_id?: number | null;
+      mysql_zone_id?: number | null; type?: string | null;
+      rejection_reason?: string | null; created_at?: Date | null; updated_at?: Date | null;
+    }>('delivery_men',
+      { application_status: { $in: ['denied', 'rejected'] } },
+      { sort: { mysql_id: -1 }, limit: 200 },
+    );
+    return {
+      total: rows.length,
+      items: rows.map((r) => ({
+        id: r.mysql_id,
+        name: `${r.f_name ?? ''} ${r.l_name ?? ''}`.trim() || '—',
+        email: r.email ?? null,
+        phone: r.phone ?? null,
+        zone_id: r.mysql_zone_id ?? null,
+        vehicle_id: r.vehicle_id ?? null,
+        job_type: r.type ?? null,
+        reason: r.rejection_reason ?? null,
+        denied_at: r.updated_at ?? r.created_at ?? null,
+        status: r.application_status ?? 'denied',
       })),
     };
   }
