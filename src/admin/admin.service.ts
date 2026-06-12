@@ -1273,6 +1273,10 @@ export class AdminService {
         shift_id: d.shift_id ?? null,
         dob: d.dob ?? null,
         image_full_url: storageFullUrl('delivery-man', (d.image as string | null | undefined) ?? null),
+        license_image_full_url: storageFullUrl('delivery-man', (d.license_image as string | null | undefined) ?? null),
+        identity_image_full_urls: Array.isArray(d.identity_image)
+          ? (d.identity_image as string[]).map((f) => storageFullUrl('delivery-man', f)).filter(Boolean)
+          : [],
       },
     };
   }
