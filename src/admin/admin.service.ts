@@ -740,6 +740,8 @@ export class AdminService {
           minimum_order: Number(r.minimum_order ?? 0),
           tax: Number(r.tax ?? 0),
           minimum_shipping_charge: Number(r.minimum_shipping_charge ?? 0),
+          logo_full_url: storageFullUrl('restaurant', r.logo ?? null),
+          cover_photo_full_url: storageFullUrl('restaurant/cover', ((r as Record<string, unknown>).cover_photo as string | null | undefined) ?? null),
         },
         vendor: vendor
           ? {

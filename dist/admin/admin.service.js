@@ -669,6 +669,8 @@ let AdminService = class AdminService {
                     minimum_order: Number(r.minimum_order ?? 0),
                     tax: Number(r.tax ?? 0),
                     minimum_shipping_charge: Number(r.minimum_shipping_charge ?? 0),
+                    logo_full_url: (0, storage_url_1.storageFullUrl)('restaurant', r.logo ?? null),
+                    cover_photo_full_url: (0, storage_url_1.storageFullUrl)('restaurant/cover', r.cover_photo ?? null),
                 },
                 vendor: vendor
                     ? {

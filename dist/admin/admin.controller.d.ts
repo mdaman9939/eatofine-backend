@@ -370,6 +370,8 @@ export declare class AdminController {
             minimum_order: number;
             tax: number;
             minimum_shipping_charge: number;
+            logo_full_url: string | null;
+            cover_photo_full_url: string | null;
             mysql_id: number;
             name: string | null;
             email: string | null;
