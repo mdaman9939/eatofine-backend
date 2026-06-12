@@ -672,13 +672,23 @@ export class AdminController {
     @Query('to') to?: string,
     @Query('zone_id') zoneId?: string,
     @Query('restaurant_id') restaurantId?: string,
+    @Query('campaign') campaign?: string,
   ) {
+    // campaign: '1'/'true' → only campaign orders, '0'/'false' → only regular
+    // orders, absent → all orders (unchanged behaviour).
+    const campaignFlag =
+      campaign === '1' || campaign === 'true'
+        ? true
+        : campaign === '0' || campaign === 'false'
+          ? false
+          : undefined;
     return this.admin.orderReport({
       days: toInt(days, 30),
       from: from || undefined,
       to: to || undefined,
       zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
       restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
+      campaign: campaignFlag,
     });
   }
 

@@ -3907,7 +3907,7 @@ export class AdminService {
   /** Per-order Order Report (StackFood's "Regular Order Report"). Like the
    *  transaction report but covers ALL orders (any status) and adds order-status
    *  stat counts for the cards. */
-  async orderReport(opts: ReportFilterOpts & { days?: number } = {}) {
+  async orderReport(opts: ReportFilterOpts & { days?: number; campaign?: boolean } = {}) {
     if (!this.useMongo()) return { total: 0, rows: [], status_counts: {} as Record<string, number> };
     const match: Record<string, unknown> = {};
     if (opts.from || opts.to) {
@@ -3918,6 +3918,23 @@ export class AdminService {
     }
     if (opts.zoneId) match.mysql_zone_id = Number(opts.zoneId);
     if (opts.restaurantId) match.mysql_restaurant_id = Number(opts.restaurantId);
+
+    // Campaign vs regular split. A "campaign order" is one whose line items
+    // came from an item campaign (order_details.item_campaign_id > 0). When
+    // `campaign` is set we restrict (true) or exclude (false) those orders.
+    if (opts.campaign !== undefined) {
+      const campDetails = await this.mongo.findMany<{ order_id?: number }>(
+        'order_details', { item_campaign_id: { $gt: 0 } }, { projection: { order_id: 1 } as Record<string, 0 | 1> },
+      );
+      const campaignOrderIds = Array.from(new Set(campDetails.map((d) => Number(d.order_id ?? 0)).filter((n) => n > 0)));
+      if (opts.campaign) {
+        // Campaign report: only those orders (empty set => match nothing).
+        match.mysql_id = { $in: campaignOrderIds.length ? campaignOrderIds : [-1] };
+      } else if (campaignOrderIds.length) {
+        // Regular report: everything except campaign orders.
+        match.mysql_id = { $nin: campaignOrderIds };
+      }
+    }
 
     const orders = await this.mongo.findMany<Record<string, unknown>>('orders', match, { sort: { mysql_id: -1 }, limit: 500 });
     const restIds = Array.from(new Set(orders.map((o) => Number(o.mysql_restaurant_id ?? 0)).filter((n) => n > 0)));
