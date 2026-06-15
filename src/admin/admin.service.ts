@@ -5165,7 +5165,10 @@ AdminService.prototype.createAdvertisement = async function (this: AdminService,
       cover_image: body.cover_image ?? null,
       start_date: body.start_date ? new Date(body.start_date) : null,
       end_date: body.end_date ? new Date(body.end_date) : null,
-      status: 'pending',
+      // Admin-created ads are auto-approved — only vendor/restaurant ads need
+      // admin approval (those stay 'pending' from the vendor endpoint).
+      status: 'approved',
+      created_by_type: 'admin',
       is_paid: false,
       created_at: now,
       updated_at: now,
