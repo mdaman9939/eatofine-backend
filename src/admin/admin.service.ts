@@ -5122,6 +5122,8 @@ AdminService.prototype.listAdvertisements = async function (this: AdminService, 
         restaurant_id: restaurantId,
         restaurant_name: restaurantId !== null ? (restNames.get(restaurantId) ?? null) : null,
         add_type: (r.add_type as string) ?? (r.type as string) ?? null,
+        image_full_url: storageFullUrl('advertisement', (r.image as string | null | undefined) ?? null),
+        cover_image_full_url: storageFullUrl('advertisement', (r.cover_image as string | null | undefined) ?? null),
       };
     }), mtotal, limit, offset);
   }
