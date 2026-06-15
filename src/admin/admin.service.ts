@@ -2367,6 +2367,9 @@ export class AdminService {
     identity_number?: string;
     state?: string;
     license_document?: string;
+    // Per-category document uploads from the Add Restaurant form arrive as
+    // `doc_cat_<categoryId>: filename` keys (configured in Document master).
+    [key: string]: unknown;
   }) {
     if (!body.name) throw new BadRequestException({ errors: [{ code: 'name', message: 'Restaurant name is required' }] });
     if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
@@ -2424,12 +2427,24 @@ export class AdminService {
     const trName = nameTranslations.find((t) => (t.locale === 'en' || t.locale === 'default') && t.key === 'name')?.value;
     const trAddress = addressTranslations.find((t) => (t.locale === 'en' || t.locale === 'default') && t.key === 'address')?.value;
 
+    // Per-category document uploads (Document master): keys look like
+    // `doc_cat_<categoryId>: "<filename>"`. Keep the category link AND fold the
+    // files into the flat additional_documents list (used by the detail view).
+    const categoryDocs = Object.entries(body)
+      .filter(([k, v]) => /^doc_cat_\d+$/.test(k) && typeof v === 'string' && v)
+      .map(([k, v]) => ({ category_id: Number(k.slice('doc_cat_'.length)), file: v as string }));
+    const flatDocs = [
+      ...(Array.isArray(body.documents) ? body.documents : []),
+      ...categoryDocs.map((d) => d.file),
+    ];
+
     const nextId = await this.mongo.nextMysqlId('restaurants');
     await this.mongo.insertOne('restaurants', {
       mysql_id: nextId,
       name: trName ?? body.name,
       translations,
-      additional_documents: Array.isArray(body.documents) ? body.documents : [],
+      additional_documents: flatDocs,
+      restaurant_documents: categoryDocs,
       // Additional data — StackFood's id number / state / license document.
       identity_number: body.identity_number ?? null,
       state: body.state ?? null,
