@@ -6985,19 +6985,54 @@ AdminService.prototype.deliverymanEarningReport = async function (this: AdminSer
       },
       { $unwind: { path: '$dm', preserveNullAndEmptyArrays: true } },
     ]);
+
+    const dmIds = rows.map((g) => Number(g._id)).filter((n) => Number.isFinite(n));
+
+    // Incentive = sum of APPROVED incentive claims credited to the rider.
+    const incentiveByDm = new Map<number, number>();
+    if (dmIds.length) {
+      const incRows = await this['mongo'].aggregate<{ _id: number; total: number }>(
+        'dm_incentives',
+        [
+          { $match: { dm_id: { $in: dmIds }, status: 'approved' } },
+          { $group: { _id: '$dm_id', total: { $sum: '$claim_amount' } } },
+        ],
+      );
+      for (const r of incRows) incentiveByDm.set(Number(r._id), Number(r.total ?? 0));
+    }
+
+    // Bonus = derived from the Bonus & Incentive config: a rider who completed
+    // at least the threshold deliveries earns the configured bonus amount.
+    const cfgRows = await this['mongo'].findMany<{ key: string; value: string | null }>(
+      'business_settings',
+      { key: { $in: ['dm_incentive_enabled', 'dm_incentive_bonus_threshold', 'dm_incentive_bonus_amount'] } },
+    );
+    const cfg = new Map(cfgRows.map((r) => [r.key, r.value]));
+    const bonusEnabled = /^(1|true|yes|on)$/i.test(String(cfg.get('dm_incentive_enabled') ?? '1'));
+    const bonusThreshold = Number(cfg.get('dm_incentive_bonus_threshold') ?? 0) || 0;
+    const bonusAmount = Number(cfg.get('dm_incentive_bonus_amount') ?? 0) || 0;
+
     return {
-      top_delivery_men: rows.map((g) => ({
-        delivery_man_id: g._id !== null && g._id !== undefined ? Number(g._id) : null,
-        name: g.dm ? `${g.dm.f_name ?? ''} ${g.dm.l_name ?? ''}`.trim() : null,
-        phone: g.dm?.phone ?? null,
-        zone_id:
-          g.dm && g.dm.mysql_zone_id !== null && g.dm.mysql_zone_id !== undefined
-            ? Number(g.dm.mysql_zone_id)
-            : null,
-        deliveries: Number(g.deliveries ?? 0),
-        total_tips: Number(g.total_tips ?? 0),
-        total_delivery_charges: Number(g.total_delivery_charges ?? 0),
-      })),
+      top_delivery_men: rows.map((g) => {
+        const id = g._id !== null && g._id !== undefined ? Number(g._id) : null;
+        const deliveries = Number(g.deliveries ?? 0);
+        const incentive = id !== null ? (incentiveByDm.get(id) ?? 0) : 0;
+        const bonus = bonusEnabled && bonusThreshold > 0 && deliveries >= bonusThreshold ? bonusAmount : 0;
+        return {
+          delivery_man_id: id,
+          name: g.dm ? `${g.dm.f_name ?? ''} ${g.dm.l_name ?? ''}`.trim() : null,
+          phone: g.dm?.phone ?? null,
+          zone_id:
+            g.dm && g.dm.mysql_zone_id !== null && g.dm.mysql_zone_id !== undefined
+              ? Number(g.dm.mysql_zone_id)
+              : null,
+          deliveries,
+          total_tips: Number(g.total_tips ?? 0),
+          total_delivery_charges: Number(g.total_delivery_charges ?? 0),
+          total_incentive: incentive,
+          total_bonus: bonus,
+        };
+      }),
     };
   }
   const groups = await this['prisma'].orders.groupBy({
@@ -7027,6 +7062,8 @@ AdminService.prototype.deliverymanEarningReport = async function (this: AdminSer
         deliveries: g._count._all,
         total_tips: Number(g._sum.dm_tips ?? 0),
         total_delivery_charges: Number(g._sum.delivery_charge ?? 0),
+        total_incentive: 0,
+        total_bonus: 0,
       };
     }),
   };
