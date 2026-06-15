@@ -481,6 +481,11 @@ export class CustomerExtrasController {
   @Post('loyalty-point/point-transfer')
   async pointTransfer(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
     if (!this.useMongo()) return { message: 'Not available in demo' };
+    // Honour the admin's loyalty on/off switch — block redemption when off.
+    const lpStatus = await this.mongo.findOne<{ value?: string | null }>('business_settings', { key: 'loyalty_point_status' });
+    if (lpStatus && lpStatus.value != null && !/^(1|true|yes|on)$/i.test(String(lpStatus.value))) {
+      return { errors: [{ code: 'loyalty', message: 'Loyalty points are currently disabled' }] };
+    }
     const userId = Number(req.actor!.id);
     const points = Number(body.point ?? body.points ?? 0);
     if (!Number.isFinite(points) || points <= 0) return { errors: [{ code: 'point', message: 'Enter a valid point amount' }] };
