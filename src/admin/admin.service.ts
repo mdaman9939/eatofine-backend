@@ -6733,11 +6733,53 @@ AdminService.prototype.listRefunds = async function (this: AdminService, opts) {
 
 AdminService.prototype.updateRefundStatus = async function (this: AdminService, id, status, admin_note) {
   if (this['useMongo']()) {
-    const r = await this['mongo'].findByMysqlId<{ mysql_id: number }>('refunds', Number(id));
+    const r = await this['mongo'].findByMysqlId<Record<string, unknown>>('refunds', Number(id));
     if (!r) throw new NotFoundException({ errors: [{ code: 'refund', message: 'not found' }] });
     const data: Record<string, unknown> = { refund_status: status, updated_at: new Date() };
     if (admin_note !== undefined) data.admin_note = admin_note;
     await this['mongo'].updateOne('refunds', { mysql_id: Number(id) }, data);
+
+    // ── Auto-generate the credit note ────────────────────────────────────
+    // Every approved/completed refund issues a credit note automatically
+    // (reversing the original GST + delivery), so admins never do it by hand.
+    // Idempotent: one credit note per refund.
+    if (status === 'approved' || status === 'completed') {
+      const orderId = Number(r.order_id ?? r.mysql_order_id ?? 0);
+      const refundAmount = Number(r.refund_amount ?? 0);
+      if (orderId > 0 && refundAmount > 0) {
+        const existing = await this['mongo'].findOne<{ mysql_id: number }>('credit_notes', { refund_id: Number(id) });
+        if (!existing) {
+          const order = await this['mongo'].findByMysqlId<{
+            mysql_id: number; mysql_user_id?: number; mysql_restaurant_id?: number;
+            total_tax_amount?: number; delivery_charge?: number;
+          }>('orders', orderId);
+          const taxReversed = Number(order?.total_tax_amount ?? 0);
+          const delivReversed = Number(order?.delivery_charge ?? 0);
+          const total = refundAmount + taxReversed + delivReversed;
+          const today = new Date();
+          const cnNumber = `CN-${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}-${orderId}R${id}`;
+          const cnId = await this['mongo'].nextMysqlId('credit_notes');
+          await this['mongo'].insertOne('credit_notes', {
+            mysql_id: cnId,
+            credit_note_number: cnNumber,
+            refund_id: Number(id),
+            order_id: orderId,
+            customer_id: Number(order?.mysql_user_id ?? r.user_id ?? 0),
+            restaurant_id: order?.mysql_restaurant_id != null ? Number(order.mysql_restaurant_id) : null,
+            reason: (r.customer_reason as string) ?? 'Refund',
+            refund_amount: refundAmount,
+            tax_reversed: taxReversed,
+            delivery_reversed: delivReversed,
+            total_credit: total,
+            status: 'issued',
+            notes: 'Auto-issued on refund ' + status,
+            issued_by: null,
+            created_at: today,
+            updated_at: today,
+          });
+        }
+      }
+    }
     return { ok: true, id, status };
   }
   const r = await this['prisma'].refunds.findUnique({ where: { id: BigInt(id) }, select: { id: true } });
