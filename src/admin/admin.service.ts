@@ -4658,7 +4658,9 @@ declare module './admin.service' {
     updateAdminRole(id: number, body: { name?: string; modules?: string; status?: boolean }): Promise<unknown>;
     deleteAdminRole(id: number): Promise<unknown>;
     listSubscriptionPackages(): Promise<unknown>;
-    createSubscriptionPackage(body: { package_name: string; price: number; validity: number; max_order?: string; max_product?: string }): Promise<unknown>;
+    createSubscriptionPackage(body: { package_name: string; price: number; validity: number; max_order?: string; max_product?: string; pos?: boolean; mobile_app?: boolean; chat?: boolean; review?: boolean; self_delivery?: boolean; default?: boolean }): Promise<unknown>;
+    getSubscriptionPackage(id: number): Promise<unknown>;
+    updateSubscriptionPackage(id: number, body: Record<string, unknown>): Promise<unknown>;
     updateSubscriptionPackageStatus(id: number, status: boolean): Promise<unknown>;
     deleteSubscriptionPackage(id: number): Promise<unknown>;
     listShifts(): Promise<unknown>;
@@ -6477,6 +6479,8 @@ AdminService.prototype.createSubscriptionPackage = async function (this: AdminSe
   if (!body.package_name || typeof body.price !== 'number' || typeof body.validity !== 'number') {
     throw new BadRequestException({ errors: [{ code: 'body', message: 'package_name, price, validity required' }] });
   }
+  const b = body as Record<string, unknown>;
+  const flag = (v: unknown) => v === true || v === 1 || v === '1' || v === 'true' || v === 'on';
   if (this['useMongo']()) {
     const mysqlId = await this['mongo'].nextMysqlId('subscription_packages');
     await this['mongo'].insertOne('subscription_packages', {
@@ -6486,6 +6490,12 @@ AdminService.prototype.createSubscriptionPackage = async function (this: AdminSe
       validity: body.validity,
       max_order: body.max_order ?? 'unlimited',
       max_product: body.max_product ?? 'unlimited',
+      pos: flag(b.pos),
+      mobile_app: flag(b.mobile_app),
+      chat: flag(b.chat),
+      review: flag(b.review),
+      self_delivery: flag(b.self_delivery),
+      default: flag(b.default),
       status: true,
       created_at: new Date(),
       updated_at: new Date(),
@@ -6499,9 +6509,50 @@ AdminService.prototype.createSubscriptionPackage = async function (this: AdminSe
       validity: body.validity,
       max_order: body.max_order ?? 'unlimited',
       max_product: body.max_product ?? 'unlimited',
+      pos: flag(b.pos),
+      mobile_app: flag(b.mobile_app),
+      chat: flag(b.chat),
+      review: flag(b.review),
+      self_delivery: flag(b.self_delivery),
     },
   });
   return { ok: true, id: Number(created.id) };
+};
+
+AdminService.prototype.getSubscriptionPackage = async function (this: AdminService, id) {
+  if (this['useMongo']()) {
+    const p = await this['mongo'].findByMysqlId<Record<string, unknown>>('subscription_packages', Number(id));
+    if (!p) throw new NotFoundException({ errors: [{ code: 'package', message: 'not found' }] });
+    return { package: { ...p, id: Number(p.mysql_id), price: p.price != null ? Number(p.price) : 0 } };
+  }
+  const p = await this['prisma'].subscription_packages.findUnique({ where: { id: BigInt(id) } });
+  if (!p) throw new NotFoundException({ errors: [{ code: 'package', message: 'not found' }] });
+  return { package: bigToNumber(p) };
+};
+
+AdminService.prototype.updateSubscriptionPackage = async function (this: AdminService, id, body) {
+  const b = body as Record<string, unknown>;
+  const flag = (v: unknown) => v === true || v === 1 || v === '1' || v === 'true' || v === 'on';
+  const data: Record<string, unknown> = { updated_at: new Date() };
+  if (b.package_name !== undefined) data.package_name = String(b.package_name);
+  if (b.price !== undefined) data.price = Number(b.price);
+  if (b.validity !== undefined) data.validity = Number(b.validity);
+  if (b.max_order !== undefined) data.max_order = String(b.max_order);
+  if (b.max_product !== undefined) data.max_product = String(b.max_product);
+  for (const k of ['pos', 'mobile_app', 'chat', 'review', 'self_delivery', 'default', 'status']) {
+    if (b[k] !== undefined) data[k] = flag(b[k]);
+  }
+  if (this['useMongo']()) {
+    const p = await this['mongo'].findByMysqlId<{ mysql_id: number }>('subscription_packages', Number(id));
+    if (!p) throw new NotFoundException({ errors: [{ code: 'package', message: 'not found' }] });
+    await this['mongo'].updateOne('subscription_packages', { mysql_id: Number(id) }, data);
+    return { ok: true, id };
+  }
+  const p = await this['prisma'].subscription_packages.findUnique({ where: { id: BigInt(id) }, select: { id: true } });
+  if (!p) throw new NotFoundException({ errors: [{ code: 'package', message: 'not found' }] });
+  delete data.updated_at;
+  await this['prisma'].subscription_packages.update({ where: { id: p.id }, data: data as never });
+  return { ok: true, id };
 };
 
 AdminService.prototype.updateSubscriptionPackageStatus = async function (this: AdminService, id, status) {

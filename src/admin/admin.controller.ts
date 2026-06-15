@@ -1259,6 +1259,14 @@ export class AdminController {
   updateSubscriptionPackageStatus(@Param('id', ParseIntPipe) id: number, @Body() body: { status: boolean }) {
     return this.admin.updateSubscriptionPackageStatus(id, body.status);
   }
+  @Get('subscription-packages/:id')
+  subscriptionPackageDetail(@Param('id', ParseIntPipe) id: number) {
+    return this.admin.getSubscriptionPackage(id);
+  }
+  @Patch('subscription-packages/:id')
+  updateSubscriptionPackage(@Param('id', ParseIntPipe) id: number, @Body() body: Record<string, unknown>) {
+    return this.admin.updateSubscriptionPackage(id, body);
+  }
   @Delete('subscription-packages/:id')
   deleteSubscriptionPackage(@Param('id', ParseIntPipe) id: number) {
     return this.admin.deleteSubscriptionPackage(id);
