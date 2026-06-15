@@ -2624,6 +2624,8 @@ export class AdminService {
     discount?: number;
     tax_percent?: number;
     delivery_charge?: number;
+    additional_charge?: number;
+    extra_packaging_amount?: number;
     order_note?: string;
   }) {
     if (!body.restaurant_id) throw new BadRequestException({ errors: [{ code: 'restaurant_id', message: 'restaurant is required' }] });
@@ -2640,7 +2642,10 @@ export class AdminService {
     const taxable = Math.max(0, subtotal - discount);
     const taxAmount = taxable * (taxPercent / 100);
     const deliveryCharge = Number(body.delivery_charge ?? 0);
-    const orderAmount = taxable + taxAmount + deliveryCharge;
+    // Platform additional charges + restaurant extra-packaging, as configured.
+    const additionalCharge = Math.max(0, Number(body.additional_charge ?? 0));
+    const extraPackaging = Math.max(0, Number(body.extra_packaging_amount ?? 0));
+    const orderAmount = taxable + taxAmount + deliveryCharge + additionalCharge + extraPackaging;
 
     const now = new Date();
     const orderId = await this.mongo.nextMysqlId('orders');
@@ -2653,6 +2658,8 @@ export class AdminService {
       total_tax_amount: taxAmount,
       restaurant_discount_amount: discount,
       delivery_charge: deliveryCharge,
+      additional_charge: additionalCharge,
+      extra_packaging_amount: extraPackaging,
       payment_status: 'paid',
       order_status: 'confirmed',
       payment_method: body.payment_method ?? 'cash',

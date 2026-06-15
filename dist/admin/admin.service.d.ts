@@ -712,6 +712,9 @@ export declare class AdminService {
             vehicle_id: {} | null;
             shift_id: {} | null;
             dob: {} | null;
+            image_full_url: string | null;
+            license_image_full_url: string | null;
+            identity_image_full_urls: (string | null)[];
         };
     }>;
     updateDeliveryMan(id: number, body: {
@@ -1342,6 +1345,21 @@ export declare class AdminService {
             status: string;
         }[];
     }>;
+    listDeniedDeliveryMen(): Promise<{
+        total: number;
+        items: {
+            id: number;
+            name: string;
+            email: string | null;
+            phone: string | null;
+            zone_id: number | null;
+            vehicle_id: number | null;
+            job_type: string | null;
+            reason: string | null;
+            denied_at: Date | null;
+            status: string;
+        }[];
+    }>;
     updateDeliveryManApproval(id: number, decision: 'approved' | 'rejected', reason?: string): Promise<{
         ok: boolean;
         id: number;
@@ -1682,6 +1700,7 @@ export declare class AdminService {
     }>;
     orderReport(opts?: ReportFilterOpts & {
         days?: number;
+        campaign?: boolean;
     }): Promise<{
         total: number;
         rows: {

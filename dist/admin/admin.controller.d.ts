@@ -719,6 +719,21 @@ export declare class AdminController {
             status: string;
         }[];
     }>;
+    deliveryMenDenied(): Promise<{
+        total: number;
+        items: {
+            id: number;
+            name: string;
+            email: string | null;
+            phone: string | null;
+            zone_id: number | null;
+            vehicle_id: number | null;
+            job_type: string | null;
+            reason: string | null;
+            denied_at: Date | null;
+            status: string;
+        }[];
+    }>;
     deliveryManDetail(id: number): Promise<{
         delivery_man: {
             id: number;
@@ -726,6 +741,9 @@ export declare class AdminController {
             vehicle_id: {} | null;
             shift_id: {} | null;
             dob: {} | null;
+            image_full_url: string | null;
+            license_image_full_url: string | null;
+            identity_image_full_urls: (string | null)[];
         };
     }>;
     approveDeliveryMan(id: number): Promise<{
@@ -1410,7 +1428,7 @@ export declare class AdminController {
             delivery: number;
         }[];
     }>;
-    orderReport(days?: string, from?: string, to?: string, zoneId?: string, restaurantId?: string): Promise<{
+    orderReport(days?: string, from?: string, to?: string, zoneId?: string, restaurantId?: string, campaign?: string): Promise<{
         total: number;
         rows: {
             order_id: number;

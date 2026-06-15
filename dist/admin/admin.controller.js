@@ -159,6 +159,9 @@ let AdminController = class AdminController {
     deliveryMenPending() {
         return this.admin.listPendingDeliveryMen();
     }
+    deliveryMenDenied() {
+        return this.admin.listDeniedDeliveryMen();
+    }
     deliveryManDetail(id) {
         return this.admin.getDeliveryMan(id);
     }
@@ -380,13 +383,19 @@ let AdminController = class AdminController {
             restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
         });
     }
-    orderReport(days, from, to, zoneId, restaurantId) {
+    orderReport(days, from, to, zoneId, restaurantId, campaign) {
+        const campaignFlag = campaign === '1' || campaign === 'true'
+            ? true
+            : campaign === '0' || campaign === 'false'
+                ? false
+                : undefined;
         return this.admin.orderReport({
             days: toInt(days, 30),
             from: from || undefined,
             to: to || undefined,
             zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
             restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
+            campaign: campaignFlag,
         });
     }
     adminEarningDetailed() {
@@ -1050,6 +1059,12 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "deliveryMenPending", null);
 __decorate([
+    (0, common_1.Get)('delivery-men/denied'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "deliveryMenDenied", null);
+__decorate([
     (0, common_1.Get)('delivery-men/:id'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __metadata("design:type", Function),
@@ -1588,8 +1603,9 @@ __decorate([
     __param(2, (0, common_1.Query)('to')),
     __param(3, (0, common_1.Query)('zone_id')),
     __param(4, (0, common_1.Query)('restaurant_id')),
+    __param(5, (0, common_1.Query)('campaign')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, String, String, String, String]),
+    __metadata("design:paramtypes", [String, String, String, String, String, String]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "orderReport", null);
 __decorate([

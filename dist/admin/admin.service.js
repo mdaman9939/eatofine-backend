@@ -1174,6 +1174,11 @@ let AdminService = class AdminService {
                 vehicle_id: d.vehicle_id ?? null,
                 shift_id: d.shift_id ?? null,
                 dob: d.dob ?? null,
+                image_full_url: (0, storage_url_1.storageFullUrl)('delivery-man', d.image ?? null),
+                license_image_full_url: (0, storage_url_1.storageFullUrl)('delivery-man', d.license_image ?? null),
+                identity_image_full_urls: Array.isArray(d.identity_image)
+                    ? d.identity_image.map((f) => (0, storage_url_1.storageFullUrl)('delivery-man', f)).filter(Boolean)
+                    : [],
             },
         };
     }
@@ -2669,6 +2674,26 @@ let AdminService = class AdminService {
             })),
         };
     }
+    async listDeniedDeliveryMen() {
+        if (!this.useMongo())
+            return { items: [], total: 0 };
+        const rows = await this.mongo.findMany('delivery_men', { application_status: { $in: ['denied', 'rejected'] } }, { sort: { mysql_id: -1 }, limit: 200 });
+        return {
+            total: rows.length,
+            items: rows.map((r) => ({
+                id: r.mysql_id,
+                name: `${r.f_name ?? ''} ${r.l_name ?? ''}`.trim() || '—',
+                email: r.email ?? null,
+                phone: r.phone ?? null,
+                zone_id: r.mysql_zone_id ?? null,
+                vehicle_id: r.vehicle_id ?? null,
+                job_type: r.type ?? null,
+                reason: r.rejection_reason ?? null,
+                denied_at: r.updated_at ?? r.created_at ?? null,
+                status: r.application_status ?? 'denied',
+            })),
+        };
+    }
     async updateDeliveryManApproval(id, decision, reason) {
         if (!this.useMongo()) {
             throw new common_1.BadRequestException({ errors: [{ code: 'config', message: 'DM approval requires Mongo' }] });
@@ -3551,6 +3576,16 @@ let AdminService = class AdminService {
             match.mysql_zone_id = Number(opts.zoneId);
         if (opts.restaurantId)
             match.mysql_restaurant_id = Number(opts.restaurantId);
+        if (opts.campaign !== undefined) {
+            const campDetails = await this.mongo.findMany('order_details', { item_campaign_id: { $gt: 0 } }, { projection: { order_id: 1 } });
+            const campaignOrderIds = Array.from(new Set(campDetails.map((d) => Number(d.order_id ?? 0)).filter((n) => n > 0)));
+            if (opts.campaign) {
+                match.mysql_id = { $in: campaignOrderIds.length ? campaignOrderIds : [-1] };
+            }
+            else if (campaignOrderIds.length) {
+                match.mysql_id = { $nin: campaignOrderIds };
+            }
+        }
         const orders = await this.mongo.findMany('orders', match, { sort: { mysql_id: -1 }, limit: 500 });
         const restIds = Array.from(new Set(orders.map((o) => Number(o.mysql_restaurant_id ?? 0)).filter((n) => n > 0)));
         const userIds = Array.from(new Set(orders.map((o) => Number(o.mysql_user_id ?? 0)).filter((n) => n > 0)));
