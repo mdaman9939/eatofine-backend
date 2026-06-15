@@ -5422,6 +5422,15 @@ AdminService.prototype.listDisbursements = async function (this: AdminService, o
         const dmId = readFk(r, 'delivery_man_id');
         const isDm = dmId !== null;
         const amount = r.total_amount !== undefined && r.total_amount !== null ? Number(r.total_amount) : 0;
+        const status = String(r.status ?? 'pending');
+        // Payment-initiated / paid dates. New transitions stamp these exactly;
+        // for older rows we fall back to updated/created so the status' implied
+        // milestones still show a date instead of a blank.
+        const fallback = (r.updated_at as Date | null | undefined) ?? (r.created_at as Date | null | undefined) ?? null;
+        const initiatedAt = (r.initiated_at as Date | null | undefined)
+          ?? (status === 'processing' || status === 'disbursed' ? fallback : null);
+        const paidAt = (r.paid_at as Date | null | undefined)
+          ?? (status === 'disbursed' ? fallback : null);
         return {
           ...r,
           id: Number(r.mysql_id),
@@ -5435,6 +5444,8 @@ AdminService.prototype.listDisbursements = async function (this: AdminService, o
             : (vendorId !== null ? (vendorNames.get(vendorId) ?? null) : null),
           type: isDm ? 'deliveryman' : 'restaurant',
           payment_method: (r.payment_method as string) ?? 'cash',
+          initiated_at: initiatedAt,
+          paid_at: paidAt,
         };
       }),
       total,
@@ -5456,9 +5467,18 @@ AdminService.prototype.updateDisbursementStatus = async function (this: AdminSer
     throw new BadRequestException({ errors: [{ code: 'status', message: `status must be one of ${allowed.join(', ')}` }] });
   }
   if (this['useMongo']()) {
-    const d = await this['mongo'].findByMysqlId<{ mysql_id: number }>('disbursements', Number(id));
+    const d = await this['mongo'].findByMysqlId<{ mysql_id: number; initiated_at?: Date | null }>('disbursements', Number(id));
     if (!d) throw new NotFoundException({ errors: [{ code: 'disbursement', message: 'not found' }] });
-    await this['mongo'].updateOne('disbursements', { mysql_id: Number(id) }, { status, updated_at: new Date() });
+    const now = new Date();
+    const data: Record<string, unknown> = { status, updated_at: now };
+    // Stamp the milestone dates so the admin table can show when payment was
+    // initiated and when it was actually paid.
+    if (status === 'processing' && !d.initiated_at) data.initiated_at = now;
+    if (status === 'disbursed') {
+      data.paid_at = now;
+      if (!d.initiated_at) data.initiated_at = now; // paid directly from pending
+    }
+    await this['mongo'].updateOne('disbursements', { mysql_id: Number(id) }, data);
     return { ok: true, id, status };
   }
   const d = await this['prisma'].disbursements.findUnique({ where: { id: BigInt(id) }, select: { id: true } });
