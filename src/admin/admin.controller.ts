@@ -1134,6 +1134,10 @@ export class AdminController {
   createNotification(@Body() body: Parameters<AdminService['createNotification']>[0]) {
     return this.admin.createNotification(body);
   }
+  @Patch('notifications/:id/status')
+  updateNotificationStatus(@Param('id', ParseIntPipe) id: number, @Body() body: { status: boolean }) {
+    return this.admin.updateNotificationStatus(id, body.status);
+  }
   @Patch('notifications/:id')
   updateNotification(@Param('id', ParseIntPipe) id: number, @Body() body: Parameters<AdminService['updateNotification']>[1]) {
     return this.admin.updateNotification(id, body);

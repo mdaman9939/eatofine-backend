@@ -4626,6 +4626,7 @@ declare module './admin.service' {
     listNotifications(opts: ListOpts): Promise<unknown>;
     createNotification(body: { title: string; description?: string; tergat?: string; zone_id?: number | null; image?: string | null }): Promise<unknown>;
     updateNotification(id: number, body: { title?: string; description?: string; tergat?: string; zone_id?: number | null; image?: string | null }): Promise<unknown>;
+    updateNotificationStatus(id: number, status: boolean): Promise<unknown>;
     deleteNotification(id: number): Promise<unknown>;
     listReviews(opts: ListOpts): Promise<unknown>;
     replyReview(id: number, reply: string): Promise<unknown>;
@@ -5858,7 +5859,8 @@ AdminService.prototype.listNotifications = async function (this: AdminService, o
       this['mongo'].count('notifications'),
     ]);
     return paginate(
-      rows.map((r) => ({ ...r, id: Number(r.mysql_id) })),
+      // Default old rows (no status field) to ON.
+      rows.map((r) => ({ ...r, id: Number(r.mysql_id), status: r.status !== undefined && r.status !== null ? !!r.status : true })),
       total,
       limit,
       offset,
@@ -5883,6 +5885,7 @@ AdminService.prototype.createNotification = async function (this: AdminService, 
       tergat: body.tergat ?? null,
       zone_id: body.zone_id ? Number(body.zone_id) : null,
       image: body.image ?? null,
+      status: true,
       created_at: now,
       updated_at: now,
     });
@@ -5918,6 +5921,19 @@ AdminService.prototype.updateNotification = async function (this: AdminService, 
   if (!n) throw new NotFoundException({ errors: [{ code: 'notification', message: 'not found' }] });
   await this['prisma'].notifications.update({ where: { id: n.id }, data: data as never });
   return { ok: true, id };
+};
+
+AdminService.prototype.updateNotificationStatus = async function (this: AdminService, id, status) {
+  if (this['useMongo']()) {
+    const n = await this['mongo'].findByMysqlId<{ mysql_id: number }>('notifications', Number(id));
+    if (!n) throw new NotFoundException({ errors: [{ code: 'notification', message: 'not found' }] });
+    await this['mongo'].updateOne('notifications', { mysql_id: Number(id) }, { status: !!status, updated_at: new Date() });
+    return { ok: true, id, status: !!status };
+  }
+  const n = await this['prisma'].notifications.findUnique({ where: { id: BigInt(id) }, select: { id: true } });
+  if (!n) throw new NotFoundException({ errors: [{ code: 'notification', message: 'not found' }] });
+  await this['prisma'].notifications.update({ where: { id: n.id }, data: { status: !!status } as never });
+  return { ok: true, id, status: !!status };
 };
 
 AdminService.prototype.deleteNotification = async function (this: AdminService, id) {
