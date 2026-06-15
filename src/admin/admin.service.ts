@@ -3338,28 +3338,46 @@ export class AdminService {
       status?: string; reason?: string | null; created_at?: Date | null;
     }>('dm_incentives', filter, { sort: { mysql_id: -1 }, limit: 100 });
 
-    // Attach DM name in one batched lookup
+    // Attach DM name + zone + total earning in batched lookups.
     const dmIds = Array.from(new Set(rows.map((r) => r.dm_id).filter((x): x is number => x !== undefined)));
     const dms = dmIds.length > 0
-      ? await this.mongo.findMany<{ mysql_id: number; f_name?: string; l_name?: string }>(
+      ? await this.mongo.findMany<{ mysql_id: number; f_name?: string; l_name?: string; mysql_zone_id?: number }>(
           'delivery_men', { mysql_id: { $in: dmIds } },
         )
       : [];
     const nameById = new Map(dms.map((d) => [d.mysql_id, `${d.f_name ?? ''} ${d.l_name ?? ''}`.trim()]));
+    const zoneIdByDm = new Map(dms.map((d) => [d.mysql_id, d.mysql_zone_id ?? null]));
+
+    const zoneIds = Array.from(new Set(dms.map((d) => d.mysql_zone_id).filter((x): x is number => x != null)));
+    const zones = zoneIds.length
+      ? await this.mongo.findMany<{ mysql_id: number; name?: string }>('zones', { mysql_id: { $in: zoneIds } })
+      : [];
+    const zoneNameById = new Map(zones.map((z) => [z.mysql_id, z.name ?? `Zone #${z.mysql_id}`]));
+
+    const wallets = dmIds.length
+      ? await this.mongo.findMany<{ delivery_man_id: number; total_earning?: number }>('delivery_man_wallets', { delivery_man_id: { $in: dmIds } })
+      : [];
+    const earningByDm = new Map(wallets.map((w) => [w.delivery_man_id, Number(w.total_earning ?? 0)]));
 
     return {
       total: rows.length,
-      items: rows.map((r) => ({
-        id: r.mysql_id,
-        dm_id: r.dm_id ?? null,
-        dm_name: r.dm_id ? (nameById.get(r.dm_id) || `DM #${r.dm_id}`) : '—',
-        period: r.period ?? '—',
-        deliveries: Number(r.deliveries ?? 0),
-        claim_amount: Number(r.claim_amount ?? 0),
-        status: r.status ?? 'pending',
-        reason: r.reason ?? null,
-        created_at: r.created_at ?? null,
-      })),
+      items: rows.map((r) => {
+        const zoneId = r.dm_id != null ? (zoneIdByDm.get(r.dm_id) ?? null) : null;
+        return {
+          id: r.mysql_id,
+          dm_id: r.dm_id ?? null,
+          dm_name: r.dm_id ? (nameById.get(r.dm_id) || `DM #${r.dm_id}`) : '—',
+          zone_id: zoneId,
+          zone_name: zoneId != null ? (zoneNameById.get(zoneId) ?? `Zone #${zoneId}`) : 'All zones',
+          total_earning: r.dm_id != null ? (earningByDm.get(r.dm_id) ?? 0) : 0,
+          period: r.period ?? '—',
+          deliveries: Number(r.deliveries ?? 0),
+          claim_amount: Number(r.claim_amount ?? 0),
+          status: r.status ?? 'pending',
+          reason: r.reason ?? null,
+          created_at: r.created_at ?? null,
+        };
+      }),
     };
   }
 
