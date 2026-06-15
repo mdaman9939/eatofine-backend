@@ -5458,6 +5458,19 @@ AdminService.prototype.listDisbursements = async function (this: AdminService, o
     ]);
     const vendorNames = await nameMapFor(this['mongo'], 'vendors', rows.map((r) => readFk(r, 'vendor_id')), personLabel);
     const dmNames = await nameMapFor(this['mongo'], 'delivery_men', rows.map((r) => readFk(r, 'delivery_man_id')), personLabel);
+    // Restaurant disbursements should show the RESTAURANT name, not the owner's.
+    // Resolve restaurant name via the vendor → restaurant link.
+    const vendorIds = Array.from(new Set(rows.map((r) => readFk(r, 'vendor_id')).filter((x): x is number => x !== null)));
+    const restByVendor = new Map<number, string>();
+    if (vendorIds.length) {
+      const rests = await this['mongo'].findMany<{ mysql_vendor_id?: number; name?: string }>(
+        'restaurants', { mysql_vendor_id: { $in: vendorIds } },
+        { projection: { mysql_vendor_id: 1, name: 1 } as Record<string, 0 | 1> },
+      );
+      for (const rr of rests) {
+        if (rr.mysql_vendor_id != null && rr.name) restByVendor.set(Number(rr.mysql_vendor_id), rr.name);
+      }
+    }
     return paginate(
       rows.map((r) => {
         const vendorId = readFk(r, 'vendor_id');
@@ -5483,7 +5496,8 @@ AdminService.prototype.listDisbursements = async function (this: AdminService, o
           total_amount: amount,
           recipient: isDm
             ? (dmNames.get(dmId) ?? null)
-            : (vendorId !== null ? (vendorNames.get(vendorId) ?? null) : null),
+            // Restaurant name first; fall back to the owner/vendor name.
+            : (vendorId !== null ? (restByVendor.get(vendorId) ?? vendorNames.get(vendorId) ?? null) : null),
           type: isDm ? 'deliveryman' : 'restaurant',
           payment_method: (r.payment_method as string) ?? 'cash',
           initiated_at: initiatedAt,
@@ -5513,10 +5527,16 @@ AdminService.prototype.updateDisbursementStatus = async function (this: AdminSer
     if (!d) throw new NotFoundException({ errors: [{ code: 'disbursement', message: 'not found' }] });
     const now = new Date();
     const data: Record<string, unknown> = { status, updated_at: now };
-    // Stamp the milestone dates so the admin table can show when payment was
-    // initiated and when it was actually paid.
-    if (status === 'processing' && !d.initiated_at) data.initiated_at = now;
-    if (status === 'disbursed') {
+    // Stamp / clear the milestone dates. Transitions are reversible (admin can
+    // un-initiate or mark unpaid in case of miscommunication) so we also clear
+    // the dates that no longer apply.
+    if (status === 'pending') {
+      data.initiated_at = null;
+      data.paid_at = null;
+    } else if (status === 'processing') {
+      if (!d.initiated_at) data.initiated_at = now;
+      data.paid_at = null; // un-paid: it is initiated but not yet paid
+    } else if (status === 'disbursed') {
       data.paid_at = now;
       if (!d.initiated_at) data.initiated_at = now; // paid directly from pending
     }
