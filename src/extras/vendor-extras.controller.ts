@@ -2748,7 +2748,9 @@ export class VendorExtrasController {
       video_attachment: video,
       is_rating_active: Number(body.is_rating_active ?? 0),
       is_review_active: Number(body.is_review_active ?? 0),
-      is_paid: 0,
+      // Paid / unpaid choice + amount (when the restaurant app sends them).
+      is_paid: (body.is_paid === '1' || body.is_paid === 'paid' || body.is_paid === true || Number(body.is_paid) === 1) ? 1 : 0,
+      amount: (body.is_paid === '1' || body.is_paid === 'paid' || body.is_paid === true || Number(body.is_paid) === 1) ? Math.max(0, Number(body.amount ?? 0)) : 0,
       is_updated: 0,
       priority: 0,
       mysql_created_by_id: Number(req.actor!.id),

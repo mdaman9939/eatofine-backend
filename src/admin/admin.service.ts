@@ -4580,6 +4580,7 @@ declare module './admin.service' {
     createAdvertisement(body: {
       title?: string; description?: string; add_type?: string; restaurant_id?: number | null;
       priority?: number; start_date?: string; end_date?: string; image?: string | null; cover_image?: string | null;
+      is_paid?: boolean | string; amount?: number | string;
     }): Promise<unknown>;
     updateAdvertisementStatus(id: number, status: 'approved' | 'denied' | 'pending' | 'paused' | 'expired' | 'running'): Promise<unknown>;
     deleteAdvertisement(id: number): Promise<unknown>;
@@ -5169,7 +5170,9 @@ AdminService.prototype.createAdvertisement = async function (this: AdminService,
       // admin approval (those stay 'pending' from the vendor endpoint).
       status: 'approved',
       created_by_type: 'admin',
-      is_paid: false,
+      // Paid / unpaid choice + the ad amount when paid.
+      is_paid: body.is_paid === true || body.is_paid === 'paid' || body.is_paid === '1',
+      amount: (body.is_paid === true || body.is_paid === 'paid' || body.is_paid === '1') ? Math.max(0, Number(body.amount ?? 0)) : 0,
       created_at: now,
       updated_at: now,
     });
