@@ -96,6 +96,12 @@ export class ConfigController {
       toggle_dm_registration: await this.bs.getBool('toggle_dm_registration'),
       toggle_restaurant_registration: await this.bs.getBool('toggle_restaurant_registration'),
       schedule_order_slot_duration: await this.bs.getInt('schedule_order_slot_duration'),
+      // User subscription-order configuration (admin → Subscription Orders).
+      subscription_status: await this.bs.getInt('subscription_status', 1),
+      subscription_frequencies: (await this.bs.get('subscription_frequencies')) ?? 'daily,weekly',
+      subscription_can_pause: await this.bs.getInt('subscription_can_pause', 1),
+      subscription_max_per_customer: await this.bs.getInt('subscription_max_per_customer'),
+      subscription_min_days: await this.bs.getInt('subscription_min_days', 1),
       digit_after_decimal_point: await this.bs.getInt('digit_after_decimal_point', 2),
       loyalty_point_exchange_rate: await this.bs.getInt('loyalty_point_exchange_rate'),
       loyalty_point_item_purchase_point: await this.bs.getInt('loyalty_point_item_purchase_point'),
