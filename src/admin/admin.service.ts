@@ -1507,6 +1507,9 @@ export class AdminService {
           add_ons: Array.isArray(doc.add_ons) ? doc.add_ons : Array.isArray(doc.addon_ids) ? doc.addon_ids : [],
           addon_ids: Array.isArray(doc.addon_ids) ? doc.addon_ids : [],
           translations: Array.isArray(doc.translations) ? doc.translations : [],
+          image_full_url: storageFullUrl('product', (doc.image as string | null | undefined) ?? null),
+          request_status: (doc.request_status as string | undefined) ?? 'approved',
+          rejection_reason: (doc.rejection_reason as string | null | undefined) ?? null,
         },
         restaurant: restaurant ? { id: Number(restaurant.mysql_id), name: restaurant.name } : null,
       };
@@ -1533,6 +1536,50 @@ export class AdminService {
       },
       restaurant: restaurant ? { id: Number(restaurant.id), name: restaurant.name } : null,
     };
+  }
+
+  /** New food items a restaurant added that await admin approval. */
+  async listPendingFood() {
+    if (!this.useMongo()) return { total: 0, items: [] };
+    const rows = await this.mongo.findMany<{
+      mysql_id: number; name?: string | null; image?: string | null; price?: number;
+      veg?: boolean; mysql_restaurant_id?: number; mysql_category_id?: number; created_at?: Date | null;
+    }>('foods', { request_status: 'pending' }, { sort: { mysql_id: -1 }, limit: 200 });
+    const restIds = Array.from(new Set(rows.map((r) => r.mysql_restaurant_id).filter((x): x is number => !!x)));
+    const rests = restIds.length
+      ? await this.mongo.findMany<{ mysql_id: number; name: string | null }>('restaurants', { mysql_id: { $in: restIds } }, { projection: { mysql_id: 1, name: 1 } as Record<string, 0 | 1> })
+      : [];
+    const restMap = new Map(rests.map((r) => [r.mysql_id, r.name]));
+    return {
+      total: rows.length,
+      items: rows.map((r) => ({
+        id: r.mysql_id,
+        name: r.name ?? '—',
+        price: Number(r.price ?? 0),
+        veg: !!r.veg,
+        image_full_url: storageFullUrl('product', r.image ?? null),
+        restaurant_id: r.mysql_restaurant_id ?? null,
+        restaurant_name: r.mysql_restaurant_id ? (restMap.get(r.mysql_restaurant_id) ?? `Restaurant #${r.mysql_restaurant_id}`) : '—',
+        submitted_at: r.created_at ?? null,
+        status: 'pending',
+      })),
+    };
+  }
+
+  /** Approve / reject a pending food item. Approve makes it live; reject keeps
+   *  it offline and records the admin's remark. */
+  async updateFoodApproval(id: number, decision: 'approved' | 'denied', reason?: string) {
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    const f = await this.mongo.findByMysqlId<{ mysql_id: number }>('foods', id);
+    if (!f) throw new NotFoundException({ errors: [{ code: 'food', message: 'Food not found' }] });
+    await this.mongo.updateOne('foods', { mysql_id: id }, {
+      request_status: decision,
+      status: decision === 'approved',
+      rejection_reason: decision === 'denied' ? (reason ?? null) : null,
+      approved_at: decision === 'approved' ? new Date() : null,
+      updated_at: new Date(),
+    });
+    return { ok: true, id, decision };
   }
 
   async updateFoodStatus(id: number, status: boolean) {
@@ -2580,6 +2627,8 @@ export class AdminService {
       meta_description: body.meta_description ?? null,
       meta_image: body.meta_image ?? null,
       status: true,
+      // Admin-added foods are auto-approved (vendor-added ones await approval).
+      request_status: 'approved',
       image: body.image ?? null,
       created_at: now,
       updated_at: now,

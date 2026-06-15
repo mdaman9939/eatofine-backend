@@ -1211,7 +1211,9 @@ export class VendorExtrasController {
       discount: Number(b.discount ?? 0),
       discount_type: String(b.discount_type ?? 'percent'),
       veg: !!Number(b.veg ?? 0),
-      status: true,
+      // New restaurant-added items go offline + await admin approval.
+      status: false,
+      request_status: 'pending',
       image: imageName,
       meta_image: metaImage,
       meta_title: b.meta_title ? String(b.meta_title) : null,

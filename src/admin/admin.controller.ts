@@ -297,6 +297,22 @@ export class AdminController {
     return this.admin.bulkExportFood();
   }
 
+  // STATIC sub-paths before `:id`.
+  @Get('food/pending')
+  foodPending() {
+    return this.admin.listPendingFood();
+  }
+
+  @Patch('food/:id/approve')
+  approveFood(@Param('id', ParseIntPipe) id: number) {
+    return this.admin.updateFoodApproval(id, 'approved');
+  }
+
+  @Patch('food/:id/reject')
+  rejectFood(@Param('id', ParseIntPipe) id: number, @Body() body: { reason?: string }) {
+    return this.admin.updateFoodApproval(id, 'denied', body.reason);
+  }
+
   @Get('food/:id')
   foodDetail(@Param('id', ParseIntPipe) id: number) {
     return this.admin.getFood(id);
