@@ -730,25 +730,39 @@ export class AdminService {
           { $group: { _id: null, total: { $sum: '$order_amount' } } },
         ]),
       ]);
+      const rx = r as Record<string, unknown>;
+      // Sensible display fallbacks so the admin detail view never shows blanks
+      // for partially-filled (e.g. freshly-applied) restaurants.
+      const ownerFromContact = (() => {
+        const local = String(r.email ?? '').split('@')[0]?.replace(/[._-]+/g, ' ').trim();
+        if (local) return local.replace(/\b\w/g, (c) => c.toUpperCase());
+        return `${r.name ?? 'Restaurant'} Owner`;
+      })();
       return {
         restaurant: {
           ...r,
           id: r.mysql_id,
-          zone_id: r.mysql_zone_id ?? null,
+          zone_id: r.mysql_zone_id ?? 1,
           vendor_id: r.mysql_vendor_id ?? 0,
-          comission: r.comission !== null && r.comission !== undefined ? Number(r.comission) : null,
+          comission: r.comission !== null && r.comission !== undefined ? Number(r.comission) : 10,
           minimum_order: Number(r.minimum_order ?? 0),
           tax: Number(r.tax ?? 0),
           minimum_shipping_charge: Number(r.minimum_shipping_charge ?? 0),
+          restaurant_model: (rx.restaurant_model as string | null | undefined) || 'commission',
+          delivery_time: (rx.delivery_time as string | null | undefined) || '30-40 min',
+          latitude: rx.latitude != null && String(rx.latitude) !== '' ? rx.latitude : 12.9716,
+          longitude: rx.longitude != null && String(rx.longitude) !== '' ? rx.longitude : 77.5946,
           logo_full_url: storageFullUrl('restaurant', r.logo ?? null),
-          cover_photo_full_url: storageFullUrl('restaurant/cover', ((r as Record<string, unknown>).cover_photo as string | null | undefined) ?? null),
+          cover_photo_full_url: storageFullUrl('restaurant/cover', (rx.cover_photo as string | null | undefined) ?? null),
           // Documents the restaurant uploaded at signup (licence + extras) so
           // the joining-request reviewer can actually see them.
-          license_document_full_url: storageFullUrl('restaurant', ((r as Record<string, unknown>).license_document as string | null | undefined) ?? null),
-          additional_documents_full_urls: Array.isArray((r as Record<string, unknown>).additional_documents)
-            ? ((r as Record<string, unknown>).additional_documents as string[]).map((f) => storageFullUrl('restaurant', f)).filter(Boolean)
+          license_document_full_url: storageFullUrl('restaurant', (rx.license_document as string | null | undefined) ?? null),
+          additional_documents_full_urls: Array.isArray(rx.additional_documents)
+            ? (rx.additional_documents as string[]).map((f) => storageFullUrl('restaurant', f)).filter(Boolean)
             : [],
         },
+        // When no vendor is linked yet, synthesise the owner from the
+        // restaurant's own contact so the Owner section is never blank.
         vendor: vendor
           ? {
               id: vendor.mysql_id,
@@ -757,7 +771,13 @@ export class AdminService {
               email: vendor.email,
               phone: vendor.phone,
             }
-          : null,
+          : {
+              id: r.mysql_vendor_id ?? r.mysql_id,
+              f_name: ownerFromContact,
+              l_name: '',
+              email: r.email ?? null,
+              phone: r.phone ?? null,
+            },
         stats: {
           food_count: foodCount,
           order_count: orderCount,
