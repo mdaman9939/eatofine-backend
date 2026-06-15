@@ -2343,7 +2343,7 @@ export class AdminService {
   // ── Create restaurant / food / delivery-man (admin Add forms) ────────
 
   async createRestaurant(body: {
-    name?: string; email?: string; phone?: string; address?: string;
+    name?: string; email?: string; phone?: string; restaurant_phone?: string; address?: string;
     minimum_order?: number; zone_id?: number; vendor_id?: number;
     delivery?: boolean; take_away?: boolean;
     // Owner / vendor account (mirrors Laravel's VendorController::store —
@@ -2435,7 +2435,8 @@ export class AdminService {
       state: body.state ?? null,
       license_document: body.license_document ?? null,
       email: body.email ?? null,
-      phone: body.phone ?? null,
+      // Restaurant's own contact number (falls back to the owner's phone).
+      phone: body.restaurant_phone ?? body.phone ?? null,
       address: trAddress ?? body.address ?? null,
       latitude: body.latitude !== undefined && String(body.latitude) !== '' ? String(body.latitude) : null,
       longitude: body.longitude !== undefined && String(body.longitude) !== '' ? String(body.longitude) : null,
