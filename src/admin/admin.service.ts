@@ -3381,6 +3381,24 @@ export class AdminService {
     };
   }
 
+  /** Pause / resume / cancel a single subscription (admin manage action). */
+  async updateSubscriptionStatus(id: number, status: string) {
+    const allowed = ['active', 'paused', 'canceled'];
+    if (!allowed.includes(status)) {
+      throw new BadRequestException({ errors: [{ code: 'status', message: `status must be one of ${allowed.join(', ')}` }] });
+    }
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    const sub = await this.mongo.findByMysqlId<{ mysql_id: number }>('subscriptions', id);
+    if (!sub) throw new NotFoundException({ errors: [{ code: 'subscription', message: 'Subscription not found' }] });
+    const now = new Date();
+    const data: Record<string, unknown> = { status, updated_at: now };
+    if (status === 'paused') data.paused_at = now;
+    if (status === 'active') data.paused_at = null;
+    if (status === 'canceled') data.canceled_at = now;
+    await this.mongo.updateOne('subscriptions', { mysql_id: id }, data);
+    return { ok: true, id, status };
+  }
+
   // ── Activity log ─────────────────────────────────────────────────────
 
   async listActivityLog(limit: number) {

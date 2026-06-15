@@ -601,6 +601,11 @@ export class AdminController {
     return this.admin.listSubscriptionOrders();
   }
 
+  @Patch('subscription-orders/:id/status')
+  updateSubscriptionStatus(@Param('id', ParseIntPipe) id: number, @Body() body: { status: string }) {
+    return this.admin.updateSubscriptionStatus(id, body.status);
+  }
+
   // ── Activity log ─────────────────────────────────────────────────────
 
   @Get('activity-log')
