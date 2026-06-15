@@ -4597,7 +4597,7 @@ declare module './admin.service' {
     updateShiftStatus(id: number, status: boolean): Promise<unknown>;
     deleteShift(id: number): Promise<unknown>;
     listVehicles(): Promise<unknown>;
-    createVehicle(body: { type: string; starting_coverage_area: number; maximum_coverage_area: number; extra_charges: number }): Promise<unknown>;
+    createVehicle(body: { type: string; starting_coverage_area?: number; maximum_coverage_area?: number; extra_charges?: number }): Promise<unknown>;
     updateVehicleStatus(id: number, status: boolean): Promise<unknown>;
     deleteVehicle(id: number): Promise<unknown>;
     listOrderCancelReasons(): Promise<unknown>;
@@ -6512,22 +6512,23 @@ AdminService.prototype.listVehicles = async function (this: AdminService) {
 };
 
 AdminService.prototype.createVehicle = async function (this: AdminService, body) {
-  if (
-    !body.type ||
-    typeof body.starting_coverage_area !== 'number' ||
-    typeof body.maximum_coverage_area !== 'number' ||
-    typeof body.extra_charges !== 'number'
-  ) {
-    throw new BadRequestException({ errors: [{ code: 'body', message: 'type/coverage/extra_charges required' }] });
+  // Only the vehicle type is mandatory now; coverage + extra charge are
+  // optional (default 0) since the admin form no longer collects extra charge
+  // and keeps the coverage fields non-mandatory.
+  if (!body.type) {
+    throw new BadRequestException({ errors: [{ code: 'body', message: 'type is required' }] });
   }
+  const startCoverage = Number(body.starting_coverage_area ?? 0) || 0;
+  const maxCoverage = Number(body.maximum_coverage_area ?? 0) || 0;
+  const extraCharges = Number(body.extra_charges ?? 0) || 0;
   if (this['useMongo']()) {
     const mysqlId = await this['mongo'].nextMysqlId('vehicles');
     await this['mongo'].insertOne('vehicles', {
       mysql_id: mysqlId,
       type: body.type,
-      starting_coverage_area: body.starting_coverage_area,
-      maximum_coverage_area: body.maximum_coverage_area,
-      extra_charges: body.extra_charges,
+      starting_coverage_area: startCoverage,
+      maximum_coverage_area: maxCoverage,
+      extra_charges: extraCharges,
       status: true,
       created_at: new Date(),
       updated_at: new Date(),
@@ -6537,9 +6538,9 @@ AdminService.prototype.createVehicle = async function (this: AdminService, body)
   const created = await this['prisma'].vehicles.create({
     data: {
       type: body.type,
-      starting_coverage_area: body.starting_coverage_area,
-      maximum_coverage_area: body.maximum_coverage_area,
-      extra_charges: body.extra_charges,
+      starting_coverage_area: startCoverage,
+      maximum_coverage_area: maxCoverage,
+      extra_charges: extraCharges,
     },
   });
   return { ok: true, id: Number(created.id) };
