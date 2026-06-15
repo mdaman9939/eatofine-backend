@@ -742,6 +742,12 @@ export class AdminService {
           minimum_shipping_charge: Number(r.minimum_shipping_charge ?? 0),
           logo_full_url: storageFullUrl('restaurant', r.logo ?? null),
           cover_photo_full_url: storageFullUrl('restaurant/cover', ((r as Record<string, unknown>).cover_photo as string | null | undefined) ?? null),
+          // Documents the restaurant uploaded at signup (licence + extras) so
+          // the joining-request reviewer can actually see them.
+          license_document_full_url: storageFullUrl('restaurant', ((r as Record<string, unknown>).license_document as string | null | undefined) ?? null),
+          additional_documents_full_urls: Array.isArray((r as Record<string, unknown>).additional_documents)
+            ? ((r as Record<string, unknown>).additional_documents as string[]).map((f) => storageFullUrl('restaurant', f)).filter(Boolean)
+            : [],
         },
         vendor: vendor
           ? {
