@@ -3,6 +3,17 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { storageFullUrl } from '../common/storage-url';
 import { FcmService } from '../notifications/fcm.service';
+import { UserDeliveryChargesService } from '../enhancements/user-delivery-charges.service';
+
+/** Great-circle distance between two lat/lng points, in kilometres. */
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const R = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
 interface MongoFood {
   mysql_id: number;
@@ -21,6 +32,8 @@ interface MongoRestaurant {
   mysql_id: number;
   minimum_shipping_charge?: number;
   mysql_zone_id?: number;
+  latitude?: string | number | null;
+  longitude?: string | number | null;
 }
 
 interface MongoOrder {
@@ -64,6 +77,7 @@ export class OrderService {
     private readonly prisma: PrismaService,
     private readonly mongo: MongoDataService,
     private readonly fcm: FcmService,
+    private readonly userCharges: UserDeliveryChargesService,
   ) {}
 
   /** Push a real-time "new order" FCM notification to the restaurant's vendor
@@ -179,7 +193,37 @@ export class OrderService {
         totalTax += lineTax;
       }
 
-      const deliveryCharge = body.order_type === 'take_away' ? 0 : Number(restaurant.minimum_shipping_charge ?? 0);
+      // ── Delivery charge — distance-slab engine (User Delivery Charges) ──
+      // The customer fee comes from the configured distance slabs + surge +
+      // surcharges + free-delivery threshold (GST applied). Take-away = ₹0.
+      // If no slab covers the distance, fall back to the restaurant flat fee.
+      let deliveryCharge = 0;
+      let deliveryGst = 0;
+      if (body.order_type !== 'take_away') {
+        // Distance: prefer what the app sent, else compute from coordinates.
+        let distanceKm = body.distance != null && Number.isFinite(Number(body.distance)) ? Math.max(0, Number(body.distance)) : NaN;
+        if (Number.isNaN(distanceKm)) {
+          const rLat = Number(restaurant.latitude), rLng = Number(restaurant.longitude);
+          const uLat = Number(body.latitude), uLng = Number(body.longitude);
+          distanceKm = [rLat, rLng, uLat, uLng].every((n) => Number.isFinite(n)) ? haversineKm(rLat, rLng, uLat, uLng) : 0;
+        }
+        try {
+          const dc = await this.userCharges.calculate({ distance_km: distanceKm, order_value: orderAmount, when: body.schedule_at });
+          if (dc.free_delivery) {
+            deliveryCharge = 0;
+          } else if (dc.matched_slab) {
+            deliveryCharge = Number((dc as { subtotal?: number }).subtotal ?? 0);
+            deliveryGst = Number(dc.gst_amount ?? 0);
+          } else {
+            // No active slab for this distance — fall back to the flat fee.
+            deliveryCharge = Number(restaurant.minimum_shipping_charge ?? 0);
+          }
+        } catch {
+          deliveryCharge = Number(restaurant.minimum_shipping_charge ?? 0);
+        }
+      }
+      // Delivery GST rolls into the order's tax so the invoice CGST/SGST covers it.
+      totalTax = Math.round((totalTax + deliveryGst) * 100) / 100;
       const finalAmount = Math.round((orderAmount + totalTax + deliveryCharge) * 100) / 100;
       const otp = String(Math.floor(1000 + Math.random() * 9000));
       const now = new Date();
