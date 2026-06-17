@@ -40,6 +40,7 @@ export declare class BrowseService {
             free_delivery: number;
             delivery: number;
             take_away: number;
+            is_dine_in_active: boolean;
             veg: number;
             non_veg: number;
             minimum_shipping_charge: number;
@@ -78,6 +79,7 @@ export declare class BrowseService {
             free_delivery: number;
             delivery: number;
             take_away: number;
+            is_dine_in_active: boolean;
             veg: number;
             non_veg: number;
             minimum_shipping_charge: number;
@@ -116,6 +118,7 @@ export declare class BrowseService {
             free_delivery: number;
             delivery: number;
             take_away: number;
+            is_dine_in_active: boolean;
             veg: number;
             non_veg: number;
             minimum_shipping_charge: number;
@@ -153,6 +156,7 @@ export declare class BrowseService {
             free_delivery: number;
             delivery: number;
             take_away: number;
+            is_dine_in_active: boolean;
             veg: number;
             non_veg: number;
             minimum_shipping_charge: number;
@@ -191,6 +195,7 @@ export declare class BrowseService {
             free_delivery: number;
             delivery: number;
             take_away: number;
+            is_dine_in_active: boolean;
             veg: number;
             non_veg: number;
             minimum_shipping_charge: number;
@@ -228,6 +233,7 @@ export declare class BrowseService {
             free_delivery: number;
             delivery: number;
             take_away: number;
+            is_dine_in_active: boolean;
             veg: number;
             non_veg: number;
             minimum_shipping_charge: number;
@@ -296,6 +302,7 @@ export declare class BrowseService {
         free_delivery: number;
         delivery: number;
         take_away: number;
+        is_dine_in_active: boolean;
         veg: number;
         non_veg: number;
         minimum_shipping_charge: number;
@@ -360,6 +367,7 @@ export declare class BrowseService {
         free_delivery: number;
         delivery: number;
         take_away: number;
+        is_dine_in_active: boolean;
         veg: number;
         non_veg: number;
         minimum_shipping_charge: number;
@@ -769,6 +777,7 @@ export declare class BrowseService {
             free_delivery: number;
             delivery: number;
             take_away: number;
+            is_dine_in_active: boolean;
             veg: number;
             non_veg: number;
             minimum_shipping_charge: number;
@@ -807,6 +816,7 @@ export declare class BrowseService {
             free_delivery: number;
             delivery: number;
             take_away: number;
+            is_dine_in_active: boolean;
             veg: number;
             non_veg: number;
             minimum_shipping_charge: number;

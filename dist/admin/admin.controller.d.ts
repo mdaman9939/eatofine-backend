@@ -136,6 +136,7 @@ export declare class AdminController {
             order_status: string | undefined;
             payment_method: string | undefined;
             order_type: string | undefined;
+            table_number: string | null;
             coupon_code: string | null;
             order_note: string | null;
             delivery_address: string | null;
@@ -214,6 +215,7 @@ export declare class AdminController {
                 failed: Date | null;
             };
             created_at: Date | null;
+            table_number?: undefined;
         };
         user: {
             id: number;
@@ -247,7 +249,7 @@ export declare class AdminController {
             food_details: unknown;
         }[];
     }>;
-    placePosOrder(body: Parameters<AdminService['createPosOrder']>[0]): Promise<{
+    placePosOrder(req: AuthedRequest, body: Parameters<AdminService['createPosOrder']>[0]): Promise<{
         ok: boolean;
         id: number;
         order_amount: number;

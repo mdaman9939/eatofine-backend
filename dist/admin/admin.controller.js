@@ -99,8 +99,9 @@ let AdminController = class AdminController {
     orderDetail(id) {
         return this.admin.getOrder(id);
     }
-    placePosOrder(body) {
-        return this.admin.createPosOrder(body);
+    placePosOrder(req, body) {
+        const createdBy = req.actor ? { kind: req.actor.kind, id: Number(req.actor.id) } : undefined;
+        return this.admin.createPosOrder(body, createdBy);
     }
     updateOrderStatus(id, body) {
         return this.admin.updateOrderStatus(id, body.status, body.reason);
@@ -927,9 +928,10 @@ __decorate([
 __decorate([
     (0, common_1.Post)('pos/place-order'),
     (0, common_1.HttpCode)(200),
-    __param(0, (0, common_1.Body)()),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
+    __metadata("design:paramtypes", [Object, Object]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "placePosOrder", null);
 __decorate([

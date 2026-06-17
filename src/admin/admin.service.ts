@@ -54,6 +54,14 @@ const ORDER_STATUSES = [
   'failed',
   'refund_requested',
   'refunded',
+  // POS (Take Away / Dine In) lifecycle states. These are additive — the
+  // existing customer-app / delivery flow is unchanged. Take Away ends at
+  // `completed` via `ready_for_pickup`; Dine In via `served`. They carry no
+  // delivery semantics, so no DM/notification logic is triggered for them.
+  'created',
+  'ready_for_pickup',
+  'served',
+  'completed',
 ] as const;
 type OrderStatus = (typeof ORDER_STATUSES)[number];
 
@@ -430,6 +438,7 @@ export class AdminService {
         order_amount?: number; coupon_discount_amount?: number; total_tax_amount?: number;
         delivery_charge?: number; restaurant_discount_amount?: number;
         payment_status?: string; order_status?: string; payment_method?: string; order_type?: string;
+        table_number?: string | null;
         coupon_code?: string | null; order_note?: string | null; delivery_address?: string | null;
         cancellation_reason?: string | null; canceled_by?: string | null;
         contact_person_name?: string | null; contact_person_number?: string | null;
@@ -467,6 +476,7 @@ export class AdminService {
           order_status: order.order_status,
           payment_method: order.payment_method,
           order_type: order.order_type,
+          table_number: order.table_number ?? null,
           coupon_code: order.coupon_code ?? null,
           order_note: order.order_note ?? null,
           delivery_address: order.delivery_address ?? null,
@@ -2709,25 +2719,44 @@ export class AdminService {
   /** Place a POS order on behalf of a restaurant (admin walk-in / phone order).
    *  Mirrors Laravel's POSController::placeOrder — creates the order plus its
    *  line items so it shows up in the orders list + detail like any order. */
-  async createPosOrder(body: {
-    restaurant_id?: number;
-    items?: Array<{ food_id?: number; name?: string; price?: number; quantity?: number }>;
-    customer_name?: string;
-    customer_phone?: string;
-    address?: string;
-    order_type?: string;
-    payment_method?: string;
-    discount?: number;
-    tax_percent?: number;
-    delivery_charge?: number;
-    additional_charge?: number;
-    extra_packaging_amount?: number;
-    order_note?: string;
-  }) {
+  async createPosOrder(
+    body: {
+      restaurant_id?: number;
+      items?: Array<{ food_id?: number; name?: string; price?: number; quantity?: number }>;
+      customer_name?: string;
+      customer_phone?: string;
+      address?: string;
+      order_type?: string;
+      table_number?: string | number;
+      payment_method?: string;
+      discount?: number;
+      tax_percent?: number;
+      delivery_charge?: number;
+      additional_charge?: number;
+      extra_packaging_amount?: number;
+      order_note?: string;
+    },
+    createdBy?: { kind: string; id: number },
+  ) {
     if (!body.restaurant_id) throw new BadRequestException({ errors: [{ code: 'restaurant_id', message: 'restaurant is required' }] });
     const items = (body.items ?? []).filter((i) => i.food_id && (i.quantity ?? 0) > 0);
     if (items.length === 0) throw new BadRequestException({ errors: [{ code: 'items', message: 'add at least one item' }] });
     if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+
+    // POS supports exactly three order types. Delivery keeps the existing
+    // delivery flow (DM is assigned later via the existing dispatch endpoint);
+    // Take Away and Dine In never get a delivery man.
+    const orderType = body.order_type ?? 'take_away';
+    if (!['take_away', 'dine_in', 'delivery'].includes(orderType)) {
+      throw new BadRequestException({ errors: [{ code: 'order_type', message: 'order_type must be take_away, dine_in or delivery' }] });
+    }
+    // Table number is mandatory for Dine In and MUST be null for the others.
+    let tableNumber: string | null = null;
+    if (orderType === 'dine_in') {
+      const tn = body.table_number === undefined || body.table_number === null ? '' : String(body.table_number).trim();
+      if (!tn) throw new BadRequestException({ errors: [{ code: 'table_number', message: 'table number is required for dine in' }] });
+      tableNumber = tn;
+    }
 
     const restaurant = await this.mongo.findByMysqlId<{ mysql_id: number; tax?: number }>('restaurants', Number(body.restaurant_id));
     if (!restaurant) throw new NotFoundException({ errors: [{ code: 'restaurant', message: 'Restaurant not found' }] });
@@ -2749,6 +2778,8 @@ export class AdminService {
       mysql_id: orderId,
       mysql_user_id: null,
       mysql_restaurant_id: Number(body.restaurant_id),
+      // No delivery man at creation. For `delivery` orders one is assigned later
+      // through the existing dispatch endpoint; Take Away / Dine In never get one.
       mysql_delivery_man_id: null,
       order_amount: orderAmount,
       total_tax_amount: taxAmount,
@@ -2759,7 +2790,10 @@ export class AdminService {
       payment_status: 'paid',
       order_status: 'confirmed',
       payment_method: body.payment_method ?? 'cash',
-      order_type: body.order_type ?? 'take_away',
+      order_type: orderType,
+      table_number: tableNumber, // null for take_away & delivery
+      created_by: createdBy?.id ?? null,
+      created_by_type: createdBy?.kind ?? null,
       order_note: body.order_note ?? null,
       delivery_address: body.address ?? null,
       contact_person_name: body.customer_name ?? 'Walk-in customer',

@@ -199,7 +199,9 @@ export class OrderService {
       // If no slab covers the distance, fall back to the restaurant flat fee.
       let deliveryCharge = 0;
       let deliveryGst = 0;
-      if (body.order_type !== 'take_away') {
+      // Take Away and Dine In are collected/eaten at the restaurant — no delivery
+      // leg, so they carry no delivery charge. Only Home Delivery is charged.
+      if (body.order_type !== 'take_away' && body.order_type !== 'dine_in') {
         // Distance: prefer what the app sent, else compute from coordinates.
         let distanceKm = body.distance != null && Number.isFinite(Number(body.distance)) ? Math.max(0, Number(body.distance)) : NaN;
         if (Number.isNaN(distanceKm)) {

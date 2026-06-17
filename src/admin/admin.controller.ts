@@ -108,8 +108,12 @@ export class AdminController {
 
   @Post('pos/place-order')
   @HttpCode(200)
-  placePosOrder(@Body() body: Parameters<AdminService['createPosOrder']>[0]) {
-    return this.admin.createPosOrder(body);
+  placePosOrder(
+    @Req() req: AuthedRequest,
+    @Body() body: Parameters<AdminService['createPosOrder']>[0],
+  ) {
+    const createdBy = req.actor ? { kind: req.actor.kind, id: Number(req.actor.id) } : undefined;
+    return this.admin.createPosOrder(body, createdBy);
   }
 
   @Patch('orders/:id/status')

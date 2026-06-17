@@ -15,6 +15,7 @@ export declare class BusinessSettingsService implements OnModuleInit {
     get(key: string): Promise<string | null>;
     getJson<T = unknown>(key: string): Promise<T | null>;
     getBool(key: string): Promise<boolean>;
+    getBoolDefault(key: string, fallback: boolean): Promise<boolean>;
     getInt(key: string, fallback?: number): Promise<number>;
     getStatus(key: string): Promise<boolean>;
 }

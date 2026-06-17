@@ -81,6 +81,7 @@ export declare class ConfigController {
         refund_active_status: boolean;
         take_away: boolean;
         dine_in: boolean;
+        dine_in_order_option: number;
         repeat_order_option: boolean;
         home_delivery: boolean;
         active_payment_method_list: {

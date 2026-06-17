@@ -124,7 +124,11 @@ export class ConfigController {
       fav_icon_full_url: fullUrl('business', favIcon),
       refund_active_status: await this.bs.getBool('refund_active_status'),
       take_away: await this.bs.getBool('take_away'),
-      dine_in: await this.bs.getBool('dine_in'),
+      dine_in: await this.bs.getBoolDefault('dine_in', true),
+      // The customer app gates the "Dine In" checkout option on this key and
+      // compares it to the integer 1 (not a bool), so it MUST be 1/0. Mirrors
+      // the `dine_in` business setting; ON by default until admin disables it.
+      dine_in_order_option: (await this.bs.getBoolDefault('dine_in', true)) ? 1 : 0,
       repeat_order_option: await this.bs.getBool('repeat_order_option'),
       home_delivery: await this.bs.getBool('home_delivery'),
       // Digital payment gateways the apps list (customer checkout + vendor

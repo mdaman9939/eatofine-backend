@@ -21,6 +21,7 @@ interface MongoRestaurantDoc {
   free_delivery?: boolean;
   delivery?: boolean;
   take_away?: boolean;
+  is_dine_in_active?: boolean;
   veg?: boolean;
   non_veg?: boolean;
   minimum_shipping_charge?: number;
@@ -105,6 +106,7 @@ export class BrowseService {
     free_delivery: boolean;
     delivery: boolean;
     take_away: boolean;
+    is_dine_in_active?: boolean;
     veg: boolean;
     non_veg: boolean;
     minimum_shipping_charge: number | { toString(): string };
@@ -137,6 +139,10 @@ export class BrowseService {
       free_delivery: r.free_delivery ? 1 : 0,
       delivery: r.delivery ? 1 : 0,
       take_away: r.take_away ? 1 : 0,
+      // The customer app reads this as a boolean (isActiveDineIn) and gates the
+      // "Dine In" checkout option on it. Default ON unless a restaurant has
+      // explicitly opted out (is_dine_in_active === false from the vendor app).
+      is_dine_in_active: r.is_dine_in_active === false ? false : true,
       veg: r.veg ? 1 : 0,
       non_veg: r.non_veg ? 1 : 0,
       minimum_shipping_charge: Number(r.minimum_shipping_charge ?? 0),
@@ -182,6 +188,10 @@ export class BrowseService {
       free_delivery: r.free_delivery ? 1 : 0,
       delivery: r.delivery ? 1 : 0,
       take_away: r.take_away ? 1 : 0,
+      // The customer app reads this as a boolean (isActiveDineIn) and gates the
+      // "Dine In" checkout option on it. Default ON unless a restaurant has
+      // explicitly opted out (is_dine_in_active === false from the vendor app).
+      is_dine_in_active: r.is_dine_in_active === false ? false : true,
       veg: r.veg ? 1 : 0,
       non_veg: r.non_veg ? 1 : 0,
       minimum_shipping_charge: Number(r.minimum_shipping_charge ?? 0),

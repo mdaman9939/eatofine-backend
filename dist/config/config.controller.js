@@ -113,7 +113,8 @@ let ConfigController = class ConfigController {
             fav_icon_full_url: fullUrl('business', favIcon),
             refund_active_status: await this.bs.getBool('refund_active_status'),
             take_away: await this.bs.getBool('take_away'),
-            dine_in: await this.bs.getBool('dine_in'),
+            dine_in: await this.bs.getBoolDefault('dine_in', true),
+            dine_in_order_option: (await this.bs.getBoolDefault('dine_in', true)) ? 1 : 0,
             repeat_order_option: await this.bs.getBool('repeat_order_option'),
             home_delivery: await this.bs.getBool('home_delivery'),
             active_payment_method_list: [

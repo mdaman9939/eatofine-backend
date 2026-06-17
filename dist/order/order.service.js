@@ -107,7 +107,7 @@ let OrderService = class OrderService {
             }
             let deliveryCharge = 0;
             let deliveryGst = 0;
-            if (body.order_type !== 'take_away') {
+            if (body.order_type !== 'take_away' && body.order_type !== 'dine_in') {
                 let distanceKm = body.distance != null && Number.isFinite(Number(body.distance)) ? Math.max(0, Number(body.distance)) : NaN;
                 if (Number.isNaN(distanceKm)) {
                     const rLat = Number(restaurant.latitude), rLng = Number(restaurant.longitude);

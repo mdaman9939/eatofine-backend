@@ -175,6 +175,7 @@ export declare class AdminService {
             order_status: string | undefined;
             payment_method: string | undefined;
             order_type: string | undefined;
+            table_number: string | null;
             coupon_code: string | null;
             order_note: string | null;
             delivery_address: string | null;
@@ -253,6 +254,7 @@ export declare class AdminService {
                 failed: Date | null;
             };
             created_at: Date | null;
+            table_number?: undefined;
         };
         user: {
             id: number;
@@ -1278,6 +1280,7 @@ export declare class AdminService {
         customer_phone?: string;
         address?: string;
         order_type?: string;
+        table_number?: string | number;
         payment_method?: string;
         discount?: number;
         tax_percent?: number;
@@ -1285,6 +1288,9 @@ export declare class AdminService {
         additional_charge?: number;
         extra_packaging_amount?: number;
         order_note?: string;
+    }, createdBy?: {
+        kind: string;
+        id: number;
     }): Promise<{
         ok: boolean;
         id: number;

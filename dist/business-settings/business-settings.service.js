@@ -81,6 +81,12 @@ let BusinessSettingsService = class BusinessSettingsService {
             return false;
         return v === '1' || v === 'true';
     }
+    async getBoolDefault(key, fallback) {
+        const v = await this.get(key);
+        if (v === null)
+            return fallback;
+        return v === '1' || v === 'true';
+    }
     async getInt(key, fallback = 0) {
         const v = await this.get(key);
         if (v === null)

@@ -65,6 +65,10 @@ const ORDER_STATUSES = [
     'failed',
     'refund_requested',
     'refunded',
+    'created',
+    'ready_for_pickup',
+    'served',
+    'completed',
 ];
 const TIMESTAMP_COLUMN = {
     pending: 'pending',
@@ -409,6 +413,7 @@ let AdminService = class AdminService {
                     order_status: order.order_status,
                     payment_method: order.payment_method,
                     order_type: order.order_type,
+                    table_number: order.table_number ?? null,
                     coupon_code: order.coupon_code ?? null,
                     order_note: order.order_note ?? null,
                     delivery_address: order.delivery_address ?? null,
@@ -2509,7 +2514,7 @@ let AdminService = class AdminService {
         }
         return [];
     }
-    async createPosOrder(body) {
+    async createPosOrder(body, createdBy) {
         if (!body.restaurant_id)
             throw new common_1.BadRequestException({ errors: [{ code: 'restaurant_id', message: 'restaurant is required' }] });
         const items = (body.items ?? []).filter((i) => i.food_id && (i.quantity ?? 0) > 0);
@@ -2517,6 +2522,17 @@ let AdminService = class AdminService {
             throw new common_1.BadRequestException({ errors: [{ code: 'items', message: 'add at least one item' }] });
         if (!this.useMongo())
             throw new common_1.BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+        const orderType = body.order_type ?? 'take_away';
+        if (!['take_away', 'dine_in', 'delivery'].includes(orderType)) {
+            throw new common_1.BadRequestException({ errors: [{ code: 'order_type', message: 'order_type must be take_away, dine_in or delivery' }] });
+        }
+        let tableNumber = null;
+        if (orderType === 'dine_in') {
+            const tn = body.table_number === undefined || body.table_number === null ? '' : String(body.table_number).trim();
+            if (!tn)
+                throw new common_1.BadRequestException({ errors: [{ code: 'table_number', message: 'table number is required for dine in' }] });
+            tableNumber = tn;
+        }
         const restaurant = await this.mongo.findByMysqlId('restaurants', Number(body.restaurant_id));
         if (!restaurant)
             throw new common_1.NotFoundException({ errors: [{ code: 'restaurant', message: 'Restaurant not found' }] });
@@ -2545,7 +2561,10 @@ let AdminService = class AdminService {
             payment_status: 'paid',
             order_status: 'confirmed',
             payment_method: body.payment_method ?? 'cash',
-            order_type: body.order_type ?? 'take_away',
+            order_type: orderType,
+            table_number: tableNumber,
+            created_by: createdBy?.id ?? null,
+            created_by_type: createdBy?.kind ?? null,
             order_note: body.order_note ?? null,
             delivery_address: body.address ?? null,
             contact_person_name: body.customer_name ?? 'Walk-in customer',

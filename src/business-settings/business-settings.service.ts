@@ -86,6 +86,15 @@ export class BusinessSettingsService implements OnModuleInit {
     return v === '1' || v === 'true';
   }
 
+  /** Like getBool, but returns `fallback` when the key was never saved. Used by
+   *  toggles that should be ON until an admin explicitly turns them off (mirrors
+   *  the admin panel, which renders an unsaved toggle as enabled). */
+  async getBoolDefault(key: string, fallback: boolean): Promise<boolean> {
+    const v = await this.get(key);
+    if (v === null) return fallback;
+    return v === '1' || v === 'true';
+  }
+
   async getInt(key: string, fallback = 0): Promise<number> {
     const v = await this.get(key);
     if (v === null) return fallback;
