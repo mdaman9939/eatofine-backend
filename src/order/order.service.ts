@@ -5,6 +5,7 @@ import { storageFullUrl } from '../common/storage-url';
 import { FcmService } from '../notifications/fcm.service';
 import { UserDeliveryChargesService } from '../enhancements/user-delivery-charges.service';
 import { ZoneService } from '../zone/zone.service';
+import { computeFlatAdditionalCharge, type AdditionalChargeRow } from '../common/additional-charge';
 
 /** Great-circle distance between two lat/lng points, in kilometres. */
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -252,7 +253,11 @@ export class OrderService {
       }
       // Delivery GST rolls into the order's tax so the invoice CGST/SGST covers it.
       totalTax = Math.round((totalTax + deliveryGst) * 100) / 100;
-      const finalAmount = Math.round((orderAmount + totalTax + deliveryCharge) * 100) / 100;
+      // Platform/packaging/convenience fees — the SAME flat value the customer
+      // app shows from config, so the displayed total matches what we charge.
+      const addChargeRows = await this.mongo.findMany<AdditionalChargeRow>('additional_user_charges', {});
+      const additionalCharge = computeFlatAdditionalCharge(addChargeRows).amount;
+      const finalAmount = Math.round((orderAmount + totalTax + deliveryCharge + additionalCharge) * 100) / 100;
       const otp = String(Math.floor(1000 + Math.random() * 9000));
       const now = new Date();
 
@@ -353,7 +358,7 @@ export class OrderService {
         total_tax_amount: Math.round(totalTax * 100) / 100,
         delivery_charge: deliveryCharge,
         coupon_discount_amount: 0,
-        additional_charge: 0,
+        additional_charge: additionalCharge,
         restaurant_discount_amount: 0,
         otp,
         pending: now,

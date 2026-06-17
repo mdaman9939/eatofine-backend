@@ -17,6 +17,7 @@ const storage_url_1 = require("../common/storage-url");
 const fcm_service_1 = require("../notifications/fcm.service");
 const user_delivery_charges_service_1 = require("../enhancements/user-delivery-charges.service");
 const zone_service_1 = require("../zone/zone.service");
+const additional_charge_1 = require("../common/additional-charge");
 function haversineKm(lat1, lng1, lat2, lng2) {
     const toRad = (d) => (d * Math.PI) / 180;
     const R = 6371;
@@ -151,7 +152,9 @@ let OrderService = class OrderService {
                 }
             }
             totalTax = Math.round((totalTax + deliveryGst) * 100) / 100;
-            const finalAmount = Math.round((orderAmount + totalTax + deliveryCharge) * 100) / 100;
+            const addChargeRows = await this.mongo.findMany('additional_user_charges', {});
+            const additionalCharge = (0, additional_charge_1.computeFlatAdditionalCharge)(addChargeRows).amount;
+            const finalAmount = Math.round((orderAmount + totalTax + deliveryCharge + additionalCharge) * 100) / 100;
             const otp = String(Math.floor(1000 + Math.random() * 9000));
             const now = new Date();
             const orderMysqlId = await this.mongo.nextMysqlId('orders');
@@ -239,7 +242,7 @@ let OrderService = class OrderService {
                 total_tax_amount: Math.round(totalTax * 100) / 100,
                 delivery_charge: deliveryCharge,
                 coupon_discount_amount: 0,
-                additional_charge: 0,
+                additional_charge: additionalCharge,
                 restaurant_discount_amount: 0,
                 otp,
                 pending: now,

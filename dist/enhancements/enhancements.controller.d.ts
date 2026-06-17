@@ -133,6 +133,52 @@ export declare class EnhancementsController {
     }>;
     invoice(id: number): Promise<{
         invoice_no: string;
+        eatofine_invoice_no: string;
+        order_id: number;
+        order_date: Date;
+        restaurant: {
+            name: string;
+            address: string;
+            gstin: string | null;
+            fssai: string | null;
+            cin: string | null;
+        };
+        customer: {
+            name: string;
+            email: string | null;
+            phone: string | null;
+            address: string | null;
+            place_of_delivery: string | null;
+        };
+        restaurant_invoice: {
+            hsn: string;
+            service_type: string;
+            items: {
+                name: string;
+                qty: number;
+                unit_rate: number;
+                amount: number;
+            }[];
+            sub_total: number;
+            discount: number;
+            net_value: number;
+            gst_rate_half: number;
+            cgst: number;
+            igst: number;
+            total: number;
+        };
+        eatofine_invoice: {
+            hsn: string;
+            supply_description: string;
+            rows: {
+                description: string;
+                amount: number;
+                cgst: number;
+                sgst: number;
+                net: number;
+            }[];
+            total: number;
+        };
         issued_on: Date | null;
         bill_from: {
             name: string;
@@ -167,6 +213,49 @@ export declare class EnhancementsController {
         };
         payment_method: string | null;
         payment_status: string;
+    } | {
+        invoice_no: string;
+        eatofine_invoice_no: string;
+        issued_on: Date | null;
+        bill_from: {
+            name: string;
+            address: string;
+            gstin: string;
+            state: string;
+            state_code: string;
+        };
+        bill_to: {
+            name: string;
+            email: string | null;
+            phone: string | null;
+            address: string | null;
+        };
+        items: {
+            id: number;
+            name: string;
+            hsn: string;
+            qty: number;
+            unit_price: number;
+            subtotal: number;
+            tax: number;
+        }[];
+        summary: {
+            subtotal: number;
+            delivery_charge: number;
+            tax_total: number;
+            cgst: number;
+            sgst: number;
+            igst: number;
+            grand_total: number;
+        };
+        payment_method: string | null;
+        payment_status: string;
+        order_id?: undefined;
+        order_date?: undefined;
+        restaurant?: undefined;
+        customer?: undefined;
+        restaurant_invoice?: undefined;
+        eatofine_invoice?: undefined;
     }>;
     tds(vid?: string, rate?: string, threshold?: string): Promise<{
         tds_rate: number;

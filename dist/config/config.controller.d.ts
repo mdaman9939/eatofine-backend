@@ -81,6 +81,9 @@ export declare class ConfigController {
         fav_icon: string | null;
         fav_icon_full_url: string | null;
         refund_active_status: boolean;
+        additional_charge_status: number;
+        additional_charge_name: string;
+        additional_charge: number;
         take_away: boolean;
         dine_in: boolean;
         dine_in_order_option: number;

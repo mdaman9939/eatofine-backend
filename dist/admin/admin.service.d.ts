@@ -1008,25 +1008,25 @@ export declare class AdminService {
     listCoupons(): Promise<{
         coupons: {
             id: number;
-            title: string | null;
-            code: string | null;
-            start_date: Date | null;
-            expire_date: Date | null;
+            restaurant_id: number | null;
             min_purchase: number;
             max_discount: number;
             discount: number;
-            discount_type: string;
-            coupon_type: string;
+            total_uses: number;
             limit: number | null;
-            status: boolean;
             created_at: Date | null;
             updated_at: Date | null;
+            status: boolean;
             data: string | null;
-            total_uses: number;
-            created_by: string | null;
-            customer_id: string | null;
             slug: string | null;
-            restaurant_id: number | null;
+            discount_type: string;
+            title: string | null;
+            code: string | null;
+            coupon_type: string;
+            start_date: Date | null;
+            expire_date: Date | null;
+            customer_id: string | null;
+            created_by: string | null;
         }[];
     }>;
     createCoupon(body: {

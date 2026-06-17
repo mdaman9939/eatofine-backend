@@ -178,12 +178,12 @@ let SettlementService = class SettlementService {
         if (!b.identity_ok) {
             this.logger.warn(`Order ${orderId}: accounting identity mismatch — stored anyway for audit.`);
         }
-        await this.creditWalletOnce(orderId, 'restaurant', 'restaurant_wallets', { mysql_restaurant_id: restaurantId }, { mysql_restaurant_id: restaurantId, restaurant_id: restaurantId }, b.restaurant_earning, { owner_id: restaurantId, reference: `settlement#${orderId}` });
+        await this.creditWalletOnce(orderId, 'restaurant', 'restaurant_wallets', { mysql_restaurant_id: restaurantId }, { restaurant_id: restaurantId }, b.restaurant_earning, { owner_id: restaurantId, reference: `settlement#${orderId}` });
         const dmId = order.mysql_delivery_man_id != null ? Number(order.mysql_delivery_man_id) : 0;
         if (dmId > 0) {
-            await this.creditWalletOnce(orderId, 'deliveryman', 'delivery_man_wallets', { mysql_delivery_man_id: dmId }, { mysql_delivery_man_id: dmId, delivery_man_id: dmId }, b.deliveryman_earning, { owner_id: dmId, reference: `settlement#${orderId}` });
+            await this.creditWalletOnce(orderId, 'deliveryman', 'delivery_man_wallets', { mysql_delivery_man_id: dmId }, { delivery_man_id: dmId }, b.deliveryman_earning, { owner_id: dmId, reference: `settlement#${orderId}` });
         }
-        await this.creditWalletOnce(orderId, 'admin', 'admin_wallet', { key: 'platform' }, { key: 'platform' }, b.admin_net, { owner_id: 0, reference: `settlement#${orderId}` });
+        await this.creditWalletOnce(orderId, 'admin', 'admin_wallet', { key: 'platform' }, {}, b.admin_net, { owner_id: 0, reference: `settlement#${orderId}` });
         await this.writeLedgerOnce('platform_revenue_ledger', orderId, {
             mysql_restaurant_id: restaurantId,
             admin_commission: b.admin_commission,

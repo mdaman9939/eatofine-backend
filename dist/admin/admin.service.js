@@ -1804,6 +1804,10 @@ let AdminService = class AdminService {
                     customer_id: r.customer_id ?? null,
                     slug: r.slug ?? null,
                     restaurant_id: r.mysql_restaurant_id ?? r.restaurant_id ?? null,
+                    discount_owner: ['admin', 'restaurant', 'shared'].includes(String(r.discount_owner)) ? r.discount_owner : 'admin',
+                    admin_discount_amount: Number(r.admin_discount_amount ?? 0),
+                    restaurant_discount_amount: Number(r.restaurant_discount_amount ?? 0),
+                    funded_by: ['admin', 'restaurant', 'shared'].includes(String(r.discount_owner)) ? r.discount_owner : 'admin',
                 })),
             };
         }

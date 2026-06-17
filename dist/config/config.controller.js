@@ -18,6 +18,7 @@ const business_settings_service_1 = require("../business-settings/business-setti
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
 const zone_service_1 = require("../zone/zone.service");
+const additional_charge_1 = require("../common/additional-charge");
 let ConfigController = class ConfigController {
     bs;
     prisma;
@@ -50,6 +51,10 @@ let ConfigController = class ConfigController {
             })(),
         ]);
         const fullUrl = (folder, file) => file ? (/^https?:\/\//i.test(file) ? file : `${base}/${folder}/${file}`) : null;
+        const addChargeRows = this.useMongo()
+            ? await this.mongo.findMany('additional_user_charges', {})
+            : [];
+        const addCharge = (0, additional_charge_1.computeFlatAdditionalCharge)(addChargeRows);
         return {
             business_name: await this.bs.get('business_name'),
             logo,
@@ -115,6 +120,9 @@ let ConfigController = class ConfigController {
             fav_icon: favIcon,
             fav_icon_full_url: fullUrl('business', favIcon),
             refund_active_status: await this.bs.getBool('refund_active_status'),
+            additional_charge_status: addCharge.amount > 0 ? 1 : 0,
+            additional_charge_name: addCharge.name,
+            additional_charge: addCharge.amount,
             take_away: await this.bs.getBool('take_away'),
             dine_in: await this.bs.getBoolDefault('dine_in', true),
             dine_in_order_option: (await this.bs.getBoolDefault('dine_in', true)) ? 1 : 0,

@@ -631,6 +631,18 @@ let EnhancementsService = class EnhancementsService {
         }
         return String(value);
     }
+    fyCode(dt) {
+        const startYear = dt.getMonth() + 1 >= 4 ? dt.getFullYear() : dt.getFullYear() - 1;
+        return `${String(startYear % 100).padStart(2, '0')}${String((startYear + 1) % 100).padStart(2, '0')}`;
+    }
+    async assignInvoiceNumber(order, field, prefix, fy, existing) {
+        if (existing)
+            return existing;
+        const seq = (await this.mongo.count('orders', { [field]: { $regex: `^${prefix}${fy}-` } })) + 1;
+        const number = `${prefix}${fy}-${String(seq).padStart(4, '0')}`;
+        await this.mongo.updateOne('orders', { mysql_id: Number(order.mysql_id) }, { [field]: number });
+        return number;
+    }
     async getInvoice(orderId) {
         if (this.useMongo()) {
             const order = await this.mongo.findByMysqlId('orders', orderId);
@@ -649,10 +661,78 @@ let EnhancementsService = class EnhancementsService {
             const tax = Number(order.total_tax_amount ?? 0);
             const delivery = Number(order.delivery_charge ?? 0);
             const dt = (order.created_at_legacy ?? order.created_at) ?? new Date();
-            const month = String(dt.getMonth() + 1).padStart(2, '0');
-            const year = dt.getFullYear();
+            const fy = this.fyCode(dt);
+            const invoiceNo = await this.assignInvoiceNumber(order, 'customer_invoice_number', 'OBR', fy, order.customer_invoice_number);
+            const eatofineNo = await this.assignInvoiceNumber(order, 'eatofine_invoice_number', 'ETFU', fy, order.eatofine_invoice_number);
+            const r2inv = (n) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
+            const foodSubtotal = items.reduce((s, it) => s + Number(it.price) * Number(it.quantity), 0);
+            const foodTax = items.reduce((s, it) => s + Number(it.tax_amount ?? 0), 0);
+            const discountTotal = Number(order.coupon_discount_amount ?? 0) + Number(order.restaurant_discount_amount ?? 0);
+            const netValue = Math.max(0, foodSubtotal - discountTotal);
+            const foodHalfTax = r2inv(foodTax / 2);
+            const gstRateHalf = netValue > 0 ? r2inv(((foodTax / netValue) * 100) / 2) : 2.5;
+            const restItems = items.map((it) => {
+                let parsed = {};
+                try {
+                    parsed = JSON.parse(it.food_details ?? '{}');
+                }
+                catch { }
+                return {
+                    name: parsed.name ?? `Item #${it.food_id ?? '?'}`,
+                    qty: Number(it.quantity),
+                    unit_rate: r2inv(Number(it.price)),
+                    amount: r2inv(Number(it.price) * Number(it.quantity)),
+                };
+            });
+            const svcRow = (description, amount) => {
+                const cgst = r2inv(amount * 0.09);
+                const sgst = r2inv(amount * 0.09);
+                return { description, amount: r2inv(amount), cgst, sgst, net: r2inv(amount + cgst + sgst) };
+            };
+            const eatofineRows = [
+                svcRow('Delivery Charges', Number(order.delivery_charge ?? 0)),
+                svcRow('Order Management Fees', Number(order.additional_charge ?? 0)),
+                svcRow('Other Fees (Ex - convenience/surge/packaging)', Number(order.extra_packaging_amount ?? 0)),
+            ];
+            const eatofineTotal = r2inv(eatofineRows.reduce((s, x) => s + x.net, 0));
+            const ph = (v) => (v && String(v).trim() !== '' ? String(v) : null);
             return {
-                invoice_no: `INV-${year}-${month}-${String(Number(order.mysql_id)).padStart(5, '0')}`,
+                invoice_no: invoiceNo,
+                eatofine_invoice_no: eatofineNo,
+                order_id: Number(order.mysql_id),
+                order_date: dt,
+                restaurant: {
+                    name: restaurant?.name ?? '—',
+                    address: restaurant?.address ?? '—',
+                    gstin: ph(restaurant?.gstin),
+                    fssai: ph(restaurant?.fssai),
+                    cin: ph(restaurant?.cin),
+                },
+                customer: {
+                    name: (user ? `${user.f_name ?? ''} ${user.l_name ?? ''}`.trim() : '') || order.contact_person_name || 'Customer',
+                    email: user?.email ?? null,
+                    phone: user?.phone ?? order.contact_person_number ?? null,
+                    address: this.flattenAddress(order.delivery_address),
+                    place_of_delivery: null,
+                },
+                restaurant_invoice: {
+                    hsn: '996331',
+                    service_type: 'Restaurant Service',
+                    items: restItems,
+                    sub_total: r2inv(foodSubtotal),
+                    discount: r2inv(discountTotal),
+                    net_value: r2inv(netValue),
+                    gst_rate_half: gstRateHalf,
+                    cgst: foodHalfTax,
+                    igst: foodHalfTax,
+                    total: r2inv(netValue + foodTax),
+                },
+                eatofine_invoice: {
+                    hsn: '999799',
+                    supply_description: 'Other Services N.E.C',
+                    rows: eatofineRows,
+                    total: eatofineTotal,
+                },
                 issued_on: order.delivered ?? order.created_at_legacy ?? order.created_at,
                 bill_from: {
                     name: restaurant?.name ?? '—',
@@ -707,10 +787,10 @@ let EnhancementsService = class EnhancementsService {
         const tax = Number(order.total_tax_amount);
         const delivery = Number(order.delivery_charge);
         const dt = order.created_at ?? new Date();
-        const month = String(dt.getMonth() + 1).padStart(2, '0');
-        const year = dt.getFullYear();
+        const fy = this.fyCode(dt);
         return {
-            invoice_no: `INV-${year}-${month}-${String(Number(order.id)).padStart(5, '0')}`,
+            invoice_no: `OBR${fy}-${String(Number(order.id)).padStart(4, '0')}`,
+            eatofine_invoice_no: `ETFU${fy}-${String(Number(order.id)).padStart(4, '0')}`,
             issued_on: order.delivered ?? order.created_at,
             bill_from: {
                 name: restaurant?.name ?? '—',

@@ -4,6 +4,7 @@ import { BusinessSettingsService } from '../business-settings/business-settings.
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { ZoneService } from '../zone/zone.service';
+import { computeFlatAdditionalCharge, type AdditionalChargeRow } from '../common/additional-charge';
 
 interface MongoCurrencyDoc {
   mysql_id?: number;
@@ -48,6 +49,13 @@ export class ConfigController {
 
     const fullUrl = (folder: string, file?: string | null) =>
       file ? (/^https?:\/\//i.test(file) ? file : `${base}/${folder}/${file}`) : null;
+
+    // Consolidate the admin's active FIXED additional charges (Platform/Packaging
+    // /Convenience fees) into the single flat charge the app reads & displays.
+    const addChargeRows = this.useMongo()
+      ? await this.mongo.findMany<AdditionalChargeRow>('additional_user_charges', {})
+      : [];
+    const addCharge = computeFlatAdditionalCharge(addChargeRows);
 
     return {
       business_name: await this.bs.get('business_name'),
@@ -119,6 +127,11 @@ export class ConfigController {
       fav_icon: favIcon,
       fav_icon_full_url: fullUrl('business', favIcon),
       refund_active_status: await this.bs.getBool('refund_active_status'),
+      // Customer-facing additional charge (consolidated from Additional Charges).
+      // App reads `additional_charge_status == 1` (integer), so emit 1/0.
+      additional_charge_status: addCharge.amount > 0 ? 1 : 0,
+      additional_charge_name: addCharge.name,
+      additional_charge: addCharge.amount,
       take_away: await this.bs.getBool('take_away'),
       dine_in: await this.bs.getBoolDefault('dine_in', true),
       // The customer app gates the "Dine In" checkout option on this key and
