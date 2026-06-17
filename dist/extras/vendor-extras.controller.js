@@ -624,6 +624,27 @@ let VendorExtrasController = class VendorExtrasController {
         const created = r.created_at;
         const updated = r.updated_at;
         const u = user ?? null;
+        const rawDa = r.delivery_address;
+        const daObj = (rawDa && typeof rawDa === 'object') ? rawDa : {};
+        const contactName = daObj.contact_person_name ?? r.contact_person_name ?? null;
+        const contactNumber = daObj.contact_person_number ?? r.contact_person_number ?? null;
+        const deliveryAddress = {
+            ...daObj,
+            contact_person_name: contactName,
+            contact_person_number: contactNumber,
+            address: daObj.address ?? (typeof rawDa === 'string' ? rawDa : null),
+        };
+        const orderType = r.order_type ?? 'delivery';
+        const orderReference = {
+            id: Number(r.mysql_id),
+            order_id: Number(r.mysql_id),
+            table_number: r.table_number != null ? String(r.table_number) : null,
+            token_number: r.token_number != null
+                ? String(r.token_number)
+                : (orderType === 'dine_in' ? String(r.mysql_id) : null),
+            created_at: created ? new Date(created).toISOString() : null,
+            updated_at: updated ? new Date(updated).toISOString() : null,
+        };
         return {
             ...(r.legacy ?? {}),
             ...r,
@@ -636,7 +657,9 @@ let VendorExtrasController = class VendorExtrasController {
             order_type: (r.order_type ?? 'delivery'),
             payment_method: (r.payment_method ?? 'cash_on_delivery'),
             payment_status: (r.payment_status ?? 'unpaid'),
-            delivery_address: r.delivery_address ?? null,
+            delivery_address: deliveryAddress,
+            order_reference: orderReference,
+            is_guest: !u,
             created_at: created ? new Date(created).toISOString() : new Date().toISOString(),
             updated_at: updated ? new Date(updated).toISOString() : new Date().toISOString(),
             customer: u
@@ -648,7 +671,16 @@ let VendorExtrasController = class VendorExtrasController {
                     email: u.email ?? null,
                     image_full_url: (0, storage_url_1.storageFullUrl)('profile', u.image ?? null),
                 }
-                : null,
+                : (contactName || contactNumber)
+                    ? {
+                        id: 0,
+                        f_name: contactName ?? 'Walk-in customer',
+                        l_name: '',
+                        phone: contactNumber ?? null,
+                        email: null,
+                        image_full_url: (0, storage_url_1.storageFullUrl)('profile', null),
+                    }
+                    : null,
         };
     }
     async vendorUserMap(orders) {

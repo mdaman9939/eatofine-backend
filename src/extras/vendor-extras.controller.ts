@@ -855,6 +855,36 @@ export class VendorExtrasController {
     const created = (r as { created_at?: Date | string | null }).created_at;
     const updated = (r as { updated_at?: Date | string | null }).updated_at;
     const u = user ?? null;
+
+    // ── Customer / delivery-address (POS & walk-in safe) ─────────────────
+    // POS / walk-in orders have no registered user and no structured address —
+    // fall back to the contact_person_* captured at the counter so the vendor
+    // app's Delivery Information + Customer Details show a name/phone instead of
+    // "Walking Customer (null)".
+    const rawDa = (r as { delivery_address?: unknown }).delivery_address;
+    const daObj = (rawDa && typeof rawDa === 'object') ? (rawDa as Record<string, unknown>) : {};
+    const contactName = (daObj.contact_person_name as string | undefined) ?? (r.contact_person_name as string | undefined) ?? null;
+    const contactNumber = (daObj.contact_person_number as string | undefined) ?? (r.contact_person_number as string | undefined) ?? null;
+    const deliveryAddress = {
+      ...daObj,
+      contact_person_name: contactName,
+      contact_person_number: contactNumber,
+      address: (daObj.address as string | undefined) ?? (typeof rawDa === 'string' ? rawDa : null),
+    };
+
+    // ── Order reference: Table Number + Token Number (dine-in) ───────────
+    const orderType = (r.order_type as string | undefined) ?? 'delivery';
+    const orderReference = {
+      id: Number(r.mysql_id),
+      order_id: Number(r.mysql_id),
+      table_number: (r as { table_number?: unknown }).table_number != null ? String((r as { table_number?: unknown }).table_number) : null,
+      token_number: (r as { token_number?: unknown }).token_number != null
+        ? String((r as { token_number?: unknown }).token_number)
+        : (orderType === 'dine_in' ? String(r.mysql_id) : null),
+      created_at: created ? new Date(created).toISOString() : null,
+      updated_at: updated ? new Date(updated).toISOString() : null,
+    };
+
     return {
       ...(r.legacy ?? {}),
       ...r,
@@ -868,10 +898,13 @@ export class VendorExtrasController {
       order_type: ((r as { order_type?: string }).order_type ?? 'delivery') as string,
       payment_method: ((r as { payment_method?: string }).payment_method ?? 'cash_on_delivery') as string,
       payment_status: ((r as { payment_status?: string }).payment_status ?? 'unpaid') as string,
-      delivery_address: (r as { delivery_address?: unknown }).delivery_address ?? null,
+      delivery_address: deliveryAddress,
+      order_reference: orderReference,
+      is_guest: !u,
       created_at: created ? new Date(created).toISOString() : new Date().toISOString(),
       updated_at: updated ? new Date(updated).toISOString() : new Date().toISOString(),
       // Nested customer object so the restaurant sees who ordered (name / phone).
+      // For POS / walk-in (no user) fall back to the counter contact details.
       customer: u
         ? {
             id: Number(u.mysql_id),
@@ -881,7 +914,16 @@ export class VendorExtrasController {
             email: u.email ?? null,
             image_full_url: storageFullUrl('profile', (u.image as string | null | undefined) ?? null),
           }
-        : null,
+        : (contactName || contactNumber)
+          ? {
+              id: 0,
+              f_name: contactName ?? 'Walk-in customer',
+              l_name: '',
+              phone: contactNumber ?? null,
+              email: null,
+              image_full_url: storageFullUrl('profile', null),
+            }
+          : null,
     };
   }
 

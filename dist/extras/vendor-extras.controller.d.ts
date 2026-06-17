@@ -243,7 +243,20 @@ export declare class VendorExtrasController {
         order_type: string;
         payment_method: string;
         payment_status: string;
-        delivery_address: {} | null;
+        delivery_address: {
+            contact_person_name: string | null;
+            contact_person_number: string | null;
+            address: string | null;
+        };
+        order_reference: {
+            id: number;
+            order_id: number;
+            table_number: string | null;
+            token_number: string | null;
+            created_at: string | null;
+            updated_at: string | null;
+        };
+        is_guest: boolean;
         created_at: string;
         updated_at: string;
         customer: {
@@ -341,7 +354,20 @@ export declare class VendorExtrasController {
             order_type: string;
             payment_method: string;
             payment_status: string;
-            delivery_address: {} | null;
+            delivery_address: {
+                contact_person_name: string | null;
+                contact_person_number: string | null;
+                address: string | null;
+            };
+            order_reference: {
+                id: number;
+                order_id: number;
+                table_number: string | null;
+                token_number: string | null;
+                created_at: string | null;
+                updated_at: string | null;
+            };
+            is_guest: boolean;
             created_at: string;
             updated_at: string;
             customer: {
@@ -443,7 +469,20 @@ export declare class VendorExtrasController {
         order_type: string;
         payment_method: string;
         payment_status: string;
-        delivery_address: {} | null;
+        delivery_address: {
+            contact_person_name: string | null;
+            contact_person_number: string | null;
+            address: string | null;
+        };
+        order_reference: {
+            id: number;
+            order_id: number;
+            table_number: string | null;
+            token_number: string | null;
+            created_at: string | null;
+            updated_at: string | null;
+        };
+        is_guest: boolean;
         created_at: string;
         updated_at: string;
         customer: {
