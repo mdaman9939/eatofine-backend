@@ -4,6 +4,7 @@ import { MongoDataService } from '../mongo/mongo-data.service';
 import { storageFullUrl } from '../common/storage-url';
 import { FcmService } from '../notifications/fcm.service';
 import { UserDeliveryChargesService } from '../enhancements/user-delivery-charges.service';
+import { ZoneService } from '../zone/zone.service';
 
 /** Great-circle distance between two lat/lng points, in kilometres. */
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -78,6 +79,7 @@ export class OrderService {
     private readonly mongo: MongoDataService,
     private readonly fcm: FcmService,
     private readonly userCharges: UserDeliveryChargesService,
+    private readonly zones: ZoneService,
   ) {}
 
   /** Push a real-time "new order" FCM notification to the restaurant's vendor
@@ -155,6 +157,30 @@ export class OrderService {
       const restaurant = await this.mongo.findByMysqlId<MongoRestaurant>('restaurants', body.restaurant_id);
       if (!restaurant) {
         throw new NotFoundException({ errors: [{ code: 'restaurant_id', message: 'not_found' }] });
+      }
+
+      // ── Zone geofence ──────────────────────────────────────────────────
+      // A delivery customer may only order from a restaurant inside their own
+      // zone (e.g. a Delhi address cannot order a UP restaurant). We resolve the
+      // delivery location's zone by point-in-polygon and reject a cross-zone or
+      // out-of-coverage order. Take Away / Dine In are exempt (the buyer travels
+      // to the restaurant). The check is a no-op until the admin draws zone
+      // polygons (geofencingActive=false), so existing behaviour is preserved.
+      if ((body.order_type ?? 'delivery') === 'delivery') {
+        const dLat = Number(body.latitude);
+        const dLng = Number(body.longitude);
+        if (Number.isFinite(dLat) && Number.isFinite(dLng)) {
+          const { zones, geofencingActive, serviceable } = await this.zones.classifyPoint(dLat, dLng);
+          if (geofencingActive) {
+            if (!serviceable) {
+              throw new BadRequestException({ errors: [{ code: 'zone', message: 'We are not available at your location yet.' }] });
+            }
+            const zoneIds = zones.map((z) => z.id);
+            if (restaurant.mysql_zone_id != null && !zoneIds.includes(Number(restaurant.mysql_zone_id))) {
+              throw new BadRequestException({ errors: [{ code: 'zone', message: 'This restaurant does not deliver to your area.' }] });
+            }
+          }
+        }
       }
 
       const itemIds = body.cart.map((c) => Number(c.item_id ?? 0));

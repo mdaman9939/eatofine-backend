@@ -31,6 +31,7 @@ const completion_module_1 = require("./completion/completion.module");
 const refund_module_1 = require("./refund/refund.module");
 const mongo_module_1 = require("./mongo/mongo.module");
 const migration_module_1 = require("./mongo/migration.module");
+const zone_module_1 = require("./zone/zone.module");
 const notifications_module_1 = require("./notifications/notifications.module");
 let AppModule = class AppModule {
 };
@@ -64,6 +65,7 @@ exports.AppModule = AppModule = __decorate([
             refund_module_1.RefundModule,
             mongo_module_1.MongoModule,
             migration_module_1.MigrationModule,
+            zone_module_1.ZoneModule,
             notifications_module_1.NotificationsModule,
         ],
         controllers: [app_controller_1.AppController],

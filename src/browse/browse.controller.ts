@@ -1,4 +1,4 @@
-import { Controller, Get, NotFoundException, Param, Query } from '@nestjs/common';
+import { Controller, Get, Headers, NotFoundException, Param, Query } from '@nestjs/common';
 import { BrowseService } from './browse.service';
 
 const parseZoneIdHeader = (raw: string | string[] | undefined): number | undefined => {
@@ -24,8 +24,10 @@ export class BrowseController {
     @Param('filterData') filter: string,
     @Query('limit') limit: string = '10',
     @Query('offset') offset: string = '1',
+    @Headers('zoneId') zoneHeader?: string,
   ) {
     return this.browse.getRestaurants({
+      zoneId: parseZoneIdHeader(zoneHeader),
       limit: parseInt(limit, 10) || 10,
       offset: parseInt(offset, 10) || 1,
       filter,
@@ -33,13 +35,13 @@ export class BrowseController {
   }
 
   @Get('restaurants/latest')
-  restaurantsLatest(@Query('limit') limit?: string, @Query('offset') offset?: string) {
-    return this.browse.getRestaurantsLatest(undefined, parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
+  restaurantsLatest(@Query('limit') limit?: string, @Query('offset') offset?: string, @Headers('zoneId') zoneHeader?: string) {
+    return this.browse.getRestaurantsLatest(parseZoneIdHeader(zoneHeader), parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
   }
 
   @Get('restaurants/popular')
-  restaurantsPopular(@Query('limit') limit?: string, @Query('offset') offset?: string) {
-    return this.browse.getRestaurantsPopular(undefined, parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
+  restaurantsPopular(@Query('limit') limit?: string, @Query('offset') offset?: string, @Headers('zoneId') zoneHeader?: string) {
+    return this.browse.getRestaurantsPopular(parseZoneIdHeader(zoneHeader), parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
   }
 
   @Get('restaurants/details/:id')
@@ -52,23 +54,23 @@ export class BrowseController {
   }
 
   @Get('products/latest')
-  productsLatest(@Query('limit') limit?: string, @Query('offset') offset?: string) {
-    return this.browse.getProductsLatest(undefined, parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
+  productsLatest(@Query('limit') limit?: string, @Query('offset') offset?: string, @Headers('zoneId') zoneHeader?: string) {
+    return this.browse.getProductsLatest(parseZoneIdHeader(zoneHeader), parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
   }
 
   @Get('products/popular')
-  productsPopular(@Query('limit') limit?: string, @Query('offset') offset?: string) {
-    return this.browse.getProductsPopular(undefined, parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
+  productsPopular(@Query('limit') limit?: string, @Query('offset') offset?: string, @Headers('zoneId') zoneHeader?: string) {
+    return this.browse.getProductsPopular(parseZoneIdHeader(zoneHeader), parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
   }
 
   @Get('products/recommended')
-  productsRecommended(@Query('limit') limit?: string, @Query('offset') offset?: string) {
-    return this.browse.getProductsRecommended(undefined, parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
+  productsRecommended(@Query('limit') limit?: string, @Query('offset') offset?: string, @Headers('zoneId') zoneHeader?: string) {
+    return this.browse.getProductsRecommended(parseZoneIdHeader(zoneHeader), parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
   }
 
   @Get('products/most-reviewed')
-  productsMostReviewed(@Query('limit') limit?: string, @Query('offset') offset?: string) {
-    return this.browse.getProductsMostReviewed(undefined, parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
+  productsMostReviewed(@Query('limit') limit?: string, @Query('offset') offset?: string, @Headers('zoneId') zoneHeader?: string) {
+    return this.browse.getProductsMostReviewed(parseZoneIdHeader(zoneHeader), parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
   }
 
   @Get('products/details/:id')

@@ -16,6 +16,7 @@ const mongo_data_service_1 = require("../mongo/mongo-data.service");
 const storage_url_1 = require("../common/storage-url");
 const fcm_service_1 = require("../notifications/fcm.service");
 const user_delivery_charges_service_1 = require("../enhancements/user-delivery-charges.service");
+const zone_service_1 = require("../zone/zone.service");
 function haversineKm(lat1, lng1, lat2, lng2) {
     const toRad = (d) => (d * Math.PI) / 180;
     const R = 6371;
@@ -29,11 +30,13 @@ let OrderService = class OrderService {
     mongo;
     fcm;
     userCharges;
-    constructor(prisma, mongo, fcm, userCharges) {
+    zones;
+    constructor(prisma, mongo, fcm, userCharges, zones) {
         this.prisma = prisma;
         this.mongo = mongo;
         this.fcm = fcm;
         this.userCharges = userCharges;
+        this.zones = zones;
     }
     async pushNewOrderToRestaurant(restaurantId, orderId) {
         try {
@@ -71,6 +74,22 @@ let OrderService = class OrderService {
             const restaurant = await this.mongo.findByMysqlId('restaurants', body.restaurant_id);
             if (!restaurant) {
                 throw new common_1.NotFoundException({ errors: [{ code: 'restaurant_id', message: 'not_found' }] });
+            }
+            if ((body.order_type ?? 'delivery') === 'delivery') {
+                const dLat = Number(body.latitude);
+                const dLng = Number(body.longitude);
+                if (Number.isFinite(dLat) && Number.isFinite(dLng)) {
+                    const { zones, geofencingActive, serviceable } = await this.zones.classifyPoint(dLat, dLng);
+                    if (geofencingActive) {
+                        if (!serviceable) {
+                            throw new common_1.BadRequestException({ errors: [{ code: 'zone', message: 'We are not available at your location yet.' }] });
+                        }
+                        const zoneIds = zones.map((z) => z.id);
+                        if (restaurant.mysql_zone_id != null && !zoneIds.includes(Number(restaurant.mysql_zone_id))) {
+                            throw new common_1.BadRequestException({ errors: [{ code: 'zone', message: 'This restaurant does not deliver to your area.' }] });
+                        }
+                    }
+                }
             }
             const itemIds = body.cart.map((c) => Number(c.item_id ?? 0));
             const foods = await this.mongo.findMany('foods', { mysql_id: { $in: itemIds } });
@@ -575,6 +594,7 @@ exports.OrderService = OrderService = __decorate([
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
         mongo_data_service_1.MongoDataService,
         fcm_service_1.FcmService,
-        user_delivery_charges_service_1.UserDeliveryChargesService])
+        user_delivery_charges_service_1.UserDeliveryChargesService,
+        zone_service_1.ZoneService])
 ], OrderService);
 //# sourceMappingURL=order.service.js.map

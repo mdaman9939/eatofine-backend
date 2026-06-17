@@ -2,12 +2,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { FcmService } from '../notifications/fcm.service';
 import { UserDeliveryChargesService } from '../enhancements/user-delivery-charges.service';
+import { ZoneService } from '../zone/zone.service';
 export declare class OrderService {
     private readonly prisma;
     private readonly mongo;
     private readonly fcm;
     private readonly userCharges;
-    constructor(prisma: PrismaService, mongo: MongoDataService, fcm: FcmService, userCharges: UserDeliveryChargesService);
+    private readonly zones;
+    constructor(prisma: PrismaService, mongo: MongoDataService, fcm: FcmService, userCharges: UserDeliveryChargesService, zones: ZoneService);
     private pushNewOrderToRestaurant;
     private useMongo;
     placeOrder(userId: bigint, body: {

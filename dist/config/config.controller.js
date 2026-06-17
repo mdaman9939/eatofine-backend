@@ -17,14 +17,17 @@ const common_1 = require("@nestjs/common");
 const business_settings_service_1 = require("../business-settings/business-settings.service");
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
+const zone_service_1 = require("../zone/zone.service");
 let ConfigController = class ConfigController {
     bs;
     prisma;
     mongo;
-    constructor(bs, prisma, mongo) {
+    zones;
+    constructor(bs, prisma, mongo, zones) {
         this.bs = bs;
         this.prisma = prisma;
         this.mongo = mongo;
+        this.zones = zones;
     }
     useMongo() {
         const v = (process.env.USE_MONGO_CONFIG ?? '1').toLowerCase();
@@ -248,26 +251,10 @@ let ConfigController = class ConfigController {
     async getZoneId(latStr, lngStr) {
         const lat = parseFloat(latStr ?? '');
         const lng = parseFloat(lngStr ?? '');
-        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-            return { zone_id: '[]', zone_data: [] };
-        }
-        if (this.useMongo()) {
-            const rows = await this.mongo.findMany('zones', { status: true }, { sort: { mysql_id: 1 }, limit: 1, projection: { mysql_id: 1, name: 1 } });
-            const fallback = rows[0] ?? null;
-            const fbId = fallback ? Number(fallback.mysql_id) : null;
-            return {
-                zone_id: JSON.stringify(fbId !== null ? [fbId] : []),
-                zone_data: fbId !== null ? [{ id: fbId, name: fallback?.name ?? null }] : [],
-            };
-        }
-        const fallback = await this.prisma.zones.findFirst({
-            where: { status: true },
-            orderBy: { id: 'asc' },
-            select: { id: true, name: true },
-        });
+        const { zones } = await this.zones.classifyPoint(lat, lng);
         return {
-            zone_id: JSON.stringify(fallback ? [Number(fallback.id)] : []),
-            zone_data: fallback ? [{ id: Number(fallback.id), name: fallback.name }] : [],
+            zone_id: JSON.stringify(zones.map((z) => z.id)),
+            zone_data: zones.map((z) => ({ id: z.id, name: z.name })),
         };
     }
 };
@@ -323,7 +310,8 @@ exports.ConfigController = ConfigController = __decorate([
     (0, common_1.Controller)('config'),
     __metadata("design:paramtypes", [business_settings_service_1.BusinessSettingsService,
         prisma_service_1.PrismaService,
-        mongo_data_service_1.MongoDataService])
+        mongo_data_service_1.MongoDataService,
+        zone_service_1.ZoneService])
 ], ConfigController);
 function haversineMeters(lat1, lon1, lat2, lon2) {
     const R = 6371000;

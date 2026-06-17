@@ -3,6 +3,7 @@ import type { Request } from 'express';
 import { BusinessSettingsService } from '../business-settings/business-settings.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { ZoneService } from '../zone/zone.service';
 
 interface MongoCurrencyDoc {
   mysql_id?: number;
@@ -12,18 +13,13 @@ interface MongoCurrencyDoc {
   exchange_rate?: number | string | null;
 }
 
-interface MongoZoneDoc {
-  mysql_id?: number;
-  name?: string | null;
-  status?: boolean | number | null;
-}
-
 @Controller('config')
 export class ConfigController {
   constructor(
     private readonly bs: BusinessSettingsService,
     private readonly prisma: PrismaService,
     private readonly mongo: MongoDataService,
+    private readonly zones: ZoneService,
   ) {}
 
   /** Feature flag — when "1", config reads route to MongoDB instead of MySQL. */
@@ -295,33 +291,19 @@ export class ConfigController {
   async getZoneId(@Query('lat') latStr?: string, @Query('lng') lngStr?: string) {
     const lat = parseFloat(latStr ?? '');
     const lng = parseFloat(lngStr ?? '');
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      // The Flutter customer app does `jsonDecode(json['zone_id'])`, so
-      // zone_id must be a JSON-encoded STRING, not an array. zone_data is
-      // already iterated as an array.
-      return { zone_id: '[]', zone_data: [] };
-    }
-    if (this.useMongo()) {
-      const rows = await this.mongo.findMany<MongoZoneDoc>(
-        'zones',
-        { status: true },
-        { sort: { mysql_id: 1 }, limit: 1, projection: { mysql_id: 1, name: 1 } },
-      );
-      const fallback = rows[0] ?? null;
-      const fbId = fallback ? Number(fallback.mysql_id) : null;
-      return {
-        zone_id: JSON.stringify(fbId !== null ? [fbId] : []),
-        zone_data: fbId !== null ? [{ id: fbId, name: fallback?.name ?? null }] : [],
-      };
-    }
-    const fallback = await this.prisma.zones.findFirst({
-      where: { status: true },
-      orderBy: { id: 'asc' },
-      select: { id: true, name: true },
-    });
+    // Real geofence: point-in-polygon test against each zone's drawn coverage
+    // area. The matching zone(s) become the app's zoneId header, so a customer
+    // only sees/orders restaurants in their own zone. Outside every drawn zone
+    // → empty (the app shows "not available in your area"). Until the admin
+    // draws any polygon, ZoneService falls back to the first active zone so the
+    // platform behaves exactly as before.
+    // NOTE: the Flutter customer app does `jsonDecode(json['zone_id'])`, so
+    // zone_id MUST be a JSON-encoded STRING (not a raw array); zone_data is an
+    // array it iterates directly.
+    const { zones } = await this.zones.classifyPoint(lat, lng);
     return {
-      zone_id: JSON.stringify(fallback ? [Number(fallback.id)] : []),
-      zone_data: fallback ? [{ id: Number(fallback.id), name: fallback.name }] : [],
+      zone_id: JSON.stringify(zones.map((z) => z.id)),
+      zone_data: zones.map((z) => ({ id: z.id, name: z.name })),
     };
   }
 }

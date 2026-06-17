@@ -3,7 +3,7 @@ declare const parseZoneIdHeader: (raw: string | string[] | undefined) => number 
 export declare class BrowseController {
     private readonly browse;
     constructor(browse: BrowseService);
-    restaurantsList(filter: string, limit?: string, offset?: string): Promise<{
+    restaurantsList(filter: string, limit?: string, offset?: string, zoneHeader?: string): Promise<{
         filter_data: string;
         total_size: number;
         limit: string;
@@ -82,7 +82,7 @@ export declare class BrowseController {
             food_section: number;
         }[];
     }>;
-    restaurantsLatest(limit?: string, offset?: string): Promise<{
+    restaurantsLatest(limit?: string, offset?: string, zoneHeader?: string): Promise<{
         total_size: number;
         limit: string;
         offset: string;
@@ -159,7 +159,7 @@ export declare class BrowseController {
             food_section: number;
         }[];
     }>;
-    restaurantsPopular(limit?: string, offset?: string): Promise<{
+    restaurantsPopular(limit?: string, offset?: string, zoneHeader?: string): Promise<{
         total_size: number;
         limit: string;
         offset: string;
@@ -367,7 +367,7 @@ export declare class BrowseController {
         closeing_time: Date | null;
         food_section: number;
     }>;
-    productsLatest(limit?: string, offset?: string): Promise<{
+    productsLatest(limit?: string, offset?: string, zoneHeader?: string): Promise<{
         total_size: number;
         limit: string;
         offset: string;
@@ -426,7 +426,7 @@ export declare class BrowseController {
             recommended: number;
         }[];
     }>;
-    productsPopular(limit?: string, offset?: string): Promise<{
+    productsPopular(limit?: string, offset?: string, zoneHeader?: string): Promise<{
         total_size: number;
         limit: string;
         offset: string;
@@ -485,7 +485,7 @@ export declare class BrowseController {
             recommended: number;
         }[];
     }>;
-    productsRecommended(limit?: string, offset?: string): Promise<{
+    productsRecommended(limit?: string, offset?: string, zoneHeader?: string): Promise<{
         total_size: number;
         limit: string;
         offset: string;
@@ -544,7 +544,7 @@ export declare class BrowseController {
             recommended: number;
         }[];
     }>;
-    productsMostReviewed(limit?: string, offset?: string): Promise<{
+    productsMostReviewed(limit?: string, offset?: string, zoneHeader?: string): Promise<{
         total_size: number;
         limit: string;
         offset: string;

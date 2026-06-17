@@ -39,18 +39,19 @@ let BrowseController = class BrowseController {
     constructor(browse) {
         this.browse = browse;
     }
-    async restaurantsList(filter, limit = '10', offset = '1') {
+    async restaurantsList(filter, limit = '10', offset = '1', zoneHeader) {
         return this.browse.getRestaurants({
+            zoneId: parseZoneIdHeader(zoneHeader),
             limit: parseInt(limit, 10) || 10,
             offset: parseInt(offset, 10) || 1,
             filter,
         });
     }
-    restaurantsLatest(limit, offset) {
-        return this.browse.getRestaurantsLatest(undefined, parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
+    restaurantsLatest(limit, offset, zoneHeader) {
+        return this.browse.getRestaurantsLatest(parseZoneIdHeader(zoneHeader), parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
     }
-    restaurantsPopular(limit, offset) {
-        return this.browse.getRestaurantsPopular(undefined, parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
+    restaurantsPopular(limit, offset, zoneHeader) {
+        return this.browse.getRestaurantsPopular(parseZoneIdHeader(zoneHeader), parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
     }
     async restaurantDetails(id) {
         const result = await this.browse.getRestaurantDetails(id);
@@ -58,17 +59,17 @@ let BrowseController = class BrowseController {
             throw new common_1.NotFoundException({ errors: [{ code: 'restaurant_id', message: 'not_found' }] });
         return result;
     }
-    productsLatest(limit, offset) {
-        return this.browse.getProductsLatest(undefined, parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
+    productsLatest(limit, offset, zoneHeader) {
+        return this.browse.getProductsLatest(parseZoneIdHeader(zoneHeader), parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
     }
-    productsPopular(limit, offset) {
-        return this.browse.getProductsPopular(undefined, parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
+    productsPopular(limit, offset, zoneHeader) {
+        return this.browse.getProductsPopular(parseZoneIdHeader(zoneHeader), parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
     }
-    productsRecommended(limit, offset) {
-        return this.browse.getProductsRecommended(undefined, parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
+    productsRecommended(limit, offset, zoneHeader) {
+        return this.browse.getProductsRecommended(parseZoneIdHeader(zoneHeader), parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
     }
-    productsMostReviewed(limit, offset) {
-        return this.browse.getProductsMostReviewed(undefined, parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
+    productsMostReviewed(limit, offset, zoneHeader) {
+        return this.browse.getProductsMostReviewed(parseZoneIdHeader(zoneHeader), parseInt(limit ?? '10', 10), parseInt(offset ?? '1', 10));
     }
     async productDetails(idStr) {
         const id = parseInt(idStr, 10);
@@ -93,24 +94,27 @@ __decorate([
     __param(0, (0, common_1.Param)('filterData')),
     __param(1, (0, common_1.Query)('limit')),
     __param(2, (0, common_1.Query)('offset')),
+    __param(3, (0, common_1.Headers)('zoneId')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, String, String]),
+    __metadata("design:paramtypes", [String, String, String, String]),
     __metadata("design:returntype", Promise)
 ], BrowseController.prototype, "restaurantsList", null);
 __decorate([
     (0, common_1.Get)('restaurants/latest'),
     __param(0, (0, common_1.Query)('limit')),
     __param(1, (0, common_1.Query)('offset')),
+    __param(2, (0, common_1.Headers)('zoneId')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, String]),
+    __metadata("design:paramtypes", [String, String, String]),
     __metadata("design:returntype", void 0)
 ], BrowseController.prototype, "restaurantsLatest", null);
 __decorate([
     (0, common_1.Get)('restaurants/popular'),
     __param(0, (0, common_1.Query)('limit')),
     __param(1, (0, common_1.Query)('offset')),
+    __param(2, (0, common_1.Headers)('zoneId')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, String]),
+    __metadata("design:paramtypes", [String, String, String]),
     __metadata("design:returntype", void 0)
 ], BrowseController.prototype, "restaurantsPopular", null);
 __decorate([
@@ -124,32 +128,36 @@ __decorate([
     (0, common_1.Get)('products/latest'),
     __param(0, (0, common_1.Query)('limit')),
     __param(1, (0, common_1.Query)('offset')),
+    __param(2, (0, common_1.Headers)('zoneId')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, String]),
+    __metadata("design:paramtypes", [String, String, String]),
     __metadata("design:returntype", void 0)
 ], BrowseController.prototype, "productsLatest", null);
 __decorate([
     (0, common_1.Get)('products/popular'),
     __param(0, (0, common_1.Query)('limit')),
     __param(1, (0, common_1.Query)('offset')),
+    __param(2, (0, common_1.Headers)('zoneId')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, String]),
+    __metadata("design:paramtypes", [String, String, String]),
     __metadata("design:returntype", void 0)
 ], BrowseController.prototype, "productsPopular", null);
 __decorate([
     (0, common_1.Get)('products/recommended'),
     __param(0, (0, common_1.Query)('limit')),
     __param(1, (0, common_1.Query)('offset')),
+    __param(2, (0, common_1.Headers)('zoneId')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, String]),
+    __metadata("design:paramtypes", [String, String, String]),
     __metadata("design:returntype", void 0)
 ], BrowseController.prototype, "productsRecommended", null);
 __decorate([
     (0, common_1.Get)('products/most-reviewed'),
     __param(0, (0, common_1.Query)('limit')),
     __param(1, (0, common_1.Query)('offset')),
+    __param(2, (0, common_1.Headers)('zoneId')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, String]),
+    __metadata("design:paramtypes", [String, String, String]),
     __metadata("design:returntype", void 0)
 ], BrowseController.prototype, "productsMostReviewed", null);
 __decorate([

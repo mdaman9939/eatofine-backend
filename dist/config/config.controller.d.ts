@@ -2,11 +2,13 @@ import type { Request } from 'express';
 import { BusinessSettingsService } from '../business-settings/business-settings.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { ZoneService } from '../zone/zone.service';
 export declare class ConfigController {
     private readonly bs;
     private readonly prisma;
     private readonly mongo;
-    constructor(bs: BusinessSettingsService, prisma: PrismaService, mongo: MongoDataService);
+    private readonly zones;
+    constructor(bs: BusinessSettingsService, prisma: PrismaService, mongo: MongoDataService, zones: ZoneService);
     private useMongo;
     getConfig(req: Request): Promise<{
         business_name: string | null;
