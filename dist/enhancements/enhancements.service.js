@@ -13,12 +13,16 @@ exports.EnhancementsService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
+const business_settings_service_1 = require("../business-settings/business-settings.service");
+const decimal_1 = require("../common/decimal");
 let EnhancementsService = class EnhancementsService {
     prisma;
     mongo;
-    constructor(prisma, mongo) {
+    bs;
+    constructor(prisma, mongo, bs) {
         this.prisma = prisma;
         this.mongo = mongo;
+        this.bs = bs;
     }
     useMongo() {
         const v = (process.env.USE_MONGO_ENHANCEMENTS ?? '1').toLowerCase();
@@ -225,9 +229,9 @@ let EnhancementsService = class EnhancementsService {
                 id: Number(r.mysql_id),
                 charge_head: r.charge_head,
                 charge_type: r.charge_type,
-                amount: Number(r.amount),
+                amount: (0, decimal_1.toNum)(r.amount),
                 gst_applicable: !!r.gst_applicable,
-                gst_rate: Number(r.gst_rate),
+                gst_rate: (0, decimal_1.toNum)(r.gst_rate),
                 hsn_sac: r.hsn_sac ?? null,
                 description: r.description ?? null,
                 status: !!r.status,
@@ -664,13 +668,18 @@ let EnhancementsService = class EnhancementsService {
             const fy = this.fyCode(dt);
             const invoiceNo = await this.assignInvoiceNumber(order, 'customer_invoice_number', 'OBR', fy, order.customer_invoice_number);
             const eatofineNo = await this.assignInvoiceNumber(order, 'eatofine_invoice_number', 'ETFU', fy, order.eatofine_invoice_number);
+            const [svcCgstRate, svcSgstRate, foodGstRate] = await Promise.all([
+                this.bs.getNumber('service_invoice_cgst_rate', 9),
+                this.bs.getNumber('service_invoice_sgst_rate', 9),
+                this.bs.getNumber('food_gst_rate', 5),
+            ]);
             const r2inv = (n) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
             const foodSubtotal = items.reduce((s, it) => s + Number(it.price) * Number(it.quantity), 0);
             const foodTax = items.reduce((s, it) => s + Number(it.tax_amount ?? 0), 0);
             const discountTotal = Number(order.coupon_discount_amount ?? 0) + Number(order.restaurant_discount_amount ?? 0);
             const netValue = Math.max(0, foodSubtotal - discountTotal);
             const foodHalfTax = r2inv(foodTax / 2);
-            const gstRateHalf = netValue > 0 ? r2inv(((foodTax / netValue) * 100) / 2) : 2.5;
+            const gstRateHalf = netValue > 0 ? r2inv(((foodTax / netValue) * 100) / 2) : r2inv(foodGstRate / 2);
             const restItems = items.map((it) => {
                 let parsed = {};
                 try {
@@ -685,8 +694,8 @@ let EnhancementsService = class EnhancementsService {
                 };
             });
             const svcRow = (description, amount) => {
-                const cgst = r2inv(amount * 0.09);
-                const sgst = r2inv(amount * 0.09);
+                const cgst = r2inv(amount * (svcCgstRate / 100));
+                const sgst = r2inv(amount * (svcSgstRate / 100));
                 return { description, amount: r2inv(amount), cgst, sgst, net: r2inv(amount + cgst + sgst) };
             };
             const eatofineRows = [
@@ -948,6 +957,7 @@ exports.EnhancementsService = EnhancementsService;
 exports.EnhancementsService = EnhancementsService = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
-        mongo_data_service_1.MongoDataService])
+        mongo_data_service_1.MongoDataService,
+        business_settings_service_1.BusinessSettingsService])
 ], EnhancementsService);
 //# sourceMappingURL=enhancements.service.js.map

@@ -17,5 +17,6 @@ export declare class BusinessSettingsService implements OnModuleInit {
     getBool(key: string): Promise<boolean>;
     getBoolDefault(key: string, fallback: boolean): Promise<boolean>;
     getInt(key: string, fallback?: number): Promise<number>;
+    getNumber(key: string, fallback: number): Promise<number>;
     getStatus(key: string): Promise<boolean>;
 }

@@ -13,12 +13,24 @@ exports.CompletionService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
+const business_settings_service_1 = require("../business-settings/business-settings.service");
 let CompletionService = class CompletionService {
     prisma;
     mongo;
-    constructor(prisma, mongo) {
+    bs;
+    constructor(prisma, mongo, bs) {
         this.prisma = prisma;
         this.mongo = mongo;
+        this.bs = bs;
+    }
+    async invoiceRates() {
+        const [cgst, sgst, tds, ppo] = await Promise.all([
+            this.bs.getNumber('vendor_invoice_cgst_rate', 9),
+            this.bs.getNumber('vendor_invoice_sgst_rate', 9),
+            this.bs.getNumber('vendor_invoice_tds_rate', 1),
+            this.bs.getNumber('ppo_rate_per_order', 10),
+        ]);
+        return { cgst, sgst, tds, ppo };
     }
     useMongo() {
         const v = (process.env.USE_MONGO_COMPLETION ?? '1').toLowerCase();
@@ -307,6 +319,7 @@ let CompletionService = class CompletionService {
             const fyStartYear = start.getMonth() + 1 >= 4 ? start.getFullYear() : start.getFullYear() - 1;
             const fyCode = `${String(fyStartYear % 100).padStart(2, '0')}${String((fyStartYear + 1) % 100).padStart(2, '0')}`;
             let seq = await this.mongo.count('vendor_invoices', { invoice_number: { $regex: `^RES${fyCode}-` } });
+            const rates = await this.invoiceRates();
             let created = 0;
             for (const row of rollups) {
                 const rid = Number(row._id?.restaurant_id ?? 0);
@@ -334,13 +347,13 @@ let CompletionService = class CompletionService {
                 const commissionPct = Number(restaurant.comission ?? 0);
                 const planType = (restaurant.restaurant_model ?? 'commission').toLowerCase();
                 const commissionBase = (gross * commissionPct) / 100;
-                const ppoBase = planType === 'ppo' ? orders * 10 : 0;
+                const ppoBase = planType === 'ppo' ? orders * rates.ppo : 0;
                 const subFee = 0;
                 const taxable = commissionBase + ppoBase + subFee;
-                const cgst = taxable * 0.09;
-                const sgst = taxable * 0.09;
+                const cgst = taxable * (rates.cgst / 100);
+                const sgst = taxable * (rates.sgst / 100);
                 const total = taxable + cgst + sgst;
-                const tds = total * 0.01;
+                const tds = total * (rates.tds / 100);
                 const netPayable = gross - total - tds;
                 seq += 1;
                 const invNumber = `RES${fyCode}-${String(seq).padStart(4, '0')}`;
@@ -384,6 +397,7 @@ let CompletionService = class CompletionService {
        WHERE o.order_status = 'delivered'
          AND DATE(o.delivered) BETWEEN '${startStr}' AND '${endStr}'
        GROUP BY r.vendor_id, r.id`);
+        const rates = await this.invoiceRates();
         let created = 0;
         for (const row of rollups) {
             const vid = Number(row.vendor_id);
@@ -401,13 +415,13 @@ let CompletionService = class CompletionService {
             const commissionPct = Number(commRows[0]?.comission ?? 0);
             const planType = (commRows[0]?.restaurant_model ?? 'commission').toLowerCase();
             const commissionBase = (gross * commissionPct) / 100;
-            const ppoBase = planType === 'ppo' ? orders * 10 : 0;
+            const ppoBase = planType === 'ppo' ? orders * rates.ppo : 0;
             const subFee = 0;
             const taxable = commissionBase + ppoBase + subFee;
-            const cgst = taxable * 0.09;
-            const sgst = taxable * 0.09;
+            const cgst = taxable * (rates.cgst / 100);
+            const sgst = taxable * (rates.sgst / 100);
             const total = taxable + cgst + sgst;
-            const tds = total * 0.01;
+            const tds = total * (rates.tds / 100);
             const netPayable = gross - total - tds;
             const invNumber = `INV-${start.getFullYear()}${String(start.getMonth() + 1).padStart(2, '0')}-${vid}-${rid}`;
             await this.prisma.$executeRawUnsafe(`INSERT INTO vendor_invoices
@@ -945,6 +959,7 @@ exports.CompletionService = CompletionService;
 exports.CompletionService = CompletionService = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
-        mongo_data_service_1.MongoDataService])
+        mongo_data_service_1.MongoDataService,
+        business_settings_service_1.BusinessSettingsService])
 ], CompletionService);
 //# sourceMappingURL=completion.service.js.map

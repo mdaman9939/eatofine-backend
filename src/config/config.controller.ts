@@ -150,7 +150,7 @@ export class ConfigController {
       // Minimum cash-in-hand before the vendor must settle with admin. The app
       // force-unwraps this (minAmountToPayRestaurant!) so it MUST be a number,
       // else the Pay Now tap crashes once payment options exist.
-      min_amount_to_pay_restaurant: 100,
+      min_amount_to_pay_restaurant: await this.bs.getInt('min_amount_to_pay_restaurant', 100),
       digital_payment_info: {
         digital_payment: true,
         plugin_payment_gateways: false,

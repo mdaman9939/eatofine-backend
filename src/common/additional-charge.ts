@@ -13,6 +13,8 @@
  * into a flat config value; those continue to apply only at POS (where the
  * subtotal is known at billing time).
  */
+import { toNum } from './decimal';
+
 export interface AdditionalChargeRow {
   charge_head?: string | null;
   charge_type?: string | null;
@@ -30,8 +32,9 @@ export function computeFlatAdditionalCharge(rows: AdditionalChargeRow[]): { amou
   );
   let total = 0;
   for (const r of active) {
-    const base = Number(r.amount ?? 0) || 0;
-    const gst = isOn(r.gst_applicable) ? base * (Number(r.gst_rate ?? 0) / 100) : 0;
+    // Amounts may be migrated decimal.js objects → toNum decodes safely.
+    const base = toNum(r.amount);
+    const gst = isOn(r.gst_applicable) ? base * (toNum(r.gst_rate) / 100) : 0;
     total += base + gst;
   }
   const name =

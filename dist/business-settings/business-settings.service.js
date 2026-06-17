@@ -94,6 +94,13 @@ let BusinessSettingsService = class BusinessSettingsService {
         const n = parseInt(v, 10);
         return Number.isFinite(n) ? n : fallback;
     }
+    async getNumber(key, fallback) {
+        const v = await this.get(key);
+        if (v === null || v === '')
+            return fallback;
+        const n = parseFloat(v);
+        return Number.isFinite(n) ? n : fallback;
+    }
     async getStatus(key) {
         const o = await this.getJson(key);
         return o ? o.status === '1' || o.status === 1 : false;

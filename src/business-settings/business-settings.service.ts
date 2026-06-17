@@ -102,6 +102,17 @@ export class BusinessSettingsService implements OnModuleInit {
     return Number.isFinite(n) ? n : fallback;
   }
 
+  /** Like getInt but keeps decimals — for configurable rates such as GST/TDS
+   *  percentages (e.g. 2.5). Returns `fallback` when unset or unparseable, so a
+   *  caller's hardcoded value can become the safe default with no behaviour
+   *  change until an admin sets the key. */
+  async getNumber(key: string, fallback: number): Promise<number> {
+    const v = await this.get(key);
+    if (v === null || v === '') return fallback;
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : fallback;
+  }
+
   async getStatus(key: string): Promise<boolean> {
     const o = await this.getJson<{ status?: number | string }>(key);
     return o ? o.status === '1' || o.status === 1 : false;

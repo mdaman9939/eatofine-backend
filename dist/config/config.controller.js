@@ -133,7 +133,7 @@ let ConfigController = class ConfigController {
                 { gateway: 'stripe', gateway_title: 'Credit / Debit Card', gateway_image_full_url: 'https://images.unsplash.com/photo-1563013544-824ae1b704d3?w=200&h=200&fit=crop&q=80' },
                 { gateway: 'paystack', gateway_title: 'Paystack', gateway_image_full_url: 'https://images.unsplash.com/photo-1601597111158-2fceff292cdc?w=200&h=200&fit=crop&q=80' },
             ],
-            min_amount_to_pay_restaurant: 100,
+            min_amount_to_pay_restaurant: await this.bs.getInt('min_amount_to_pay_restaurant', 100),
             digital_payment_info: {
                 digital_payment: true,
                 plugin_payment_gateways: false,

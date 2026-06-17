@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { BusinessSettingsService } from '../business-settings/business-settings.service';
+import { toNum } from '../common/decimal';
 
 // BRD enhancements: §5.1 Slab Plan + §5.3 GST Engine + §5.2 Invoices + §5.4 TDS.
 // New tables (business_plan_slabs, tax_master) are demo-time additions not yet
@@ -128,6 +130,7 @@ export class EnhancementsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mongo: MongoDataService,
+    private readonly bs: BusinessSettingsService,
   ) {}
 
   /** Feature flag — when "1"/"true"/"yes", reads/writes route to MongoDB. */
@@ -362,9 +365,11 @@ export class EnhancementsService {
         id: Number(r.mysql_id),
         charge_head: r.charge_head,
         charge_type: r.charge_type,
-        amount: Number(r.amount),
+        // Migrated DECIMAL columns arrive as decimal.js objects → Number() = NaN
+        // (shows as ₹0). toNum decodes them robustly.
+        amount: toNum(r.amount),
         gst_applicable: !!r.gst_applicable,
-        gst_rate: Number(r.gst_rate),
+        gst_rate: toNum(r.gst_rate),
         hsn_sac: r.hsn_sac ?? null,
         description: r.description ?? null,
         status: !!r.status,
@@ -798,6 +803,13 @@ export class EnhancementsService {
       // ETFU<FY>-NNNN = Eatofine's own delivery-service invoice number.
       const eatofineNo = await this.assignInvoiceNumber(order, 'eatofine_invoice_number', 'ETFU', fy, order.eatofine_invoice_number);
 
+      // Admin-configurable invoice rates (defaults = previously hardcoded values).
+      const [svcCgstRate, svcSgstRate, foodGstRate] = await Promise.all([
+        this.bs.getNumber('service_invoice_cgst_rate', 9),
+        this.bs.getNumber('service_invoice_sgst_rate', 9),
+        this.bs.getNumber('food_gst_rate', 5),
+      ]);
+
       // ── Page 1: restaurant ("On Behalf of Restaurant") food invoice ──────
       const r2inv = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
       const foodSubtotal = items.reduce((s, it) => s + Number(it.price) * Number(it.quantity), 0);
@@ -805,7 +817,7 @@ export class EnhancementsService {
       const discountTotal = Number(order.coupon_discount_amount ?? 0) + Number(order.restaurant_discount_amount ?? 0);
       const netValue = Math.max(0, foodSubtotal - discountTotal);
       const foodHalfTax = r2inv(foodTax / 2);
-      const gstRateHalf = netValue > 0 ? r2inv(((foodTax / netValue) * 100) / 2) : 2.5;
+      const gstRateHalf = netValue > 0 ? r2inv(((foodTax / netValue) * 100) / 2) : r2inv(foodGstRate / 2);
       const restItems = items.map((it) => {
         let parsed: { name?: string } = {};
         try { parsed = JSON.parse(it.food_details ?? '{}'); } catch { /* ignore */ }
@@ -819,8 +831,8 @@ export class EnhancementsService {
 
       // ── Page 2: Eatofine service invoice — 18% GST (9% CGST + 9% SGST) ────
       const svcRow = (description: string, amount: number) => {
-        const cgst = r2inv(amount * 0.09);
-        const sgst = r2inv(amount * 0.09);
+        const cgst = r2inv(amount * (svcCgstRate / 100));
+        const sgst = r2inv(amount * (svcSgstRate / 100));
         return { description, amount: r2inv(amount), cgst, sgst, net: r2inv(amount + cgst + sgst) };
       };
       const eatofineRows = [

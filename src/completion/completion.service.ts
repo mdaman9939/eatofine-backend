@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { BusinessSettingsService } from '../business-settings/business-settings.service';
 
 // SOW Admin Completion — unified service for the 5 remaining admin features:
 //   1. Vendor invoices (monthly auto-generate)
@@ -184,7 +185,22 @@ export class CompletionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mongo: MongoDataService,
+    private readonly bs: BusinessSettingsService,
   ) {}
+
+  /** Vendor-invoice tax/fee rates — admin-configurable via business_settings,
+   *  defaulting to the values previously hardcoded so nothing changes until set:
+   *    vendor_invoice_cgst_rate (9), vendor_invoice_sgst_rate (9),
+   *    vendor_invoice_tds_rate (1), ppo_rate_per_order (10). */
+  private async invoiceRates(): Promise<{ cgst: number; sgst: number; tds: number; ppo: number }> {
+    const [cgst, sgst, tds, ppo] = await Promise.all([
+      this.bs.getNumber('vendor_invoice_cgst_rate', 9),
+      this.bs.getNumber('vendor_invoice_sgst_rate', 9),
+      this.bs.getNumber('vendor_invoice_tds_rate', 1),
+      this.bs.getNumber('ppo_rate_per_order', 10),
+    ]);
+    return { cgst, sgst, tds, ppo };
+  }
 
   /** Feature flag — when set, completion reads/writes route to MongoDB. */
   private useMongo(): boolean {
@@ -506,6 +522,7 @@ export class CompletionService {
       const fyStartYear = start.getMonth() + 1 >= 4 ? start.getFullYear() : start.getFullYear() - 1;
       const fyCode = `${String(fyStartYear % 100).padStart(2, '0')}${String((fyStartYear + 1) % 100).padStart(2, '0')}`;
       let seq = await this.mongo.count('vendor_invoices', { invoice_number: { $regex: `^RES${fyCode}-` } });
+      const rates = await this.invoiceRates();
 
       let created = 0;
       for (const row of rollups) {
@@ -533,13 +550,13 @@ export class CompletionService {
         const commissionPct = Number(restaurant.comission ?? 0);
         const planType = (restaurant.restaurant_model ?? 'commission').toLowerCase();
         const commissionBase = (gross * commissionPct) / 100;
-        const ppoBase = planType === 'ppo' ? orders * 10 : 0;
+        const ppoBase = planType === 'ppo' ? orders * rates.ppo : 0;
         const subFee = 0;
         const taxable = commissionBase + ppoBase + subFee;
-        const cgst = taxable * 0.09;
-        const sgst = taxable * 0.09;
+        const cgst = taxable * (rates.cgst / 100);
+        const sgst = taxable * (rates.sgst / 100);
         const total = taxable + cgst + sgst;
-        const tds = total * 0.01;
+        const tds = total * (rates.tds / 100);
         const netPayable = gross - total - tds;
 
         seq += 1;
@@ -596,6 +613,7 @@ export class CompletionService {
        GROUP BY r.vendor_id, r.id`,
     );
 
+    const rates = await this.invoiceRates();
     let created = 0;
     for (const row of rollups) {
       const vid = Number(row.vendor_id);
@@ -622,13 +640,13 @@ export class CompletionService {
       const planType = (commRows[0]?.restaurant_model ?? 'commission').toLowerCase();
 
       const commissionBase = (gross * commissionPct) / 100;
-      const ppoBase = planType === 'ppo' ? orders * 10 : 0; // ₹10/order placeholder
+      const ppoBase = planType === 'ppo' ? orders * rates.ppo : 0;
       const subFee = 0;
       const taxable = commissionBase + ppoBase + subFee;
-      const cgst = taxable * 0.09;
-      const sgst = taxable * 0.09;
+      const cgst = taxable * (rates.cgst / 100);
+      const sgst = taxable * (rates.sgst / 100);
       const total = taxable + cgst + sgst;
-      const tds = total * 0.01;
+      const tds = total * (rates.tds / 100);
       const netPayable = gross - total - tds; // what vendor receives
 
       const invNumber = `INV-${start.getFullYear()}${String(start.getMonth() + 1).padStart(2, '0')}-${vid}-${rid}`;

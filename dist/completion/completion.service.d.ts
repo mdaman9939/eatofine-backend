@@ -1,5 +1,6 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { BusinessSettingsService } from '../business-settings/business-settings.service';
 type SettingType = 'int' | 'float' | 'string' | 'bool' | 'json';
 export interface InvoiceRow {
     id: number;
@@ -74,7 +75,9 @@ export interface VendorPromoRow {
 export declare class CompletionService {
     private readonly prisma;
     private readonly mongo;
-    constructor(prisma: PrismaService, mongo: MongoDataService);
+    private readonly bs;
+    constructor(prisma: PrismaService, mongo: MongoDataService, bs: BusinessSettingsService);
+    private invoiceRates;
     private useMongo;
     private vendorNameMongo;
     private restaurantNameMongo;

@@ -1,9 +1,11 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { BusinessSettingsService } from '../business-settings/business-settings.service';
 export declare class EnhancementsService {
     private readonly prisma;
     private readonly mongo;
-    constructor(prisma: PrismaService, mongo: MongoDataService);
+    private readonly bs;
+    constructor(prisma: PrismaService, mongo: MongoDataService, bs: BusinessSettingsService);
     private useMongo;
     listSlabs(vendorId?: number): Promise<{
         id: number;
