@@ -83,6 +83,8 @@ interface MongoOrderDoc {
   delivered: Date | null;
   created_at: Date | null;
   created_at_legacy?: Date | null;
+  contact_person_name?: string | null;
+  contact_person_number?: string | null;
 }
 
 interface MongoOrderDetailDoc {
@@ -768,8 +770,10 @@ export class EnhancementsService {
           state: 'Delhi', state_code: '07',
         },
         bill_to: {
-          name: user ? `${user.f_name ?? ''} ${user.l_name ?? ''}`.trim() : 'Customer',
-          email: user?.email ?? null, phone: user?.phone ?? null,
+          // POS / walk-in orders have no user — use the counter contact details.
+          name: (user ? `${user.f_name ?? ''} ${user.l_name ?? ''}`.trim() : '') || order.contact_person_name || 'Customer',
+          email: user?.email ?? null,
+          phone: user?.phone ?? order.contact_person_number ?? null,
           address: this.flattenAddress(order.delivery_address),
         },
         items: items.map((it) => {

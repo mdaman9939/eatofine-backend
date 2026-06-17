@@ -432,6 +432,7 @@ export class AdminService {
         payment_status?: string; order_status?: string; payment_method?: string; order_type?: string;
         coupon_code?: string | null; order_note?: string | null; delivery_address?: string | null;
         cancellation_reason?: string | null; canceled_by?: string | null;
+        contact_person_name?: string | null; contact_person_number?: string | null;
         pending?: Date | null; accepted?: Date | null; confirmed?: Date | null;
         processing?: Date | null; handover?: Date | null; picked_up?: Date | null;
         delivered?: Date | null; canceled?: Date | null; failed?: Date | null;
@@ -486,7 +487,11 @@ export class AdminService {
         },
         user: user
           ? { id: user.mysql_id, f_name: user.f_name, l_name: user.l_name, email: user.email, phone: user.phone }
-          : null,
+          // POS / walk-in orders have no user account — fall back to the
+          // contact name/number captured at the counter.
+          : (order.contact_person_name || order.contact_person_number)
+            ? { id: 0, f_name: order.contact_person_name ?? 'Customer', l_name: '', email: null, phone: order.contact_person_number ?? null }
+            : null,
         restaurant: restaurant
           ? {
               id: restaurant.mysql_id,

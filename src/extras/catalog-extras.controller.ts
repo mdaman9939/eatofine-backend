@@ -780,8 +780,10 @@ export class CatalogExtrasController {
   @Get('get-vehicles')
   async vehicles() {
     if (this.useMongo()) {
-      const rows = await this.mongo.findMany<Record<string, unknown>>('vehicles', { status: true });
-      return rows.map((r) => ({ ...r, id: Number(r.mysql_id) }));
+      // Active vehicles — status may be stored as boolean true or number 1,
+      // so match both (a 1-vs-true mismatch was hiding all vehicles).
+      const rows = await this.mongo.findMany<Record<string, unknown>>('vehicles', { status: { $in: [true, 1, '1'] } });
+      return rows.map((r) => ({ ...r, id: Number(r.mysql_id), status: true }));
     }
     const rows = await this.prisma.vehicles.findMany({ where: { status: true } });
     return rows.map((r) => ({ ...r, id: Number(r.id) }));
