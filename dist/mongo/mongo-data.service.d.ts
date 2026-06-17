@@ -29,5 +29,11 @@ export declare class MongoDataService {
     }>;
     deleteMany(collection: string, filter: Record<string, unknown>): Promise<number>;
     aggregate<T extends Document = Document>(collection: string, pipeline: Document[]): Promise<T[]>;
+    ensureIndex(collection: string, keys: Record<string, 1 | -1>, options?: {
+        unique?: boolean;
+        name?: string;
+    }): Promise<void>;
+    tryInsertUnique<T extends Document = Document>(collection: string, doc: T): Promise<boolean>;
+    increment(collection: string, filter: Record<string, unknown>, inc: Record<string, number>, setOnInsert?: Record<string, unknown>): Promise<void>;
     nextMysqlId(collection: string): Promise<number>;
 }

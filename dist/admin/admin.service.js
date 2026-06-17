@@ -47,6 +47,7 @@ const common_1 = require("@nestjs/common");
 const bcrypt = __importStar(require("bcrypt"));
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
+const settlement_service_1 = require("../settlement/settlement.service");
 const storage_url_1 = require("../common/storage-url");
 function vegToBool(v, fallback = true) {
     if (v === undefined || v === null)
@@ -86,9 +87,11 @@ const TIMESTAMP_COLUMN = {
 let AdminService = class AdminService {
     prisma;
     mongo;
-    constructor(prisma, mongo) {
+    settlement;
+    constructor(prisma, mongo, settlement) {
         this.prisma = prisma;
         this.mongo = mongo;
+        this.settlement = settlement;
     }
     useMongo() {
         const v = (process.env.USE_MONGO_ADMIN ?? '1').toLowerCase();
@@ -564,6 +567,9 @@ let AdminService = class AdminService {
                     data.cancellation_reason = reason;
             }
             await this.mongo.updateOne('orders', { mysql_id: id }, data);
+            if (status === 'delivered') {
+                await this.settlement.settleOrder(id).catch(() => undefined);
+            }
             return { ok: true, id, status };
         }
         const order = await this.prisma.orders.findUnique({ where: { id: BigInt(id) } });
@@ -1839,6 +1845,9 @@ let AdminService = class AdminService {
                 expire_date: body.expire_date ? new Date(body.expire_date) : null,
                 limit: body.limit ?? null,
                 coupon_type: body.coupon_type ?? 'default',
+                discount_owner: ['admin', 'restaurant', 'shared'].includes(String(body.discount_owner)) ? body.discount_owner : 'admin',
+                admin_discount_amount: Number(body.admin_discount_amount ?? 0) || 0,
+                restaurant_discount_amount: Number(body.restaurant_discount_amount ?? 0) || 0,
                 mysql_restaurant_id: body.restaurant_id ? Number(body.restaurant_id) : null,
                 restaurant_id: body.restaurant_id ? Number(body.restaurant_id) : null,
                 mysql_zone_id: body.zone_id ? Number(body.zone_id) : null,
@@ -4176,7 +4185,8 @@ exports.AdminService = AdminService;
 exports.AdminService = AdminService = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
-        mongo_data_service_1.MongoDataService])
+        mongo_data_service_1.MongoDataService,
+        settlement_service_1.SettlementService])
 ], AdminService);
 function bigToNumber(row) {
     const out = { ...row };

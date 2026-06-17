@@ -73,6 +73,26 @@ let MongoDataService = class MongoDataService {
     async aggregate(collection, pipeline) {
         return this.coll(collection).aggregate(pipeline).toArray();
     }
+    async ensureIndex(collection, keys, options = {}) {
+        await this.coll(collection).createIndex(keys, options);
+    }
+    async tryInsertUnique(collection, doc) {
+        try {
+            await this.coll(collection).insertOne(doc);
+            return true;
+        }
+        catch (e) {
+            if (e && typeof e === 'object' && e.code === 11000)
+                return false;
+            throw e;
+        }
+    }
+    async increment(collection, filter, inc, setOnInsert = {}) {
+        const update = { $inc: inc };
+        if (Object.keys(setOnInsert).length)
+            update.$setOnInsert = setOnInsert;
+        await this.coll(collection).updateOne(filter, update, { upsert: true });
+    }
     async nextMysqlId(collection) {
         const top = await this.coll(collection)
             .find({}, { projection: { mysql_id: 1 }, sort: { mysql_id: -1 }, limit: 1 })

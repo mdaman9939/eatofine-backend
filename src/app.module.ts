@@ -23,6 +23,7 @@ import { RefundModule } from './refund/refund.module';
 import { MongoModule } from './mongo/mongo.module';
 import { MigrationModule } from './mongo/migration.module';
 import { ZoneModule } from './zone/zone.module';
+import { SettlementModule } from './settlement/settlement.module';
 import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
@@ -66,6 +67,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     MongoModule,
     MigrationModule,
     ZoneModule,
+    SettlementModule,
     NotificationsModule,
   ],
   controllers: [AppController],

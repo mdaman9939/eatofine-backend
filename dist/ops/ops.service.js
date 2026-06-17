@@ -13,15 +13,18 @@ exports.OpsService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
+const settlement_service_1 = require("../settlement/settlement.service");
 const storage_url_1 = require("../common/storage-url");
 const VENDOR_STATUSES = ['accepted', 'confirmed', 'processing', 'handover'];
 const DM_STATUSES = ['confirmed', 'processing', 'handover', 'picked_up', 'delivered', 'canceled'];
 let OpsService = class OpsService {
     prisma;
     mongo;
-    constructor(prisma, mongo) {
+    settlement;
+    constructor(prisma, mongo, settlement) {
         this.prisma = prisma;
         this.mongo = mongo;
+        this.settlement = settlement;
     }
     useMongo() {
         const v = (process.env.USE_MONGO_OPS ?? '1').toLowerCase();
@@ -418,6 +421,9 @@ let OpsService = class OpsService {
                 data.payment_status = 'paid';
             }
             await this.mongo.updateOne('orders', { mysql_id: Number(o.mysql_id) }, data);
+            if (newStatus === 'delivered') {
+                await this.settlement.settleOrder(Number(o.mysql_id)).catch(() => undefined);
+            }
             return { message: 'order_status_updated', order_status: newStatus };
         }
         const o = await this.prisma.orders.findFirst({ where: { id: BigInt(orderId), delivery_man_id: dmId } });
@@ -444,6 +450,7 @@ exports.OpsService = OpsService;
 exports.OpsService = OpsService = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
-        mongo_data_service_1.MongoDataService])
+        mongo_data_service_1.MongoDataService,
+        settlement_service_1.SettlementService])
 ], OpsService);
 //# sourceMappingURL=ops.service.js.map

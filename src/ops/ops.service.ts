@@ -1,6 +1,7 @@
 ﻿import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { SettlementService } from '../settlement/settlement.service';
 import { storageBaseUrl } from '../common/storage-url';
 
 const VENDOR_STATUSES = ['accepted', 'confirmed', 'processing', 'handover'] as const;
@@ -53,6 +54,7 @@ export class OpsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mongo: MongoDataService,
+    private readonly settlement: SettlementService,
   ) {}
 
   /** Feature flag â€” when "1", ops reads/writes route to MongoDB instead of MySQL. */
@@ -516,6 +518,10 @@ export class OpsService {
         data.payment_status = 'paid';
       }
       await this.mongo.updateOne('orders', { mysql_id: Number(o.mysql_id) }, data);
+      // Idempotent Pay-Per-Order settlement on delivery (non-fatal).
+      if (newStatus === 'delivered') {
+        await this.settlement.settleOrder(Number(o.mysql_id)).catch(() => undefined);
+      }
       return { message: 'order_status_updated', order_status: newStatus };
     }
     const o = await this.prisma.orders.findFirst({ where: { id: BigInt(orderId), delivery_man_id: dmId } });

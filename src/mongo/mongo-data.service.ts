@@ -130,6 +130,55 @@ export class MongoDataService {
     return this.coll<Document>(collection).aggregate<T>(pipeline).toArray();
   }
 
+  /** Ensure an index exists (idempotent — safe to call on every request).
+   *  The primitive behind duplicate-proof settlement: a UNIQUE index on
+   *  (order_id, restaurant_id) makes a second settlement insert impossible. */
+  async ensureIndex(
+    collection: string,
+    keys: Record<string, 1 | -1>,
+    options: { unique?: boolean; name?: string } = {},
+  ): Promise<void> {
+    await this.coll(collection).createIndex(
+      keys as Parameters<Collection['createIndex']>[0],
+      options,
+    );
+  }
+
+  /** Insert that returns `false` instead of throwing when a unique index rejects
+   *  the document (duplicate key — driver error 11000). This is the atomic
+   *  "claim" used for idempotency: the first writer wins, every retry/race/replay
+   *  gets `false` and must NOT repeat the side effects. */
+  async tryInsertUnique<T extends Document = Document>(
+    collection: string,
+    doc: T,
+  ): Promise<boolean> {
+    try {
+      await this.coll<T>(collection).insertOne(doc as OptionalUnlessRequiredId<T>);
+      return true;
+    } catch (e) {
+      if (e && typeof e === 'object' && (e as { code?: number }).code === 11000) return false;
+      throw e;
+    }
+  }
+
+  /** Atomic `$inc` with upsert — credits/debits a balance without a
+   *  read-modify-write race (two concurrent orders crediting the same wallet are
+   *  serialised by the database). `setOnInsert` seeds a freshly-created doc. */
+  async increment(
+    collection: string,
+    filter: Record<string, unknown>,
+    inc: Record<string, number>,
+    setOnInsert: Record<string, unknown> = {},
+  ): Promise<void> {
+    const update: Record<string, unknown> = { $inc: inc };
+    if (Object.keys(setOnInsert).length) update.$setOnInsert = setOnInsert;
+    await this.coll<Document>(collection).updateOne(
+      filter as Filter<Document>,
+      update as never,
+      { upsert: true },
+    );
+  }
+
   /** Get the next auto-increment-like mysql_id for a collection.
    * Used when creating new docs that need a `mysql_id` slot. */
   async nextMysqlId(collection: string): Promise<number> {

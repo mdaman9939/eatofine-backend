@@ -1,9 +1,11 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { SettlementService } from '../settlement/settlement.service';
 export declare class OpsService {
     private readonly prisma;
     private readonly mongo;
-    constructor(prisma: PrismaService, mongo: MongoDataService);
+    private readonly settlement;
+    constructor(prisma: PrismaService, mongo: MongoDataService, settlement: SettlementService);
     private useMongo;
     private storageBase;
     private restaurantForVendor;

@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { SettlementService } from '../settlement/settlement.service';
 import { storageFullUrl } from '../common/storage-url';
 
 /** Shared shape for the admin food create + update endpoints. */
@@ -84,6 +85,7 @@ export class AdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mongo: MongoDataService,
+    private readonly settlement: SettlementService,
   ) {}
 
   /** Feature flag — when "1", admin reads route to MongoDB instead of MySQL. */
@@ -626,6 +628,12 @@ export class AdminService {
         if (reason) data.cancellation_reason = reason;
       }
       await this.mongo.updateOne('orders', { mysql_id: id }, data);
+      // Pay-Per-Order settlement runs ONLY on delivery, and is idempotent — a
+      // re-delivered / retried status update will never double-credit wallets.
+      // Non-fatal: a settlement failure must not roll back the status change.
+      if (status === 'delivered') {
+        await this.settlement.settleOrder(id).catch(() => undefined);
+      }
       return { ok: true, id, status };
     }
     const order = await this.prisma.orders.findUnique({ where: { id: BigInt(id) } });
@@ -1900,6 +1908,7 @@ export class AdminService {
         data?: string | null; total_uses?: number | null;
         created_by?: string | null; customer_id?: string | null; slug?: string | null;
         restaurant_id?: number | null; mysql_restaurant_id?: number | null;
+        discount_owner?: string | null; admin_discount_amount?: number | null; restaurant_discount_amount?: number | null;
       }>('coupons', {}, { sort: { mysql_id: -1 } });
       return {
         coupons: rows.map((r) => ({
@@ -1923,6 +1932,12 @@ export class AdminService {
           customer_id: r.customer_id ?? null,
           slug: r.slug ?? null,
           restaurant_id: r.mysql_restaurant_id ?? r.restaurant_id ?? null,
+          // Who funds this coupon's discount — so admin can check at a glance.
+          // Older coupons without the field are treated as admin-funded.
+          discount_owner: ['admin', 'restaurant', 'shared'].includes(String(r.discount_owner)) ? r.discount_owner : 'admin',
+          admin_discount_amount: Number(r.admin_discount_amount ?? 0),
+          restaurant_discount_amount: Number(r.restaurant_discount_amount ?? 0),
+          funded_by: ['admin', 'restaurant', 'shared'].includes(String(r.discount_owner)) ? r.discount_owner : 'admin',
         })),
       };
     }
@@ -1951,6 +1966,11 @@ export class AdminService {
     expire_date?: string;
     limit?: number;
     coupon_type?: string;
+    // Discount ownership (who funds the discount) — drives Pay-Per-Order
+    // settlement so the funder's books are charged, never the other party's.
+    discount_owner?: string; // 'admin' | 'restaurant' | 'shared'
+    admin_discount_amount?: number;       // shared split — admin's contribution
+    restaurant_discount_amount?: number;  // shared split — restaurant's contribution
     // Targeting constraints (mirrors Laravel coupon scopes).
     restaurant_id?: number | null;
     zone_id?: number | null;
@@ -1980,6 +2000,10 @@ export class AdminService {
         expire_date: body.expire_date ? new Date(body.expire_date) : null,
         limit: body.limit ?? null,
         coupon_type: body.coupon_type ?? 'default',
+        // Ownership — defaults to admin-funded (platform promo) when unspecified.
+        discount_owner: ['admin', 'restaurant', 'shared'].includes(String(body.discount_owner)) ? body.discount_owner : 'admin',
+        admin_discount_amount: Number(body.admin_discount_amount ?? 0) || 0,
+        restaurant_discount_amount: Number(body.restaurant_discount_amount ?? 0) || 0,
         mysql_restaurant_id: body.restaurant_id ? Number(body.restaurant_id) : null,
         restaurant_id: body.restaurant_id ? Number(body.restaurant_id) : null,
         mysql_zone_id: body.zone_id ? Number(body.zone_id) : null,

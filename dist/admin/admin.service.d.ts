@@ -1,5 +1,6 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { SettlementService } from '../settlement/settlement.service';
 export interface FoodWriteBody {
     name?: string;
     description?: string;
@@ -39,7 +40,8 @@ export interface FoodWriteBody {
 export declare class AdminService {
     private readonly prisma;
     private readonly mongo;
-    constructor(prisma: PrismaService, mongo: MongoDataService);
+    private readonly settlement;
+    constructor(prisma: PrismaService, mongo: MongoDataService, settlement: SettlementService);
     private useMongo;
     getMe(adminId: bigint): Promise<{
         id: number;
@@ -1038,6 +1040,9 @@ export declare class AdminService {
         expire_date?: string;
         limit?: number;
         coupon_type?: string;
+        discount_owner?: string;
+        admin_discount_amount?: number;
+        restaurant_discount_amount?: number;
         restaurant_id?: number | null;
         zone_id?: number | null;
         customer_id?: number | string | null;
