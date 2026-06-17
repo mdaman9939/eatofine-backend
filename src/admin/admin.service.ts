@@ -3,6 +3,7 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { SettlementService } from '../settlement/settlement.service';
+import { toNum } from '../common/decimal';
 import { storageFullUrl } from '../common/storage-url';
 
 /** Shared shape for the admin food create + update endpoints. */
@@ -2746,7 +2747,7 @@ export class AdminService {
   async createPosOrder(
     body: {
       restaurant_id?: number;
-      items?: Array<{ food_id?: number; name?: string; price?: number; quantity?: number }>;
+      items?: Array<{ food_id?: number; name?: string; price?: number; quantity?: number; add_ons?: Array<{ id?: number; name?: string; price?: number }> }>;
       customer_name?: string;
       customer_phone?: string;
       address?: string;
@@ -2785,7 +2786,10 @@ export class AdminService {
     const restaurant = await this.mongo.findByMysqlId<{ mysql_id: number; tax?: number }>('restaurants', Number(body.restaurant_id));
     if (!restaurant) throw new NotFoundException({ errors: [{ code: 'restaurant', message: 'Restaurant not found' }] });
 
-    const subtotal = items.reduce((s, i) => s + Number(i.price ?? 0) * Number(i.quantity ?? 0), 0);
+    // Per-item add-on total (sum of selected add-on prices), applied per unit.
+    const addOnSum = (it: { add_ons?: Array<{ price?: number }> }) =>
+      (it.add_ons ?? []).reduce((s, a) => s + Math.max(0, Number(a.price ?? 0)), 0);
+    const subtotal = items.reduce((s, i) => s + (Number(i.price ?? 0) + addOnSum(i)) * Number(i.quantity ?? 0), 0);
     const discount = Number(body.discount ?? 0);
     const taxPercent = body.tax_percent !== undefined ? Number(body.tax_percent) : Number(restaurant.tax ?? 0);
     const taxable = Math.max(0, subtotal - discount);
@@ -2839,8 +2843,9 @@ export class AdminService {
         price: Number(it.price ?? 0),
         quantity: Number(it.quantity ?? 0),
         tax_amount: 0,
-        total_add_on_price: 0,
-        food_details: JSON.stringify({ name: it.name ?? null }),
+        total_add_on_price: Number((addOnSum(it) * Number(it.quantity ?? 0)).toFixed(2)),
+        add_ons: (it.add_ons ?? []).map((a) => ({ id: a.id ?? null, name: a.name ?? null, price: Math.max(0, Number(a.price ?? 0)) })),
+        food_details: JSON.stringify({ name: it.name ?? null, add_ons: (it.add_ons ?? []).map((a) => a.name).filter(Boolean) }),
         created_at: now,
         updated_at: now,
       });
@@ -4838,7 +4843,8 @@ AdminService.prototype.listAddOns = async function (this: AdminService, opts: Li
       rows.map((r) => ({
         ...r,
         id: Number(r.mysql_id),
-        price: r.price !== undefined && r.price !== null ? Number(r.price) : 0,
+        // Migrated DECIMAL prices arrive as decimal.js objects → Number()=NaN.
+        price: toNum(r.price),
       })),
       total,
       limit,

@@ -1280,6 +1280,11 @@ export declare class AdminService {
             name?: string;
             price?: number;
             quantity?: number;
+            add_ons?: Array<{
+                id?: number;
+                name?: string;
+                price?: number;
+            }>;
         }>;
         customer_name?: string;
         customer_phone?: string;

@@ -48,6 +48,7 @@ const bcrypt = __importStar(require("bcrypt"));
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
 const settlement_service_1 = require("../settlement/settlement.service");
+const decimal_1 = require("../common/decimal");
 const storage_url_1 = require("../common/storage-url");
 function vegToBool(v, fallback = true) {
     if (v === undefined || v === null)
@@ -2549,7 +2550,8 @@ let AdminService = class AdminService {
         const restaurant = await this.mongo.findByMysqlId('restaurants', Number(body.restaurant_id));
         if (!restaurant)
             throw new common_1.NotFoundException({ errors: [{ code: 'restaurant', message: 'Restaurant not found' }] });
-        const subtotal = items.reduce((s, i) => s + Number(i.price ?? 0) * Number(i.quantity ?? 0), 0);
+        const addOnSum = (it) => (it.add_ons ?? []).reduce((s, a) => s + Math.max(0, Number(a.price ?? 0)), 0);
+        const subtotal = items.reduce((s, i) => s + (Number(i.price ?? 0) + addOnSum(i)) * Number(i.quantity ?? 0), 0);
         const discount = Number(body.discount ?? 0);
         const taxPercent = body.tax_percent !== undefined ? Number(body.tax_percent) : Number(restaurant.tax ?? 0);
         const taxable = Math.max(0, subtotal - discount);
@@ -2597,8 +2599,9 @@ let AdminService = class AdminService {
                 price: Number(it.price ?? 0),
                 quantity: Number(it.quantity ?? 0),
                 tax_amount: 0,
-                total_add_on_price: 0,
-                food_details: JSON.stringify({ name: it.name ?? null }),
+                total_add_on_price: Number((addOnSum(it) * Number(it.quantity ?? 0)).toFixed(2)),
+                add_ons: (it.add_ons ?? []).map((a) => ({ id: a.id ?? null, name: a.name ?? null, price: Math.max(0, Number(a.price ?? 0)) })),
+                food_details: JSON.stringify({ name: it.name ?? null, add_ons: (it.add_ons ?? []).map((a) => a.name).filter(Boolean) }),
                 created_at: now,
                 updated_at: now,
             });
@@ -4256,7 +4259,7 @@ AdminService.prototype.listAddOns = async function (opts) {
         return paginate(rows.map((r) => ({
             ...r,
             id: Number(r.mysql_id),
-            price: r.price !== undefined && r.price !== null ? Number(r.price) : 0,
+            price: (0, decimal_1.toNum)(r.price),
         })), total, limit, offset);
     }
     const where = {};
