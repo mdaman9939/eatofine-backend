@@ -10,6 +10,7 @@ exports.CompletionModule = void 0;
 const common_1 = require("@nestjs/common");
 const completion_controller_1 = require("./completion.controller");
 const completion_service_1 = require("./completion.service");
+const invoice_cron_service_1 = require("./invoice-cron.service");
 const migration_module_1 = require("../mongo/migration.module");
 let CompletionModule = class CompletionModule {
 };
@@ -18,7 +19,7 @@ exports.CompletionModule = CompletionModule = __decorate([
     (0, common_1.Module)({
         imports: [migration_module_1.MigrationModule],
         controllers: [completion_controller_1.CompletionController],
-        providers: [completion_service_1.CompletionService],
+        providers: [completion_service_1.CompletionService, invoice_cron_service_1.InvoiceCronService],
     })
 ], CompletionModule);
 //# sourceMappingURL=completion.module.js.map

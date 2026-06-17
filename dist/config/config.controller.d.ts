@@ -50,6 +50,11 @@ export declare class ConfigController {
         toggle_dm_registration: boolean;
         toggle_restaurant_registration: boolean;
         schedule_order_slot_duration: number;
+        subscription_status: number;
+        subscription_frequencies: string;
+        subscription_can_pause: number;
+        subscription_max_per_customer: number;
+        subscription_min_days: number;
         digit_after_decimal_point: number;
         loyalty_point_exchange_rate: number;
         loyalty_point_item_purchase_point: number;
@@ -75,6 +80,7 @@ export declare class ConfigController {
         fav_icon_full_url: string | null;
         refund_active_status: boolean;
         take_away: boolean;
+        dine_in: boolean;
         repeat_order_option: boolean;
         home_delivery: boolean;
         active_payment_method_list: {

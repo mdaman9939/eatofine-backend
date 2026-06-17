@@ -195,6 +195,15 @@ let AdminController = class AdminController {
     bulkExportFood() {
         return this.admin.bulkExportFood();
     }
+    foodPending() {
+        return this.admin.listPendingFood();
+    }
+    approveFood(id) {
+        return this.admin.updateFoodApproval(id, 'approved');
+    }
+    rejectFood(id, body) {
+        return this.admin.updateFoodApproval(id, 'denied', body.reason);
+    }
     foodDetail(id) {
         return this.admin.getFood(id);
     }
@@ -353,6 +362,9 @@ let AdminController = class AdminController {
     }
     subscriptionOrders() {
         return this.admin.listSubscriptionOrders();
+    }
+    updateSubscriptionStatus(id, body) {
+        return this.admin.updateSubscriptionStatus(id, body.status);
     }
     activityLog(limit) {
         return this.admin.listActivityLog(toInt(limit, 100));
@@ -648,6 +660,9 @@ let AdminController = class AdminController {
     createNotification(body) {
         return this.admin.createNotification(body);
     }
+    updateNotificationStatus(id, body) {
+        return this.admin.updateNotificationStatus(id, body.status);
+    }
     updateNotification(id, body) {
         return this.admin.updateNotification(id, body);
     }
@@ -728,6 +743,12 @@ let AdminController = class AdminController {
     }
     updateSubscriptionPackageStatus(id, body) {
         return this.admin.updateSubscriptionPackageStatus(id, body.status);
+    }
+    subscriptionPackageDetail(id) {
+        return this.admin.getSubscriptionPackage(id);
+    }
+    updateSubscriptionPackage(id, body) {
+        return this.admin.updateSubscriptionPackage(id, body);
     }
     deleteSubscriptionPackage(id) {
         return this.admin.deleteSubscriptionPackage(id);
@@ -1150,6 +1171,27 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "bulkExportFood", null);
 __decorate([
+    (0, common_1.Get)('food/pending'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "foodPending", null);
+__decorate([
+    (0, common_1.Patch)('food/:id/approve'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "approveFood", null);
+__decorate([
+    (0, common_1.Patch)('food/:id/reject'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "rejectFood", null);
+__decorate([
     (0, common_1.Get)('food/:id'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __metadata("design:type", Function),
@@ -1534,6 +1576,14 @@ __decorate([
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "subscriptionOrders", null);
+__decorate([
+    (0, common_1.Patch)('subscription-orders/:id/status'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateSubscriptionStatus", null);
 __decorate([
     (0, common_1.Get)('activity-log'),
     __param(0, (0, common_1.Query)('limit')),
@@ -2117,6 +2167,14 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "createNotification", null);
 __decorate([
+    (0, common_1.Patch)('notifications/:id/status'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateNotificationStatus", null);
+__decorate([
     (0, common_1.Patch)('notifications/:id'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __param(1, (0, common_1.Body)()),
@@ -2311,6 +2369,21 @@ __decorate([
     __metadata("design:paramtypes", [Number, Object]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "updateSubscriptionPackageStatus", null);
+__decorate([
+    (0, common_1.Get)('subscription-packages/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "subscriptionPackageDetail", null);
+__decorate([
+    (0, common_1.Patch)('subscription-packages/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateSubscriptionPackage", null);
 __decorate([
     (0, common_1.Delete)('subscription-packages/:id'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),

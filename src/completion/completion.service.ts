@@ -501,6 +501,12 @@ export class CompletionService {
         },
       ]);
 
+      // Invoice numbering: RES<financial-year>-NNNN  (e.g. RES2526-0001).
+      // FY runs Apr→Mar, so Jul-2025 belongs to FY 2025-26 → "2526".
+      const fyStartYear = start.getMonth() + 1 >= 4 ? start.getFullYear() : start.getFullYear() - 1;
+      const fyCode = `${String(fyStartYear % 100).padStart(2, '0')}${String((fyStartYear + 1) % 100).padStart(2, '0')}`;
+      let seq = await this.mongo.count('vendor_invoices', { invoice_number: { $regex: `^RES${fyCode}-` } });
+
       let created = 0;
       for (const row of rollups) {
         const rid = Number(row._id?.restaurant_id ?? 0);
@@ -536,7 +542,8 @@ export class CompletionService {
         const tds = total * 0.01;
         const netPayable = gross - total - tds;
 
-        const invNumber = `INV-${start.getFullYear()}${String(start.getMonth() + 1).padStart(2, '0')}-${vid}-${rid}`;
+        seq += 1;
+        const invNumber = `RES${fyCode}-${String(seq).padStart(4, '0')}`;
 
         const mysqlId = await this.mongo.nextMysqlId('vendor_invoices');
         const nowDate = new Date();

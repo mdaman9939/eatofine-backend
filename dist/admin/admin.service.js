@@ -429,7 +429,9 @@ let AdminService = class AdminService {
                 },
                 user: user
                     ? { id: user.mysql_id, f_name: user.f_name, l_name: user.l_name, email: user.email, phone: user.phone }
-                    : null,
+                    : (order.contact_person_name || order.contact_person_number)
+                        ? { id: 0, f_name: order.contact_person_name ?? 'Customer', l_name: '', email: null, phone: order.contact_person_number ?? null }
+                        : null,
                 restaurant: restaurant
                     ? {
                         id: restaurant.mysql_id,
@@ -659,18 +661,33 @@ let AdminService = class AdminService {
                     { $group: { _id: null, total: { $sum: '$order_amount' } } },
                 ]),
             ]);
+            const rx = r;
+            const ownerFromContact = (() => {
+                const local = String(r.email ?? '').split('@')[0]?.replace(/[._-]+/g, ' ').trim();
+                if (local)
+                    return local.replace(/\b\w/g, (c) => c.toUpperCase());
+                return `${r.name ?? 'Restaurant'} Owner`;
+            })();
             return {
                 restaurant: {
                     ...r,
                     id: r.mysql_id,
-                    zone_id: r.mysql_zone_id ?? null,
+                    zone_id: r.mysql_zone_id ?? 1,
                     vendor_id: r.mysql_vendor_id ?? 0,
-                    comission: r.comission !== null && r.comission !== undefined ? Number(r.comission) : null,
+                    comission: r.comission !== null && r.comission !== undefined ? Number(r.comission) : 10,
                     minimum_order: Number(r.minimum_order ?? 0),
                     tax: Number(r.tax ?? 0),
                     minimum_shipping_charge: Number(r.minimum_shipping_charge ?? 0),
+                    restaurant_model: rx.restaurant_model || 'commission',
+                    delivery_time: rx.delivery_time || '30-40 min',
+                    latitude: rx.latitude != null && String(rx.latitude) !== '' ? rx.latitude : 12.9716,
+                    longitude: rx.longitude != null && String(rx.longitude) !== '' ? rx.longitude : 77.5946,
                     logo_full_url: (0, storage_url_1.storageFullUrl)('restaurant', r.logo ?? null),
-                    cover_photo_full_url: (0, storage_url_1.storageFullUrl)('restaurant/cover', r.cover_photo ?? null),
+                    cover_photo_full_url: (0, storage_url_1.storageFullUrl)('restaurant/cover', rx.cover_photo ?? null),
+                    license_document_full_url: (0, storage_url_1.storageFullUrl)('restaurant', rx.license_document ?? null),
+                    additional_documents_full_urls: Array.isArray(rx.additional_documents)
+                        ? rx.additional_documents.map((f) => (0, storage_url_1.storageFullUrl)('restaurant', f)).filter(Boolean)
+                        : [],
                 },
                 vendor: vendor
                     ? {
@@ -680,7 +697,13 @@ let AdminService = class AdminService {
                         email: vendor.email,
                         phone: vendor.phone,
                     }
-                    : null,
+                    : {
+                        id: r.mysql_vendor_id ?? r.mysql_id,
+                        f_name: ownerFromContact,
+                        l_name: '',
+                        email: r.email ?? null,
+                        phone: r.phone ?? null,
+                    },
                 stats: {
                     food_count: foodCount,
                     order_count: orderCount,
@@ -1386,6 +1409,9 @@ let AdminService = class AdminService {
                     add_ons: Array.isArray(doc.add_ons) ? doc.add_ons : Array.isArray(doc.addon_ids) ? doc.addon_ids : [],
                     addon_ids: Array.isArray(doc.addon_ids) ? doc.addon_ids : [],
                     translations: Array.isArray(doc.translations) ? doc.translations : [],
+                    image_full_url: (0, storage_url_1.storageFullUrl)('product', doc.image ?? null),
+                    request_status: doc.request_status ?? 'approved',
+                    rejection_reason: doc.rejection_reason ?? null,
                 },
                 restaurant: restaurant ? { id: Number(restaurant.mysql_id), name: restaurant.name } : null,
             };
@@ -1413,6 +1439,45 @@ let AdminService = class AdminService {
             },
             restaurant: restaurant ? { id: Number(restaurant.id), name: restaurant.name } : null,
         };
+    }
+    async listPendingFood() {
+        if (!this.useMongo())
+            return { total: 0, items: [] };
+        const rows = await this.mongo.findMany('foods', { request_status: 'pending' }, { sort: { mysql_id: -1 }, limit: 200 });
+        const restIds = Array.from(new Set(rows.map((r) => r.mysql_restaurant_id).filter((x) => !!x)));
+        const rests = restIds.length
+            ? await this.mongo.findMany('restaurants', { mysql_id: { $in: restIds } }, { projection: { mysql_id: 1, name: 1 } })
+            : [];
+        const restMap = new Map(rests.map((r) => [r.mysql_id, r.name]));
+        return {
+            total: rows.length,
+            items: rows.map((r) => ({
+                id: r.mysql_id,
+                name: r.name ?? '—',
+                price: Number(r.price ?? 0),
+                veg: !!r.veg,
+                image_full_url: (0, storage_url_1.storageFullUrl)('product', r.image ?? null),
+                restaurant_id: r.mysql_restaurant_id ?? null,
+                restaurant_name: r.mysql_restaurant_id ? (restMap.get(r.mysql_restaurant_id) ?? `Restaurant #${r.mysql_restaurant_id}`) : '—',
+                submitted_at: r.created_at ?? null,
+                status: 'pending',
+            })),
+        };
+    }
+    async updateFoodApproval(id, decision, reason) {
+        if (!this.useMongo())
+            throw new common_1.BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+        const f = await this.mongo.findByMysqlId('foods', id);
+        if (!f)
+            throw new common_1.NotFoundException({ errors: [{ code: 'food', message: 'Food not found' }] });
+        await this.mongo.updateOne('foods', { mysql_id: id }, {
+            request_status: decision,
+            status: decision === 'approved',
+            rejection_reason: decision === 'denied' ? (reason ?? null) : null,
+            approved_at: decision === 'approved' ? new Date() : null,
+            updated_at: new Date(),
+        });
+        return { ok: true, id, decision };
     }
     async updateFoodStatus(id, status) {
         if (this.useMongo()) {
@@ -2219,17 +2284,25 @@ let AdminService = class AdminService {
         const translations = [...nameTranslations, ...addressTranslations];
         const trName = nameTranslations.find((t) => (t.locale === 'en' || t.locale === 'default') && t.key === 'name')?.value;
         const trAddress = addressTranslations.find((t) => (t.locale === 'en' || t.locale === 'default') && t.key === 'address')?.value;
+        const categoryDocs = Object.entries(body)
+            .filter(([k, v]) => /^doc_cat_\d+$/.test(k) && typeof v === 'string' && v)
+            .map(([k, v]) => ({ category_id: Number(k.slice('doc_cat_'.length)), file: v }));
+        const flatDocs = [
+            ...(Array.isArray(body.documents) ? body.documents : []),
+            ...categoryDocs.map((d) => d.file),
+        ];
         const nextId = await this.mongo.nextMysqlId('restaurants');
         await this.mongo.insertOne('restaurants', {
             mysql_id: nextId,
             name: trName ?? body.name,
             translations,
-            additional_documents: Array.isArray(body.documents) ? body.documents : [],
+            additional_documents: flatDocs,
+            restaurant_documents: categoryDocs,
             identity_number: body.identity_number ?? null,
             state: body.state ?? null,
             license_document: body.license_document ?? null,
             email: body.email ?? null,
-            phone: body.phone ?? null,
+            phone: body.restaurant_phone ?? body.phone ?? null,
             address: trAddress ?? body.address ?? null,
             latitude: body.latitude !== undefined && String(body.latitude) !== '' ? String(body.latitude) : null,
             longitude: body.longitude !== undefined && String(body.longitude) !== '' ? String(body.longitude) : null,
@@ -2343,6 +2416,7 @@ let AdminService = class AdminService {
             meta_description: body.meta_description ?? null,
             meta_image: body.meta_image ?? null,
             status: true,
+            request_status: 'approved',
             image: body.image ?? null,
             created_at: now,
             updated_at: now,
@@ -2452,7 +2526,9 @@ let AdminService = class AdminService {
         const taxable = Math.max(0, subtotal - discount);
         const taxAmount = taxable * (taxPercent / 100);
         const deliveryCharge = Number(body.delivery_charge ?? 0);
-        const orderAmount = taxable + taxAmount + deliveryCharge;
+        const additionalCharge = Math.max(0, Number(body.additional_charge ?? 0));
+        const extraPackaging = Math.max(0, Number(body.extra_packaging_amount ?? 0));
+        const orderAmount = taxable + taxAmount + deliveryCharge + additionalCharge + extraPackaging;
         const now = new Date();
         const orderId = await this.mongo.nextMysqlId('orders');
         await this.mongo.insertOne('orders', {
@@ -2464,6 +2540,8 @@ let AdminService = class AdminService {
             total_tax_amount: taxAmount,
             restaurant_discount_amount: discount,
             delivery_charge: deliveryCharge,
+            additional_charge: additionalCharge,
+            extra_packaging_amount: extraPackaging,
             payment_status: 'paid',
             order_status: 'confirmed',
             payment_method: body.payment_method ?? 'cash',
@@ -3013,19 +3091,35 @@ let AdminService = class AdminService {
             ? await this.mongo.findMany('delivery_men', { mysql_id: { $in: dmIds } })
             : [];
         const nameById = new Map(dms.map((d) => [d.mysql_id, `${d.f_name ?? ''} ${d.l_name ?? ''}`.trim()]));
+        const zoneIdByDm = new Map(dms.map((d) => [d.mysql_id, d.mysql_zone_id ?? null]));
+        const zoneIds = Array.from(new Set(dms.map((d) => d.mysql_zone_id).filter((x) => x != null)));
+        const zones = zoneIds.length
+            ? await this.mongo.findMany('zones', { mysql_id: { $in: zoneIds } })
+            : [];
+        const zoneNameById = new Map(zones.map((z) => [z.mysql_id, z.name ?? `Zone #${z.mysql_id}`]));
+        const wallets = dmIds.length
+            ? await this.mongo.findMany('delivery_man_wallets', { delivery_man_id: { $in: dmIds } })
+            : [];
+        const earningByDm = new Map(wallets.map((w) => [w.delivery_man_id, Number(w.total_earning ?? 0)]));
         return {
             total: rows.length,
-            items: rows.map((r) => ({
-                id: r.mysql_id,
-                dm_id: r.dm_id ?? null,
-                dm_name: r.dm_id ? (nameById.get(r.dm_id) || `DM #${r.dm_id}`) : '—',
-                period: r.period ?? '—',
-                deliveries: Number(r.deliveries ?? 0),
-                claim_amount: Number(r.claim_amount ?? 0),
-                status: r.status ?? 'pending',
-                reason: r.reason ?? null,
-                created_at: r.created_at ?? null,
-            })),
+            items: rows.map((r) => {
+                const zoneId = r.dm_id != null ? (zoneIdByDm.get(r.dm_id) ?? null) : null;
+                return {
+                    id: r.mysql_id,
+                    dm_id: r.dm_id ?? null,
+                    dm_name: r.dm_id ? (nameById.get(r.dm_id) || `DM #${r.dm_id}`) : '—',
+                    zone_id: zoneId,
+                    zone_name: zoneId != null ? (zoneNameById.get(zoneId) ?? `Zone #${zoneId}`) : 'All zones',
+                    total_earning: r.dm_id != null ? (earningByDm.get(r.dm_id) ?? 0) : 0,
+                    period: r.period ?? '—',
+                    deliveries: Number(r.deliveries ?? 0),
+                    claim_amount: Number(r.claim_amount ?? 0),
+                    status: r.status ?? 'pending',
+                    reason: r.reason ?? null,
+                    created_at: r.created_at ?? null,
+                };
+            }),
         };
     }
     async updateDmIncentiveStatus(id, status, reason) {
@@ -3077,6 +3171,27 @@ let AdminService = class AdminService {
                 start_date: s.start_date ?? s.created_at ?? null,
             })),
         };
+    }
+    async updateSubscriptionStatus(id, status) {
+        const allowed = ['active', 'paused', 'canceled'];
+        if (!allowed.includes(status)) {
+            throw new common_1.BadRequestException({ errors: [{ code: 'status', message: `status must be one of ${allowed.join(', ')}` }] });
+        }
+        if (!this.useMongo())
+            throw new common_1.BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+        const sub = await this.mongo.findByMysqlId('subscriptions', id);
+        if (!sub)
+            throw new common_1.NotFoundException({ errors: [{ code: 'subscription', message: 'Subscription not found' }] });
+        const now = new Date();
+        const data = { status, updated_at: now };
+        if (status === 'paused')
+            data.paused_at = now;
+        if (status === 'active')
+            data.paused_at = null;
+        if (status === 'canceled')
+            data.canceled_at = now;
+        await this.mongo.updateOne('subscriptions', { mysql_id: id }, data);
+        return { ok: true, id, status };
     }
     async listActivityLog(limit) {
         if (!this.useMongo())
@@ -4480,6 +4595,8 @@ AdminService.prototype.listAdvertisements = async function (opts) {
                 restaurant_id: restaurantId,
                 restaurant_name: restaurantId !== null ? (restNames.get(restaurantId) ?? null) : null,
                 add_type: r.add_type ?? r.type ?? null,
+                image_full_url: (0, storage_url_1.storageFullUrl)('advertisement', r.image ?? null),
+                cover_image_full_url: (0, storage_url_1.storageFullUrl)('advertisement', r.cover_image ?? null),
             };
         }), mtotal, limit, offset);
     }
@@ -4522,8 +4639,10 @@ AdminService.prototype.createAdvertisement = async function (body) {
             cover_image: body.cover_image ?? null,
             start_date: body.start_date ? new Date(body.start_date) : null,
             end_date: body.end_date ? new Date(body.end_date) : null,
-            status: 'pending',
-            is_paid: false,
+            status: 'approved',
+            created_by_type: 'admin',
+            is_paid: body.is_paid === true || body.is_paid === 'paid' || body.is_paid === '1',
+            amount: (body.is_paid === true || body.is_paid === 'paid' || body.is_paid === '1') ? Math.max(0, Number(body.amount ?? 0)) : 0,
             created_at: now,
             updated_at: now,
         });
@@ -4842,11 +4961,26 @@ AdminService.prototype.listDisbursements = async function (opts) {
         ]);
         const vendorNames = await nameMapFor(this['mongo'], 'vendors', rows.map((r) => readFk(r, 'vendor_id')), personLabel);
         const dmNames = await nameMapFor(this['mongo'], 'delivery_men', rows.map((r) => readFk(r, 'delivery_man_id')), personLabel);
+        const vendorIds = Array.from(new Set(rows.map((r) => readFk(r, 'vendor_id')).filter((x) => x !== null)));
+        const restByVendor = new Map();
+        if (vendorIds.length) {
+            const rests = await this['mongo'].findMany('restaurants', { mysql_vendor_id: { $in: vendorIds } }, { projection: { mysql_vendor_id: 1, name: 1 } });
+            for (const rr of rests) {
+                if (rr.mysql_vendor_id != null && rr.name)
+                    restByVendor.set(Number(rr.mysql_vendor_id), rr.name);
+            }
+        }
         return paginate(rows.map((r) => {
             const vendorId = readFk(r, 'vendor_id');
             const dmId = readFk(r, 'delivery_man_id');
             const isDm = dmId !== null;
             const amount = r.total_amount !== undefined && r.total_amount !== null ? Number(r.total_amount) : 0;
+            const status = String(r.status ?? 'pending');
+            const fallback = r.updated_at ?? r.created_at ?? null;
+            const initiatedAt = r.initiated_at
+                ?? (status === 'processing' || status === 'disbursed' ? fallback : null);
+            const paidAt = r.paid_at
+                ?? (status === 'disbursed' ? fallback : null);
             return {
                 ...r,
                 id: Number(r.mysql_id),
@@ -4856,9 +4990,11 @@ AdminService.prototype.listDisbursements = async function (opts) {
                 total_amount: amount,
                 recipient: isDm
                     ? (dmNames.get(dmId) ?? null)
-                    : (vendorId !== null ? (vendorNames.get(vendorId) ?? null) : null),
+                    : (vendorId !== null ? (restByVendor.get(vendorId) ?? vendorNames.get(vendorId) ?? null) : null),
                 type: isDm ? 'deliveryman' : 'restaurant',
                 payment_method: r.payment_method ?? 'cash',
+                initiated_at: initiatedAt,
+                paid_at: paidAt,
             };
         }), total, limit, offset);
     }
@@ -4877,7 +5013,23 @@ AdminService.prototype.updateDisbursementStatus = async function (id, status) {
         const d = await this['mongo'].findByMysqlId('disbursements', Number(id));
         if (!d)
             throw new common_1.NotFoundException({ errors: [{ code: 'disbursement', message: 'not found' }] });
-        await this['mongo'].updateOne('disbursements', { mysql_id: Number(id) }, { status, updated_at: new Date() });
+        const now = new Date();
+        const data = { status, updated_at: now };
+        if (status === 'pending') {
+            data.initiated_at = null;
+            data.paid_at = null;
+        }
+        else if (status === 'processing') {
+            if (!d.initiated_at)
+                data.initiated_at = now;
+            data.paid_at = null;
+        }
+        else if (status === 'disbursed') {
+            data.paid_at = now;
+            if (!d.initiated_at)
+                data.initiated_at = now;
+        }
+        await this['mongo'].updateOne('disbursements', { mysql_id: Number(id) }, data);
         return { ok: true, id, status };
     }
     const d = await this['prisma'].disbursements.findUnique({ where: { id: BigInt(id) }, select: { id: true } });
@@ -5098,7 +5250,7 @@ AdminService.prototype.listNotifications = async function (opts) {
             }),
             this['mongo'].count('notifications'),
         ]);
-        return paginate(rows.map((r) => ({ ...r, id: Number(r.mysql_id) })), total, limit, offset);
+        return paginate(rows.map((r) => ({ ...r, id: Number(r.mysql_id), status: r.status !== undefined && r.status !== null ? !!r.status : true })), total, limit, offset);
     }
     const [rows, total] = await Promise.all([
         this['prisma'].notifications.findMany({ orderBy: { id: 'desc' }, take: limit, skip: offset }),
@@ -5119,6 +5271,7 @@ AdminService.prototype.createNotification = async function (body) {
             tergat: body.tergat ?? null,
             zone_id: body.zone_id ? Number(body.zone_id) : null,
             image: body.image ?? null,
+            status: true,
             created_at: now,
             updated_at: now,
         });
@@ -5161,6 +5314,20 @@ AdminService.prototype.updateNotification = async function (id, body) {
         throw new common_1.NotFoundException({ errors: [{ code: 'notification', message: 'not found' }] });
     await this['prisma'].notifications.update({ where: { id: n.id }, data: data });
     return { ok: true, id };
+};
+AdminService.prototype.updateNotificationStatus = async function (id, status) {
+    if (this['useMongo']()) {
+        const n = await this['mongo'].findByMysqlId('notifications', Number(id));
+        if (!n)
+            throw new common_1.NotFoundException({ errors: [{ code: 'notification', message: 'not found' }] });
+        await this['mongo'].updateOne('notifications', { mysql_id: Number(id) }, { status: !!status, updated_at: new Date() });
+        return { ok: true, id, status: !!status };
+    }
+    const n = await this['prisma'].notifications.findUnique({ where: { id: BigInt(id) }, select: { id: true } });
+    if (!n)
+        throw new common_1.NotFoundException({ errors: [{ code: 'notification', message: 'not found' }] });
+    await this['prisma'].notifications.update({ where: { id: n.id }, data: { status: !!status } });
+    return { ok: true, id, status: !!status };
 };
 AdminService.prototype.deleteNotification = async function (id) {
     if (this['useMongo']()) {
@@ -5695,6 +5862,8 @@ AdminService.prototype.createSubscriptionPackage = async function (body) {
     if (!body.package_name || typeof body.price !== 'number' || typeof body.validity !== 'number') {
         throw new common_1.BadRequestException({ errors: [{ code: 'body', message: 'package_name, price, validity required' }] });
     }
+    const b = body;
+    const flag = (v) => v === true || v === 1 || v === '1' || v === 'true' || v === 'on';
     if (this['useMongo']()) {
         const mysqlId = await this['mongo'].nextMysqlId('subscription_packages');
         await this['mongo'].insertOne('subscription_packages', {
@@ -5704,6 +5873,12 @@ AdminService.prototype.createSubscriptionPackage = async function (body) {
             validity: body.validity,
             max_order: body.max_order ?? 'unlimited',
             max_product: body.max_product ?? 'unlimited',
+            pos: flag(b.pos),
+            mobile_app: flag(b.mobile_app),
+            chat: flag(b.chat),
+            review: flag(b.review),
+            self_delivery: flag(b.self_delivery),
+            default: flag(b.default),
             status: true,
             created_at: new Date(),
             updated_at: new Date(),
@@ -5717,9 +5892,58 @@ AdminService.prototype.createSubscriptionPackage = async function (body) {
             validity: body.validity,
             max_order: body.max_order ?? 'unlimited',
             max_product: body.max_product ?? 'unlimited',
+            pos: flag(b.pos),
+            mobile_app: flag(b.mobile_app),
+            chat: flag(b.chat),
+            review: flag(b.review),
+            self_delivery: flag(b.self_delivery),
         },
     });
     return { ok: true, id: Number(created.id) };
+};
+AdminService.prototype.getSubscriptionPackage = async function (id) {
+    if (this['useMongo']()) {
+        const p = await this['mongo'].findByMysqlId('subscription_packages', Number(id));
+        if (!p)
+            throw new common_1.NotFoundException({ errors: [{ code: 'package', message: 'not found' }] });
+        return { package: { ...p, id: Number(p.mysql_id), price: p.price != null ? Number(p.price) : 0 } };
+    }
+    const p = await this['prisma'].subscription_packages.findUnique({ where: { id: BigInt(id) } });
+    if (!p)
+        throw new common_1.NotFoundException({ errors: [{ code: 'package', message: 'not found' }] });
+    return { package: bigToNumber(p) };
+};
+AdminService.prototype.updateSubscriptionPackage = async function (id, body) {
+    const b = body;
+    const flag = (v) => v === true || v === 1 || v === '1' || v === 'true' || v === 'on';
+    const data = { updated_at: new Date() };
+    if (b.package_name !== undefined)
+        data.package_name = String(b.package_name);
+    if (b.price !== undefined)
+        data.price = Number(b.price);
+    if (b.validity !== undefined)
+        data.validity = Number(b.validity);
+    if (b.max_order !== undefined)
+        data.max_order = String(b.max_order);
+    if (b.max_product !== undefined)
+        data.max_product = String(b.max_product);
+    for (const k of ['pos', 'mobile_app', 'chat', 'review', 'self_delivery', 'default', 'status']) {
+        if (b[k] !== undefined)
+            data[k] = flag(b[k]);
+    }
+    if (this['useMongo']()) {
+        const p = await this['mongo'].findByMysqlId('subscription_packages', Number(id));
+        if (!p)
+            throw new common_1.NotFoundException({ errors: [{ code: 'package', message: 'not found' }] });
+        await this['mongo'].updateOne('subscription_packages', { mysql_id: Number(id) }, data);
+        return { ok: true, id };
+    }
+    const p = await this['prisma'].subscription_packages.findUnique({ where: { id: BigInt(id) }, select: { id: true } });
+    if (!p)
+        throw new common_1.NotFoundException({ errors: [{ code: 'package', message: 'not found' }] });
+    delete data.updated_at;
+    await this['prisma'].subscription_packages.update({ where: { id: p.id }, data: data });
+    return { ok: true, id };
 };
 AdminService.prototype.updateSubscriptionPackageStatus = async function (id, status) {
     if (this['useMongo']()) {
@@ -5822,20 +6046,20 @@ AdminService.prototype.listVehicles = async function () {
     return { vehicles: rows.map((r) => bigToNumber(r)) };
 };
 AdminService.prototype.createVehicle = async function (body) {
-    if (!body.type ||
-        typeof body.starting_coverage_area !== 'number' ||
-        typeof body.maximum_coverage_area !== 'number' ||
-        typeof body.extra_charges !== 'number') {
-        throw new common_1.BadRequestException({ errors: [{ code: 'body', message: 'type/coverage/extra_charges required' }] });
+    if (!body.type) {
+        throw new common_1.BadRequestException({ errors: [{ code: 'body', message: 'type is required' }] });
     }
+    const startCoverage = Number(body.starting_coverage_area ?? 0) || 0;
+    const maxCoverage = Number(body.maximum_coverage_area ?? 0) || 0;
+    const extraCharges = Number(body.extra_charges ?? 0) || 0;
     if (this['useMongo']()) {
         const mysqlId = await this['mongo'].nextMysqlId('vehicles');
         await this['mongo'].insertOne('vehicles', {
             mysql_id: mysqlId,
             type: body.type,
-            starting_coverage_area: body.starting_coverage_area,
-            maximum_coverage_area: body.maximum_coverage_area,
-            extra_charges: body.extra_charges,
+            starting_coverage_area: startCoverage,
+            maximum_coverage_area: maxCoverage,
+            extra_charges: extraCharges,
             status: true,
             created_at: new Date(),
             updated_at: new Date(),
@@ -5845,9 +6069,9 @@ AdminService.prototype.createVehicle = async function (body) {
     const created = await this['prisma'].vehicles.create({
         data: {
             type: body.type,
-            starting_coverage_area: body.starting_coverage_area,
-            maximum_coverage_area: body.maximum_coverage_area,
-            extra_charges: body.extra_charges,
+            starting_coverage_area: startCoverage,
+            maximum_coverage_area: maxCoverage,
+            extra_charges: extraCharges,
         },
     });
     return { ok: true, id: Number(created.id) };
@@ -6019,6 +6243,40 @@ AdminService.prototype.updateRefundStatus = async function (id, status, admin_no
         if (admin_note !== undefined)
             data.admin_note = admin_note;
         await this['mongo'].updateOne('refunds', { mysql_id: Number(id) }, data);
+        if (status === 'approved' || status === 'completed') {
+            const orderId = Number(r.order_id ?? r.mysql_order_id ?? 0);
+            const refundAmount = Number(r.refund_amount ?? 0);
+            if (orderId > 0 && refundAmount > 0) {
+                const existing = await this['mongo'].findOne('credit_notes', { refund_id: Number(id) });
+                if (!existing) {
+                    const order = await this['mongo'].findByMysqlId('orders', orderId);
+                    const taxReversed = Number(order?.total_tax_amount ?? 0);
+                    const delivReversed = Number(order?.delivery_charge ?? 0);
+                    const total = refundAmount + taxReversed + delivReversed;
+                    const today = new Date();
+                    const cnNumber = `CN-${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}-${orderId}R${id}`;
+                    const cnId = await this['mongo'].nextMysqlId('credit_notes');
+                    await this['mongo'].insertOne('credit_notes', {
+                        mysql_id: cnId,
+                        credit_note_number: cnNumber,
+                        refund_id: Number(id),
+                        order_id: orderId,
+                        customer_id: Number(order?.mysql_user_id ?? r.user_id ?? 0),
+                        restaurant_id: order?.mysql_restaurant_id != null ? Number(order.mysql_restaurant_id) : null,
+                        reason: r.customer_reason ?? 'Refund',
+                        refund_amount: refundAmount,
+                        tax_reversed: taxReversed,
+                        delivery_reversed: delivReversed,
+                        total_credit: total,
+                        status: 'issued',
+                        notes: 'Auto-issued on refund ' + status,
+                        issued_by: null,
+                        created_at: today,
+                        updated_at: today,
+                    });
+                }
+            }
+        }
         return { ok: true, id, status };
     }
     const r = await this['prisma'].refunds.findUnique({ where: { id: BigInt(id) }, select: { id: true } });
@@ -6245,18 +6503,41 @@ AdminService.prototype.deliverymanEarningReport = async function (limit, opts = 
             },
             { $unwind: { path: '$dm', preserveNullAndEmptyArrays: true } },
         ]);
+        const dmIds = rows.map((g) => Number(g._id)).filter((n) => Number.isFinite(n));
+        const incentiveByDm = new Map();
+        if (dmIds.length) {
+            const incRows = await this['mongo'].aggregate('dm_incentives', [
+                { $match: { dm_id: { $in: dmIds }, status: 'approved' } },
+                { $group: { _id: '$dm_id', total: { $sum: '$claim_amount' } } },
+            ]);
+            for (const r of incRows)
+                incentiveByDm.set(Number(r._id), Number(r.total ?? 0));
+        }
+        const cfgRows = await this['mongo'].findMany('business_settings', { key: { $in: ['dm_incentive_enabled', 'dm_incentive_bonus_threshold', 'dm_incentive_bonus_amount'] } });
+        const cfg = new Map(cfgRows.map((r) => [r.key, r.value]));
+        const bonusEnabled = /^(1|true|yes|on)$/i.test(String(cfg.get('dm_incentive_enabled') ?? '1'));
+        const bonusThreshold = Number(cfg.get('dm_incentive_bonus_threshold') ?? 0) || 0;
+        const bonusAmount = Number(cfg.get('dm_incentive_bonus_amount') ?? 0) || 0;
         return {
-            top_delivery_men: rows.map((g) => ({
-                delivery_man_id: g._id !== null && g._id !== undefined ? Number(g._id) : null,
-                name: g.dm ? `${g.dm.f_name ?? ''} ${g.dm.l_name ?? ''}`.trim() : null,
-                phone: g.dm?.phone ?? null,
-                zone_id: g.dm && g.dm.mysql_zone_id !== null && g.dm.mysql_zone_id !== undefined
-                    ? Number(g.dm.mysql_zone_id)
-                    : null,
-                deliveries: Number(g.deliveries ?? 0),
-                total_tips: Number(g.total_tips ?? 0),
-                total_delivery_charges: Number(g.total_delivery_charges ?? 0),
-            })),
+            top_delivery_men: rows.map((g) => {
+                const id = g._id !== null && g._id !== undefined ? Number(g._id) : null;
+                const deliveries = Number(g.deliveries ?? 0);
+                const incentive = id !== null ? (incentiveByDm.get(id) ?? 0) : 0;
+                const bonus = bonusEnabled && bonusThreshold > 0 && deliveries >= bonusThreshold ? bonusAmount : 0;
+                return {
+                    delivery_man_id: id,
+                    name: g.dm ? `${g.dm.f_name ?? ''} ${g.dm.l_name ?? ''}`.trim() : null,
+                    phone: g.dm?.phone ?? null,
+                    zone_id: g.dm && g.dm.mysql_zone_id !== null && g.dm.mysql_zone_id !== undefined
+                        ? Number(g.dm.mysql_zone_id)
+                        : null,
+                    deliveries,
+                    total_tips: Number(g.total_tips ?? 0),
+                    total_delivery_charges: Number(g.total_delivery_charges ?? 0),
+                    total_incentive: incentive,
+                    total_bonus: bonus,
+                };
+            }),
         };
     }
     const groups = await this['prisma'].orders.groupBy({
@@ -6286,6 +6567,8 @@ AdminService.prototype.deliverymanEarningReport = async function (limit, opts = 
                 deliveries: g._count._all,
                 total_tips: Number(g._sum.dm_tips ?? 0),
                 total_delivery_charges: Number(g._sum.delivery_charge ?? 0),
+                total_incentive: 0,
+                total_bonus: 0,
             };
         }),
     };

@@ -364,14 +364,20 @@ export declare class AdminController {
     restaurantDetail(id: number): Promise<{
         restaurant: {
             id: number;
-            zone_id: number | null;
+            zone_id: number;
             vendor_id: number;
-            comission: number | null;
+            comission: number;
             minimum_order: number;
             tax: number;
             minimum_shipping_charge: number;
+            restaurant_model: string;
+            delivery_time: string;
+            latitude: {};
+            longitude: {};
             logo_full_url: string | null;
             cover_photo_full_url: string | null;
+            license_document_full_url: string | null;
+            additional_documents_full_urls: (string | null)[];
             mysql_id: number;
             name: string | null;
             email: string | null;
@@ -380,13 +386,10 @@ export declare class AdminController {
             active?: boolean;
             address: string | null;
             logo: string | null;
-            latitude?: number;
-            longitude?: number;
             mysql_zone_id?: number;
             mysql_vendor_id?: number;
             delivery?: boolean;
             take_away?: boolean;
-            restaurant_model?: string;
             order_count?: number;
             created_at?: Date;
         };
@@ -396,7 +399,7 @@ export declare class AdminController {
             l_name: string | null;
             email: string | null;
             phone: string | null;
-        } | null;
+        };
         stats: {
             food_count: number;
             order_count: number;
@@ -858,6 +861,32 @@ export declare class AdminController {
             status: string;
         }[];
     }>;
+    foodPending(): Promise<{
+        total: number;
+        items: {
+            id: number;
+            name: string;
+            price: number;
+            veg: boolean;
+            image_full_url: string | null;
+            restaurant_id: number | null;
+            restaurant_name: string;
+            submitted_at: Date | null;
+            status: string;
+        }[];
+    }>;
+    approveFood(id: number): Promise<{
+        ok: boolean;
+        id: number;
+        decision: "approved" | "denied";
+    }>;
+    rejectFood(id: number, body: {
+        reason?: string;
+    }): Promise<{
+        ok: boolean;
+        id: number;
+        decision: "approved" | "denied";
+    }>;
     foodDetail(id: number): Promise<{
         food: {
             id: number;
@@ -871,6 +900,9 @@ export declare class AdminController {
             add_ons: any[];
             addon_ids: any[];
             translations: any[];
+            image_full_url: string | null;
+            request_status: string;
+            rejection_reason: string | null;
         };
         restaurant: {
             id: number;
@@ -1312,6 +1344,9 @@ export declare class AdminController {
             id: number;
             dm_id: number | null;
             dm_name: string;
+            zone_id: number | null;
+            zone_name: string;
+            total_earning: number;
             period: string;
             deliveries: number;
             claim_amount: number;
@@ -1343,6 +1378,13 @@ export declare class AdminController {
             status: string;
             start_date: Date | null;
         }[];
+    }>;
+    updateSubscriptionStatus(id: number, body: {
+        status: string;
+    }): Promise<{
+        ok: boolean;
+        id: number;
+        status: string;
     }>;
     activityLog(limit?: string): Promise<{
         total: number;
@@ -1732,6 +1774,9 @@ export declare class AdminController {
     }): Promise<unknown>;
     notifications(limit?: string, offset?: string): Promise<unknown>;
     createNotification(body: Parameters<AdminService['createNotification']>[0]): Promise<unknown>;
+    updateNotificationStatus(id: number, body: {
+        status: boolean;
+    }): Promise<unknown>;
     updateNotification(id: number, body: Parameters<AdminService['updateNotification']>[1]): Promise<unknown>;
     deleteNotification(id: number): Promise<unknown>;
     reviews(limit?: string, offset?: string): Promise<unknown>;
@@ -1779,6 +1824,8 @@ export declare class AdminController {
     updateSubscriptionPackageStatus(id: number, body: {
         status: boolean;
     }): Promise<unknown>;
+    subscriptionPackageDetail(id: number): Promise<unknown>;
+    updateSubscriptionPackage(id: number, body: Record<string, unknown>): Promise<unknown>;
     deleteSubscriptionPackage(id: number): Promise<unknown>;
     shifts(): Promise<unknown>;
     createShift(body: Parameters<AdminService['createShift']>[0]): Promise<unknown>;

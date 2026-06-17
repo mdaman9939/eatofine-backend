@@ -304,6 +304,9 @@ let CompletionService = class CompletionService {
                     },
                 },
             ]);
+            const fyStartYear = start.getMonth() + 1 >= 4 ? start.getFullYear() : start.getFullYear() - 1;
+            const fyCode = `${String(fyStartYear % 100).padStart(2, '0')}${String((fyStartYear + 1) % 100).padStart(2, '0')}`;
+            let seq = await this.mongo.count('vendor_invoices', { invoice_number: { $regex: `^RES${fyCode}-` } });
             let created = 0;
             for (const row of rollups) {
                 const rid = Number(row._id?.restaurant_id ?? 0);
@@ -339,7 +342,8 @@ let CompletionService = class CompletionService {
                 const total = taxable + cgst + sgst;
                 const tds = total * 0.01;
                 const netPayable = gross - total - tds;
-                const invNumber = `INV-${start.getFullYear()}${String(start.getMonth() + 1).padStart(2, '0')}-${vid}-${rid}`;
+                seq += 1;
+                const invNumber = `RES${fyCode}-${String(seq).padStart(4, '0')}`;
                 const mysqlId = await this.mongo.nextMysqlId('vendor_invoices');
                 const nowDate = new Date();
                 await this.mongo.insertOne('vendor_invoices', {

@@ -11,6 +11,7 @@ const common_1 = require("@nestjs/common");
 const order_controller_1 = require("./order.controller");
 const order_service_1 = require("./order.service");
 const migration_module_1 = require("../mongo/migration.module");
+const user_delivery_charges_service_1 = require("../enhancements/user-delivery-charges.service");
 let OrderModule = class OrderModule {
 };
 exports.OrderModule = OrderModule;
@@ -18,7 +19,7 @@ exports.OrderModule = OrderModule = __decorate([
     (0, common_1.Module)({
         imports: [migration_module_1.MigrationModule],
         controllers: [order_controller_1.OrderController],
-        providers: [order_service_1.OrderService],
+        providers: [order_service_1.OrderService, user_delivery_charges_service_1.UserDeliveryChargesService],
         exports: [order_service_1.OrderService],
     })
 ], OrderModule);

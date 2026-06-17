@@ -1,11 +1,13 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { FcmService } from '../notifications/fcm.service';
+import { UserDeliveryChargesService } from '../enhancements/user-delivery-charges.service';
 export declare class OrderService {
     private readonly prisma;
     private readonly mongo;
     private readonly fcm;
-    constructor(prisma: PrismaService, mongo: MongoDataService, fcm: FcmService);
+    private readonly userCharges;
+    constructor(prisma: PrismaService, mongo: MongoDataService, fcm: FcmService, userCharges: UserDeliveryChargesService);
     private pushNewOrderToRestaurant;
     private useMongo;
     placeOrder(userId: bigint, body: {

@@ -15,14 +15,25 @@ const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
 const storage_url_1 = require("../common/storage-url");
 const fcm_service_1 = require("../notifications/fcm.service");
+const user_delivery_charges_service_1 = require("../enhancements/user-delivery-charges.service");
+function haversineKm(lat1, lng1, lat2, lng2) {
+    const toRad = (d) => (d * Math.PI) / 180;
+    const R = 6371;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 let OrderService = class OrderService {
     prisma;
     mongo;
     fcm;
-    constructor(prisma, mongo, fcm) {
+    userCharges;
+    constructor(prisma, mongo, fcm, userCharges) {
         this.prisma = prisma;
         this.mongo = mongo;
         this.fcm = fcm;
+        this.userCharges = userCharges;
     }
     async pushNewOrderToRestaurant(restaurantId, orderId) {
         try {
@@ -94,7 +105,33 @@ let OrderService = class OrderService {
                 orderAmount += lineTotal;
                 totalTax += lineTax;
             }
-            const deliveryCharge = body.order_type === 'take_away' ? 0 : Number(restaurant.minimum_shipping_charge ?? 0);
+            let deliveryCharge = 0;
+            let deliveryGst = 0;
+            if (body.order_type !== 'take_away') {
+                let distanceKm = body.distance != null && Number.isFinite(Number(body.distance)) ? Math.max(0, Number(body.distance)) : NaN;
+                if (Number.isNaN(distanceKm)) {
+                    const rLat = Number(restaurant.latitude), rLng = Number(restaurant.longitude);
+                    const uLat = Number(body.latitude), uLng = Number(body.longitude);
+                    distanceKm = [rLat, rLng, uLat, uLng].every((n) => Number.isFinite(n)) ? haversineKm(rLat, rLng, uLat, uLng) : 0;
+                }
+                try {
+                    const dc = await this.userCharges.calculate({ distance_km: distanceKm, order_value: orderAmount, when: body.schedule_at });
+                    if (dc.free_delivery) {
+                        deliveryCharge = 0;
+                    }
+                    else if (dc.matched_slab) {
+                        deliveryCharge = Number(dc.subtotal ?? 0);
+                        deliveryGst = Number(dc.gst_amount ?? 0);
+                    }
+                    else {
+                        deliveryCharge = Number(restaurant.minimum_shipping_charge ?? 0);
+                    }
+                }
+                catch {
+                    deliveryCharge = Number(restaurant.minimum_shipping_charge ?? 0);
+                }
+            }
+            totalTax = Math.round((totalTax + deliveryGst) * 100) / 100;
             const finalAmount = Math.round((orderAmount + totalTax + deliveryCharge) * 100) / 100;
             const otp = String(Math.floor(1000 + Math.random() * 9000));
             const now = new Date();
@@ -537,6 +574,7 @@ exports.OrderService = OrderService = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
         mongo_data_service_1.MongoDataService,
-        fcm_service_1.FcmService])
+        fcm_service_1.FcmService,
+        user_delivery_charges_service_1.UserDeliveryChargesService])
 ], OrderService);
 //# sourceMappingURL=order.service.js.map

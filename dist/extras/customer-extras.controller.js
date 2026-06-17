@@ -358,6 +358,10 @@ let CustomerExtrasController = class CustomerExtrasController {
     async pointTransfer(req, body = {}) {
         if (!this.useMongo())
             return { message: 'Not available in demo' };
+        const lpStatus = await this.mongo.findOne('business_settings', { key: 'loyalty_point_status' });
+        if (lpStatus && lpStatus.value != null && !/^(1|true|yes|on)$/i.test(String(lpStatus.value))) {
+            return { errors: [{ code: 'loyalty', message: 'Loyalty points are currently disabled' }] };
+        }
         const userId = Number(req.actor.id);
         const points = Number(body.point ?? body.points ?? 0);
         if (!Number.isFinite(points) || points <= 0)

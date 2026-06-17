@@ -661,8 +661,9 @@ let EnhancementsService = class EnhancementsService {
                     state: 'Delhi', state_code: '07',
                 },
                 bill_to: {
-                    name: user ? `${user.f_name ?? ''} ${user.l_name ?? ''}`.trim() : 'Customer',
-                    email: user?.email ?? null, phone: user?.phone ?? null,
+                    name: (user ? `${user.f_name ?? ''} ${user.l_name ?? ''}`.trim() : '') || order.contact_person_name || 'Customer',
+                    email: user?.email ?? null,
+                    phone: user?.phone ?? order.contact_person_number ?? null,
                     address: this.flattenAddress(order.delivery_address),
                 },
                 items: items.map((it) => {

@@ -343,14 +343,20 @@ export declare class AdminService {
     getRestaurant(id: number): Promise<{
         restaurant: {
             id: number;
-            zone_id: number | null;
+            zone_id: number;
             vendor_id: number;
-            comission: number | null;
+            comission: number;
             minimum_order: number;
             tax: number;
             minimum_shipping_charge: number;
+            restaurant_model: string;
+            delivery_time: string;
+            latitude: {};
+            longitude: {};
             logo_full_url: string | null;
             cover_photo_full_url: string | null;
+            license_document_full_url: string | null;
+            additional_documents_full_urls: (string | null)[];
             mysql_id: number;
             name: string | null;
             email: string | null;
@@ -359,13 +365,10 @@ export declare class AdminService {
             active?: boolean;
             address: string | null;
             logo: string | null;
-            latitude?: number;
-            longitude?: number;
             mysql_zone_id?: number;
             mysql_vendor_id?: number;
             delivery?: boolean;
             take_away?: boolean;
-            restaurant_model?: string;
             order_count?: number;
             created_at?: Date;
         };
@@ -375,7 +378,7 @@ export declare class AdminService {
             l_name: string | null;
             email: string | null;
             phone: string | null;
-        } | null;
+        };
         stats: {
             food_count: number;
             order_count: number;
@@ -816,6 +819,9 @@ export declare class AdminService {
             add_ons: any[];
             addon_ids: any[];
             translations: any[];
+            image_full_url: string | null;
+            request_status: string;
+            rejection_reason: string | null;
         };
         restaurant: {
             id: number;
@@ -861,6 +867,25 @@ export declare class AdminService {
             id: number;
             name: string;
         } | null;
+    }>;
+    listPendingFood(): Promise<{
+        total: number;
+        items: {
+            id: number;
+            name: string;
+            price: number;
+            veg: boolean;
+            image_full_url: string | null;
+            restaurant_id: number | null;
+            restaurant_name: string;
+            submitted_at: Date | null;
+            status: string;
+        }[];
+    }>;
+    updateFoodApproval(id: number, decision: 'approved' | 'denied', reason?: string): Promise<{
+        ok: boolean;
+        id: number;
+        decision: "approved" | "denied";
     }>;
     updateFoodStatus(id: number, status: boolean): Promise<{
         ok: boolean;
@@ -1165,6 +1190,7 @@ export declare class AdminService {
         name?: string;
         email?: string;
         phone?: string;
+        restaurant_phone?: string;
         address?: string;
         minimum_order?: number;
         zone_id?: number;
@@ -1201,6 +1227,7 @@ export declare class AdminService {
         identity_number?: string;
         state?: string;
         license_document?: string;
+        [key: string]: unknown;
     }): Promise<{
         ok: boolean;
         id: number;
@@ -1255,6 +1282,8 @@ export declare class AdminService {
         discount?: number;
         tax_percent?: number;
         delivery_charge?: number;
+        additional_charge?: number;
+        extra_packaging_amount?: number;
         order_note?: string;
     }): Promise<{
         ok: boolean;
@@ -1513,6 +1542,9 @@ export declare class AdminService {
             id: number;
             dm_id: number | null;
             dm_name: string;
+            zone_id: number | null;
+            zone_name: string;
+            total_earning: number;
             period: string;
             deliveries: number;
             claim_amount: number;
@@ -1537,6 +1569,11 @@ export declare class AdminService {
             status: string;
             start_date: Date | null;
         }[];
+    }>;
+    updateSubscriptionStatus(id: number, status: string): Promise<{
+        ok: boolean;
+        id: number;
+        status: string;
     }>;
     listActivityLog(limit: number): Promise<{
         total: number;
@@ -1941,6 +1978,8 @@ declare module './admin.service' {
             end_date?: string;
             image?: string | null;
             cover_image?: string | null;
+            is_paid?: boolean | string;
+            amount?: number | string;
         }): Promise<unknown>;
         updateAdvertisementStatus(id: number, status: 'approved' | 'denied' | 'pending' | 'paused' | 'expired' | 'running'): Promise<unknown>;
         deleteAdvertisement(id: number): Promise<unknown>;
@@ -2016,6 +2055,7 @@ declare module './admin.service' {
             zone_id?: number | null;
             image?: string | null;
         }): Promise<unknown>;
+        updateNotificationStatus(id: number, status: boolean): Promise<unknown>;
         deleteNotification(id: number): Promise<unknown>;
         listReviews(opts: ListOpts): Promise<unknown>;
         replyReview(id: number, reply: string): Promise<unknown>;
@@ -2088,7 +2128,15 @@ declare module './admin.service' {
             validity: number;
             max_order?: string;
             max_product?: string;
+            pos?: boolean;
+            mobile_app?: boolean;
+            chat?: boolean;
+            review?: boolean;
+            self_delivery?: boolean;
+            default?: boolean;
         }): Promise<unknown>;
+        getSubscriptionPackage(id: number): Promise<unknown>;
+        updateSubscriptionPackage(id: number, body: Record<string, unknown>): Promise<unknown>;
         updateSubscriptionPackageStatus(id: number, status: boolean): Promise<unknown>;
         deleteSubscriptionPackage(id: number): Promise<unknown>;
         listShifts(): Promise<unknown>;
@@ -2103,9 +2151,9 @@ declare module './admin.service' {
         listVehicles(): Promise<unknown>;
         createVehicle(body: {
             type: string;
-            starting_coverage_area: number;
-            maximum_coverage_area: number;
-            extra_charges: number;
+            starting_coverage_area?: number;
+            maximum_coverage_area?: number;
+            extra_charges?: number;
         }): Promise<unknown>;
         updateVehicleStatus(id: number, status: boolean): Promise<unknown>;
         deleteVehicle(id: number): Promise<unknown>;

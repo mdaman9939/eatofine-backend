@@ -650,8 +650,8 @@ let CatalogExtrasController = class CatalogExtrasController {
     }
     async vehicles() {
         if (this.useMongo()) {
-            const rows = await this.mongo.findMany('vehicles', { status: true });
-            return rows.map((r) => ({ ...r, id: Number(r.mysql_id) }));
+            const rows = await this.mongo.findMany('vehicles', { status: { $in: [true, 1, '1'] } });
+            return rows.map((r) => ({ ...r, id: Number(r.mysql_id), status: true }));
         }
         const rows = await this.prisma.vehicles.findMany({ where: { status: true } });
         return rows.map((r) => ({ ...r, id: Number(r.id) }));

@@ -282,6 +282,7 @@ export declare class CatalogExtrasController {
     }[]>;
     vehicles(): Promise<{
         id: number;
+        status: boolean;
     }[]>;
     vehicleExtraCharge(): {
         extra_charges: number;
