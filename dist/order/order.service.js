@@ -125,6 +125,50 @@ let OrderService = class OrderService {
                 orderAmount += lineTotal;
                 totalTax += lineTax;
             }
+            let couponDiscount = 0;
+            let couponCode = null;
+            let couponAdminDiscount = 0;
+            let couponRestaurantDiscount = 0;
+            let couponMysqlId = null;
+            let couponOwner = 'admin';
+            if (body.coupon_code && String(body.coupon_code).trim()) {
+                const code = String(body.coupon_code).trim();
+                const coupon = await this.mongo.findOne('coupons', { code });
+                const now2 = new Date();
+                const okStatus = !!coupon && (coupon.status === true || coupon.status === 1 || coupon.status === undefined);
+                const okStart = !coupon?.start_date || new Date(coupon.start_date) <= now2;
+                const okEnd = !coupon?.expire_date || new Date(coupon.expire_date) >= now2;
+                const okMin = !coupon?.min_purchase || orderAmount >= Number(coupon.min_purchase);
+                const okRest = coupon?.mysql_restaurant_id == null || Number(coupon.mysql_restaurant_id) === Number(body.restaurant_id);
+                const okLimit = coupon?.limit == null || Number(coupon.total_uses ?? 0) < Number(coupon.limit);
+                if (coupon && okStatus && okStart && okEnd && okMin && okRest && okLimit) {
+                    const dType = String(coupon.discount_type ?? 'percentage');
+                    let d = dType === 'percent' || dType === 'percentage'
+                        ? (orderAmount * Number(coupon.discount ?? 0)) / 100
+                        : Number(coupon.discount ?? 0);
+                    const maxD = Number(coupon.max_discount ?? 0);
+                    if (maxD > 0)
+                        d = Math.min(d, maxD);
+                    couponDiscount = Math.min(Math.round(d * 100) / 100, orderAmount);
+                    couponCode = code;
+                    couponMysqlId = Number(coupon.mysql_id);
+                    couponOwner = ['admin', 'restaurant', 'shared'].includes(String(coupon.discount_owner)) ? String(coupon.discount_owner) : 'admin';
+                    if (couponOwner === 'restaurant') {
+                        couponRestaurantDiscount = couponDiscount;
+                    }
+                    else if (couponOwner === 'shared') {
+                        const cfgA = Math.max(0, Number(coupon.admin_discount_amount ?? 0));
+                        const cfgR = Math.max(0, Number(coupon.restaurant_discount_amount ?? 0));
+                        const tot = cfgA + cfgR;
+                        const aShare = tot > 0 ? Math.round(((couponDiscount * cfgA) / tot) * 100) / 100 : couponDiscount;
+                        couponAdminDiscount = aShare;
+                        couponRestaurantDiscount = Math.round((couponDiscount - aShare) * 100) / 100;
+                    }
+                    else {
+                        couponAdminDiscount = couponDiscount;
+                    }
+                }
+            }
             let deliveryCharge = 0;
             let deliveryGst = 0;
             if (body.order_type !== 'take_away' && body.order_type !== 'dine_in') {
@@ -154,7 +198,7 @@ let OrderService = class OrderService {
             totalTax = Math.round((totalTax + deliveryGst) * 100) / 100;
             const addChargeRows = await this.mongo.findMany('additional_user_charges', {});
             const additionalCharge = (0, additional_charge_1.computeFlatAdditionalCharge)(addChargeRows).amount;
-            const finalAmount = Math.round((orderAmount + totalTax + deliveryCharge + additionalCharge) * 100) / 100;
+            const finalAmount = Math.round((orderAmount - couponDiscount + totalTax + deliveryCharge + additionalCharge) * 100) / 100;
             const otp = String(Math.floor(1000 + Math.random() * 9000));
             const now = new Date();
             const orderMysqlId = await this.mongo.nextMysqlId('orders');
@@ -241,9 +285,12 @@ let OrderService = class OrderService {
                 order_amount: finalAmount,
                 total_tax_amount: Math.round(totalTax * 100) / 100,
                 delivery_charge: deliveryCharge,
-                coupon_discount_amount: 0,
+                coupon_discount_amount: couponDiscount,
+                coupon_code: couponCode,
+                discount_owner: couponCode ? couponOwner : null,
+                admin_discount_amount: couponAdminDiscount,
                 additional_charge: additionalCharge,
-                restaurant_discount_amount: 0,
+                restaurant_discount_amount: couponRestaurantDiscount,
                 otp,
                 pending: now,
                 items,
@@ -254,6 +301,9 @@ let OrderService = class OrderService {
                 updated_at: now,
                 created_at_legacy: now,
             });
+            if (couponMysqlId != null) {
+                await this.mongo.increment('coupons', { mysql_id: couponMysqlId }, { total_uses: 1 });
+            }
             for (const it of items) {
                 const odMysqlId = await this.mongo.nextMysqlId('order_details');
                 await this.mongo.insertOne('order_details', {

@@ -52,6 +52,9 @@ interface MongoOrder {
   total_tax_amount?: number;
   delivery_charge?: number;
   coupon_discount_amount?: number;
+  coupon_code?: string | null;
+  discount_owner?: string | null;
+  admin_discount_amount?: number;
   additional_charge?: number;
   restaurant_discount_amount?: number;
   otp?: string;
@@ -220,6 +223,61 @@ export class OrderService {
         totalTax += lineTax;
       }
 
+      // ── Coupon — backend-validated + discount-ownership aware ──────────────
+      // We recompute the coupon discount here (authoritative — the customer is
+      // charged what WE compute, not what the app sent), and split it by the
+      // coupon's owner so the right party bears it:
+      //   restaurant-funded → restaurant_discount_amount (restaurant bears it)
+      //   admin-funded      → admin_discount_amount (Eatofine bears it)
+      //   shared            → split per the coupon's configured amounts
+      let couponDiscount = 0;
+      let couponCode: string | null = null;
+      let couponAdminDiscount = 0;
+      let couponRestaurantDiscount = 0;
+      let couponMysqlId: number | null = null;
+      let couponOwner = 'admin';
+      if (body.coupon_code && String(body.coupon_code).trim()) {
+        const code = String(body.coupon_code).trim();
+        const coupon = await this.mongo.findOne<{
+          mysql_id: number; code?: string; discount?: number; discount_type?: string;
+          min_purchase?: number; max_discount?: number; start_date?: Date | string | null;
+          expire_date?: Date | string | null; limit?: number | null; total_uses?: number | null;
+          status?: boolean | number; mysql_restaurant_id?: number | null;
+          discount_owner?: string; admin_discount_amount?: number; restaurant_discount_amount?: number;
+        }>('coupons', { code });
+        const now2 = new Date();
+        const okStatus = !!coupon && (coupon.status === true || coupon.status === 1 || coupon.status === undefined);
+        const okStart = !coupon?.start_date || new Date(coupon.start_date) <= now2;
+        const okEnd = !coupon?.expire_date || new Date(coupon.expire_date) >= now2;
+        const okMin = !coupon?.min_purchase || orderAmount >= Number(coupon.min_purchase);
+        const okRest = coupon?.mysql_restaurant_id == null || Number(coupon.mysql_restaurant_id) === Number(body.restaurant_id);
+        const okLimit = coupon?.limit == null || Number(coupon.total_uses ?? 0) < Number(coupon.limit);
+        if (coupon && okStatus && okStart && okEnd && okMin && okRest && okLimit) {
+          const dType = String(coupon.discount_type ?? 'percentage');
+          let d = dType === 'percent' || dType === 'percentage'
+            ? (orderAmount * Number(coupon.discount ?? 0)) / 100
+            : Number(coupon.discount ?? 0);
+          const maxD = Number(coupon.max_discount ?? 0);
+          if (maxD > 0) d = Math.min(d, maxD);
+          couponDiscount = Math.min(Math.round(d * 100) / 100, orderAmount);
+          couponCode = code;
+          couponMysqlId = Number(coupon.mysql_id);
+          couponOwner = ['admin', 'restaurant', 'shared'].includes(String(coupon.discount_owner)) ? String(coupon.discount_owner) : 'admin';
+          if (couponOwner === 'restaurant') {
+            couponRestaurantDiscount = couponDiscount;
+          } else if (couponOwner === 'shared') {
+            const cfgA = Math.max(0, Number(coupon.admin_discount_amount ?? 0));
+            const cfgR = Math.max(0, Number(coupon.restaurant_discount_amount ?? 0));
+            const tot = cfgA + cfgR;
+            const aShare = tot > 0 ? Math.round(((couponDiscount * cfgA) / tot) * 100) / 100 : couponDiscount;
+            couponAdminDiscount = aShare;
+            couponRestaurantDiscount = Math.round((couponDiscount - aShare) * 100) / 100;
+          } else {
+            couponAdminDiscount = couponDiscount;
+          }
+        }
+      }
+
       // ── Delivery charge — distance-slab engine (User Delivery Charges) ──
       // The customer fee comes from the configured distance slabs + surge +
       // surcharges + free-delivery threshold (GST applied). Take-away = ₹0.
@@ -257,7 +315,7 @@ export class OrderService {
       // app shows from config, so the displayed total matches what we charge.
       const addChargeRows = await this.mongo.findMany<AdditionalChargeRow>('additional_user_charges', {});
       const additionalCharge = computeFlatAdditionalCharge(addChargeRows).amount;
-      const finalAmount = Math.round((orderAmount + totalTax + deliveryCharge + additionalCharge) * 100) / 100;
+      const finalAmount = Math.round((orderAmount - couponDiscount + totalTax + deliveryCharge + additionalCharge) * 100) / 100;
       const otp = String(Math.floor(1000 + Math.random() * 9000));
       const now = new Date();
 
@@ -357,9 +415,12 @@ export class OrderService {
         order_amount: finalAmount,
         total_tax_amount: Math.round(totalTax * 100) / 100,
         delivery_charge: deliveryCharge,
-        coupon_discount_amount: 0,
+        coupon_discount_amount: couponDiscount,
+        coupon_code: couponCode,
+        discount_owner: couponCode ? couponOwner : null,
+        admin_discount_amount: couponAdminDiscount,
         additional_charge: additionalCharge,
-        restaurant_discount_amount: 0,
+        restaurant_discount_amount: couponRestaurantDiscount,
         otp,
         pending: now,
         items,
@@ -372,6 +433,11 @@ export class OrderService {
         updated_at: now,
         created_at_legacy: now,
       } as MongoOrder);
+
+      // Count one coupon redemption (atomic) so usage limits hold.
+      if (couponMysqlId != null) {
+        await this.mongo.increment('coupons', { mysql_id: couponMysqlId }, { total_uses: 1 });
+      }
 
       // Mirror to order_details collection for joins from other services
       for (const it of items) {

@@ -38,38 +38,15 @@ let SettlementService = class SettlementService {
         this.indexesReady = true;
     }
     async resolveDiscounts(order) {
-        let admin = Math.max(0, num(order.admin_discount_amount));
-        let restaurant = Math.max(0, num(order.restaurant_discount_amount));
-        const couponDiscount = Math.max(0, num(order.coupon_discount_amount));
-        let coupon = null;
-        let owner = order.discount_owner ||
+        const admin = r2(Math.max(0, num(order.admin_discount_amount)));
+        const restaurant = r2(Math.max(0, num(order.restaurant_discount_amount)));
+        const owner = order.discount_owner ||
             (restaurant > 0 && admin === 0 ? 'restaurant' : 'admin');
-        if (couponDiscount > 0 && order.coupon_code) {
+        let coupon = null;
+        if (num(order.coupon_discount_amount) > 0 && order.coupon_code) {
             coupon = await this.mongo.findOne('coupons', { code: order.coupon_code });
-            const cOwner = coupon?.discount_owner || 'admin';
-            owner = cOwner;
-            if (cOwner === 'restaurant') {
-                restaurant += couponDiscount;
-            }
-            else if (cOwner === 'shared') {
-                const cfgAdmin = Math.max(0, num(coupon?.admin_discount_amount));
-                const cfgRest = Math.max(0, num(coupon?.restaurant_discount_amount));
-                const cfgTotal = cfgAdmin + cfgRest;
-                const adminShare = cfgTotal > 0 ? r2(couponDiscount * (cfgAdmin / cfgTotal)) : couponDiscount;
-                admin += adminShare;
-                restaurant += r2(couponDiscount - adminShare);
-            }
-            else {
-                admin += couponDiscount;
-            }
         }
-        else if (couponDiscount > 0) {
-            if (owner === 'restaurant')
-                restaurant += couponDiscount;
-            else
-                admin += couponDiscount;
-        }
-        return { admin: r2(admin), restaurant: r2(restaurant), coupon, owner };
+        return { admin, restaurant, coupon, owner };
     }
     computeBreakdown(order, restaurant, foodAmount, discounts) {
         const customerPayment = r2(num(order.order_amount));

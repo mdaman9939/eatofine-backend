@@ -172,6 +172,8 @@ export declare class AdminService {
             commission_pct: number;
             eatofine_commission: number;
             eatofine_platform_fee: number;
+            admin_discount: number;
+            restaurant_discount: number;
             eatofine_earning: number;
             restaurant_earning: number;
             deliveryman_earning: number;

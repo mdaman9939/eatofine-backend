@@ -410,20 +410,24 @@ let AdminService = class AdminService {
             const taxAmt = r2e(Number(order.total_tax_amount ?? 0));
             const deliveryAmt = r2e(Number(order.delivery_charge ?? 0));
             const platformFee = r2e(Number(order.additional_charge ?? 0));
-            const restDiscount = r2e(Number(order.restaurant_discount_amount ?? 0));
+            const adminDiscount = r2e(Number(order.admin_discount_amount ?? 0));
+            const restaurantDiscount = r2e(Number(order.restaurant_discount_amount ?? 0));
             const foodAmount = r2e(items.reduce((s, it) => s + Number(it.price ?? 0) * Number(it.quantity ?? 0) + Number(it.total_add_on_price ?? 0), 0));
             const commissionPct = Math.max(0, Number(restaurant?.comission ?? 0));
-            const adminCommission = r2e(Math.max(0, foodAmount - restDiscount) * (commissionPct / 100));
+            const adminCommission = r2e(Math.max(0, foodAmount - restaurantDiscount) * (commissionPct / 100));
             const hasDm = order.mysql_delivery_man_id != null && Number(order.mysql_delivery_man_id) > 0;
             const deliverymanEarning = hasDm ? deliveryAmt : 0;
-            const eatofineEarning = r2e(adminCommission + platformFee + (hasDm ? 0 : deliveryAmt));
-            const restaurantEarning = r2e(customerPayment - eatofineEarning - deliverymanEarning - taxAmt);
+            const platformRevenue = r2e(adminCommission + platformFee + (hasDm ? 0 : deliveryAmt));
+            const restaurantEarning = r2e(customerPayment + adminDiscount - platformRevenue - deliverymanEarning - taxAmt);
+            const eatofineEarning = r2e(platformRevenue - adminDiscount);
             const earnings = {
                 customer_payment: customerPayment,
                 food_amount: foodAmount,
                 commission_pct: commissionPct,
                 eatofine_commission: adminCommission,
                 eatofine_platform_fee: platformFee,
+                admin_discount: adminDiscount,
+                restaurant_discount: restaurantDiscount,
                 eatofine_earning: eatofineEarning,
                 restaurant_earning: restaurantEarning,
                 deliveryman_earning: deliverymanEarning,

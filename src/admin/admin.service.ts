@@ -439,7 +439,7 @@ export class AdminService {
       const order = await this.mongo.findByMysqlId<{
         mysql_id: number; mysql_user_id?: number; mysql_restaurant_id?: number; mysql_delivery_man_id?: number;
         order_amount?: number; coupon_discount_amount?: number; total_tax_amount?: number;
-        delivery_charge?: number; restaurant_discount_amount?: number;
+        delivery_charge?: number; restaurant_discount_amount?: number; admin_discount_amount?: number;
         additional_charge?: number; extra_packaging_amount?: number;
         payment_status?: string; order_status?: string; payment_method?: string; order_type?: string;
         table_number?: string | null;
@@ -479,20 +479,33 @@ export class AdminService {
       const taxAmt = r2e(Number(order.total_tax_amount ?? 0));
       const deliveryAmt = r2e(Number(order.delivery_charge ?? 0));
       const platformFee = r2e(Number(order.additional_charge ?? 0));
-      const restDiscount = r2e(Number(order.restaurant_discount_amount ?? 0));
+
+      // ── Discount ownership (who funds the discount) ──────────────────────
+      // The order already carries the authoritative split (placeOrder resolves
+      // the coupon's owner at checkout): restaurant-funded → restaurant bears it;
+      // admin-funded → Eatofine bears it (promo expense).
+      const adminDiscount = r2e(Number(order.admin_discount_amount ?? 0));
+      const restaurantDiscount = r2e(Number(order.restaurant_discount_amount ?? 0));
+
       const foodAmount = r2e(items.reduce((s, it) => s + Number(it.price ?? 0) * Number(it.quantity ?? 0) + Number(it.total_add_on_price ?? 0), 0));
       const commissionPct = Math.max(0, Number(restaurant?.comission ?? 0));
-      const adminCommission = r2e(Math.max(0, foodAmount - restDiscount) * (commissionPct / 100));
+      // Commission is charged on the food net of the RESTAURANT's own discount.
+      const adminCommission = r2e(Math.max(0, foodAmount - restaurantDiscount) * (commissionPct / 100));
       const hasDm = order.mysql_delivery_man_id != null && Number(order.mysql_delivery_man_id) > 0;
       const deliverymanEarning = hasDm ? deliveryAmt : 0;
-      const eatofineEarning = r2e(adminCommission + platformFee + (hasDm ? 0 : deliveryAmt));
-      const restaurantEarning = r2e(customerPayment - eatofineEarning - deliverymanEarning - taxAmt);
+      const platformRevenue = r2e(adminCommission + platformFee + (hasDm ? 0 : deliveryAmt));
+      // Residual — adding admin-funded discount back so the restaurant is paid in
+      // full when ADMIN funds the discount (admin bears it, not the restaurant).
+      const restaurantEarning = r2e(customerPayment + adminDiscount - platformRevenue - deliverymanEarning - taxAmt);
+      const eatofineEarning = r2e(platformRevenue - adminDiscount); // admin net after promo expense
       const earnings = {
         customer_payment: customerPayment,
         food_amount: foodAmount,
         commission_pct: commissionPct,
         eatofine_commission: adminCommission,
         eatofine_platform_fee: platformFee,
+        admin_discount: adminDiscount,
+        restaurant_discount: restaurantDiscount,
         eatofine_earning: eatofineEarning,
         restaurant_earning: restaurantEarning,
         deliveryman_earning: deliverymanEarning,
