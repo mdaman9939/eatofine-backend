@@ -670,7 +670,7 @@ export class AdminService {
       });
     }
     if (this.useMongo()) {
-      const order = await this.mongo.findByMysqlId<{ mysql_id: number; payment_method?: string; order_status?: string }>('orders', id);
+      const order = await this.mongo.findByMysqlId<{ mysql_id: number; payment_method?: string; order_status?: string; order_type?: string }>('orders', id);
       if (!order) throw new NotFoundException({ errors: [{ code: 'order', message: 'Order not found' }] });
 
       // Cancellation → the lifecycle engine (sets cancel_reason + refund_status,
@@ -682,6 +682,7 @@ export class AdminService {
       }
 
       const fromStatus = order.order_status;
+      this.lifecycle.assertTransition(order.order_type, fromStatus, status); // no-op unless STRICT enabled
       const data: Record<string, unknown> = { order_status: status };
       const tsCol = TIMESTAMP_COLUMN[status as OrderStatus];
       if (tsCol) data[tsCol] = new Date();

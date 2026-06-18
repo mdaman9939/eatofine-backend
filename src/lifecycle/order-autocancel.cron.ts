@@ -20,6 +20,7 @@ export class OrderAutoCancelCron {
     this.running = true;
     try {
       await this.lifecycle.autoCancelStalePending();
+      await this.lifecycle.processPendingRefunds();
     } catch (e) {
       this.logger.error('auto-cancel sweep failed', e instanceof Error ? e.stack : String(e));
     } finally {

@@ -1,16 +1,20 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { FcmService } from '../notifications/fcm.service';
 import {
   CANCEL_MESSAGE_CUSTOMER,
   CANCEL_MESSAGE_RESTAURANT,
+  FLOW,
   NOTIFY_DELIVERY_ON_CANCEL,
   REFUND_STATUS,
   STATUS_LABELS,
   TERMINAL_STATUSES,
   normaliseStatus,
   type CancelReason,
+  type OrderType,
 } from './order-lifecycle.constants';
+
+const r2 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
 
 type Actor = 'customer' | 'restaurant' | 'admin' | 'delivery_partner' | 'system';
 
@@ -24,6 +28,7 @@ interface OrderDoc {
   order_type?: string;
   payment_method?: string | null;
   payment_status?: string | null;
+  order_amount?: number;
 }
 
 /**
@@ -104,7 +109,11 @@ export class OrderLifecycleService {
       return { ok: false, skipped: true, reason: `already_${order.order_status}` };
     }
     const toStatus = reason === 'restaurant_not_responded' ? 'auto_cancelled' : 'canceled';
-    const refundStatus = this.refundStatusForCancel(order);
+    // Prepaid order → start + complete the refund automatically (credit wallet).
+    let refundStatus = this.refundStatusForCancel(order);
+    if (refundStatus === REFUND_STATUS.PENDING) {
+      refundStatus = await this.processRefund(order);
+    }
     await this.mongo.updateOne('orders', { mysql_id: Number(orderId) }, {
       order_status: toStatus,
       cancel_reason: reason,
@@ -219,6 +228,92 @@ export class OrderLifecycleService {
       const order = await this.mongo.findByMysqlId<OrderDoc>('orders', orderId);
       const tok = await this.tokenForUser(order?.mysql_user_id);
       await this.push(tok, 'Order update', label, orderId, 'order_status');
+    }
+  }
+
+  // ── Refund processing (real money back to wallet) ─────────────────────────
+  /** Credit a full refund to the customer's wallet + log a wallet transaction. */
+  private async creditCustomerWallet(userId: number, amount: number): Promise<void> {
+    const w = await this.mongo.findOne<{ mysql_id: number; balance?: number; total_earning?: number }>(
+      'wallets', { $or: [{ user_id: userId }, { mysql_user_id: userId }] },
+    );
+    if (w) {
+      await this.mongo.updateOne('wallets', { mysql_id: Number(w.mysql_id) }, {
+        balance: r2(Number(w.balance ?? 0) + amount),
+        total_earning: r2(Number(w.total_earning ?? 0) + amount),
+        updated_at: new Date(),
+      });
+    } else {
+      const id = await this.mongo.nextMysqlId('wallets');
+      await this.mongo.insertOne('wallets', {
+        mysql_id: id, user_id: userId, mysql_user_id: userId,
+        balance: amount, total_earning: amount, created_at: new Date(), updated_at: new Date(),
+      });
+    }
+    const txId = await this.mongo.nextMysqlId('wallet_transactions');
+    await this.mongo.insertOne('wallet_transactions', {
+      mysql_id: txId, user_id: userId, credit: amount, debit: 0,
+      transaction_type: 'order_refund', reference: 'order_refund', created_at: new Date(),
+    });
+  }
+
+  /** Refund a cancelled prepaid order to the customer wallet. Returns the new
+   *  refund_status (processed / failed / not_required). */
+  private async processRefund(order: OrderDoc): Promise<string> {
+    const amount = r2(Number(order.order_amount ?? 0));
+    const uid = order.mysql_user_id != null ? Number(order.mysql_user_id) : 0;
+    if (!uid || amount <= 0) return REFUND_STATUS.NOT_REQUIRED;
+    try {
+      await this.creditCustomerWallet(uid, amount);
+      const rid = await this.mongo.nextMysqlId('refunds');
+      await this.mongo.insertOne('refunds', {
+        mysql_id: rid, order_id: Number(order.mysql_id), user_id: uid,
+        refund_amount: amount, refund_method: 'wallet', refund_status: 'completed',
+        reason: 'order_cancelled', created_at: new Date(),
+      });
+      const tok = await this.tokenForUser(uid);
+      await this.push(tok, 'Refund processed', `₹${amount.toFixed(2)} refunded to your wallet`, Number(order.mysql_id), 'refund');
+      return REFUND_STATUS.PROCESSED;
+    } catch (e) {
+      this.logger.warn(`refund failed for order ${order.mysql_id}: ${e instanceof Error ? e.message : String(e)}`);
+      return REFUND_STATUS.FAILED;
+    }
+  }
+
+  /** Sweep any orders left in refund_status=pending (e.g. a prior failure) and
+   *  retry. Safe to run on a schedule. */
+  async processPendingRefunds(): Promise<{ processed: number }> {
+    const pending = await this.mongo.findMany<OrderDoc>('orders', { refund_status: REFUND_STATUS.PENDING }, { limit: 200 });
+    let processed = 0;
+    for (const o of pending) {
+      const st = await this.processRefund(o);
+      await this.mongo.updateOne('orders', { mysql_id: Number(o.mysql_id) }, { refund_status: st, updated_at: new Date() });
+      if (st === REFUND_STATUS.PROCESSED) processed++;
+    }
+    return { processed };
+  }
+
+  // ── Strict per-order-type transition validation ───────────────────────────
+  /**
+   * Reject invalid forward transitions: a status that isn't part of the order
+   * type's flow (e.g. `served` on a delivery order) or a move backwards. Cancels
+   * are validated separately. Off by default — set STRICT_ORDER_TRANSITIONS=1 to
+   * enforce (so it can be enabled once the apps emit the new statuses cleanly).
+   */
+  assertTransition(orderType: string | undefined, fromStatus: string | undefined, toStatus: string): void {
+    if ((process.env.STRICT_ORDER_TRANSITIONS ?? '0') !== '1') return;
+    const to = normaliseStatus(toStatus);
+    if (to === 'canceled' || to === 'auto_cancelled') return;
+    const type: OrderType = (['delivery', 'take_away', 'dine_in'].includes(String(orderType)) ? orderType : 'delivery') as OrderType;
+    const flow = FLOW[type];
+    const toIdx = flow.indexOf(to);
+    if (toIdx === -1) {
+      throw new BadRequestException({ errors: [{ code: 'transition', message: `'${to}' is not a valid status for a ${type} order` }] });
+    }
+    const from = normaliseStatus(fromStatus ?? '');
+    const fromIdx = flow.indexOf(from);
+    if (fromIdx !== -1 && toIdx < fromIdx) {
+      throw new BadRequestException({ errors: [{ code: 'transition', message: `cannot move a ${type} order back from '${from}' to '${to}'` }] });
     }
   }
 }

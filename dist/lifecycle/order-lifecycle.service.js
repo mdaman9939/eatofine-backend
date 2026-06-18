@@ -14,6 +14,7 @@ const common_1 = require("@nestjs/common");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
 const fcm_service_1 = require("../notifications/fcm.service");
 const order_lifecycle_constants_1 = require("./order-lifecycle.constants");
+const r2 = (n) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
 let OrderLifecycleService = class OrderLifecycleService {
     mongo;
     fcm;
@@ -79,7 +80,10 @@ let OrderLifecycleService = class OrderLifecycleService {
             return { ok: false, skipped: true, reason: `already_${order.order_status}` };
         }
         const toStatus = reason === 'restaurant_not_responded' ? 'auto_cancelled' : 'canceled';
-        const refundStatus = this.refundStatusForCancel(order);
+        let refundStatus = this.refundStatusForCancel(order);
+        if (refundStatus === order_lifecycle_constants_1.REFUND_STATUS.PENDING) {
+            refundStatus = await this.processRefund(order);
+        }
         await this.mongo.updateOne('orders', { mysql_id: Number(orderId) }, {
             order_status: toStatus,
             cancel_reason: reason,
@@ -168,6 +172,79 @@ let OrderLifecycleService = class OrderLifecycleService {
             const order = await this.mongo.findByMysqlId('orders', orderId);
             const tok = await this.tokenForUser(order?.mysql_user_id);
             await this.push(tok, 'Order update', label, orderId, 'order_status');
+        }
+    }
+    async creditCustomerWallet(userId, amount) {
+        const w = await this.mongo.findOne('wallets', { $or: [{ user_id: userId }, { mysql_user_id: userId }] });
+        if (w) {
+            await this.mongo.updateOne('wallets', { mysql_id: Number(w.mysql_id) }, {
+                balance: r2(Number(w.balance ?? 0) + amount),
+                total_earning: r2(Number(w.total_earning ?? 0) + amount),
+                updated_at: new Date(),
+            });
+        }
+        else {
+            const id = await this.mongo.nextMysqlId('wallets');
+            await this.mongo.insertOne('wallets', {
+                mysql_id: id, user_id: userId, mysql_user_id: userId,
+                balance: amount, total_earning: amount, created_at: new Date(), updated_at: new Date(),
+            });
+        }
+        const txId = await this.mongo.nextMysqlId('wallet_transactions');
+        await this.mongo.insertOne('wallet_transactions', {
+            mysql_id: txId, user_id: userId, credit: amount, debit: 0,
+            transaction_type: 'order_refund', reference: 'order_refund', created_at: new Date(),
+        });
+    }
+    async processRefund(order) {
+        const amount = r2(Number(order.order_amount ?? 0));
+        const uid = order.mysql_user_id != null ? Number(order.mysql_user_id) : 0;
+        if (!uid || amount <= 0)
+            return order_lifecycle_constants_1.REFUND_STATUS.NOT_REQUIRED;
+        try {
+            await this.creditCustomerWallet(uid, amount);
+            const rid = await this.mongo.nextMysqlId('refunds');
+            await this.mongo.insertOne('refunds', {
+                mysql_id: rid, order_id: Number(order.mysql_id), user_id: uid,
+                refund_amount: amount, refund_method: 'wallet', refund_status: 'completed',
+                reason: 'order_cancelled', created_at: new Date(),
+            });
+            const tok = await this.tokenForUser(uid);
+            await this.push(tok, 'Refund processed', `₹${amount.toFixed(2)} refunded to your wallet`, Number(order.mysql_id), 'refund');
+            return order_lifecycle_constants_1.REFUND_STATUS.PROCESSED;
+        }
+        catch (e) {
+            this.logger.warn(`refund failed for order ${order.mysql_id}: ${e instanceof Error ? e.message : String(e)}`);
+            return order_lifecycle_constants_1.REFUND_STATUS.FAILED;
+        }
+    }
+    async processPendingRefunds() {
+        const pending = await this.mongo.findMany('orders', { refund_status: order_lifecycle_constants_1.REFUND_STATUS.PENDING }, { limit: 200 });
+        let processed = 0;
+        for (const o of pending) {
+            const st = await this.processRefund(o);
+            await this.mongo.updateOne('orders', { mysql_id: Number(o.mysql_id) }, { refund_status: st, updated_at: new Date() });
+            if (st === order_lifecycle_constants_1.REFUND_STATUS.PROCESSED)
+                processed++;
+        }
+        return { processed };
+    }
+    assertTransition(orderType, fromStatus, toStatus) {
+        if ((process.env.STRICT_ORDER_TRANSITIONS ?? '0') !== '1')
+            return;
+        const to = (0, order_lifecycle_constants_1.normaliseStatus)(toStatus);
+        if (to === 'canceled' || to === 'auto_cancelled')
+            return;
+        const type = (['delivery', 'take_away', 'dine_in'].includes(String(orderType)) ? orderType : 'delivery');
+        const flow = order_lifecycle_constants_1.FLOW[type];
+        const toIdx = flow.indexOf(to);
+        if (toIdx === -1) {
+            throw new common_1.BadRequestException({ errors: [{ code: 'transition', message: `'${to}' is not a valid status for a ${type} order` }] });
+        }
+        const from = (0, order_lifecycle_constants_1.normaliseStatus)(fromStatus ?? '');
+        const fromIdx = flow.indexOf(from);
+        if (fromIdx !== -1 && toIdx < fromIdx) {
+            throw new common_1.BadRequestException({ errors: [{ code: 'transition', message: `cannot move a ${type} order back from '${from}' to '${to}'` }] });
         }
     }
 };

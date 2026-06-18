@@ -34,5 +34,11 @@ export declare class OrderLifecycleService {
         cancelled: number;
     }>;
     recordTransition(orderId: number, fromStatus: string | undefined, toStatus: string, by: Actor): Promise<void>;
+    private creditCustomerWallet;
+    private processRefund;
+    processPendingRefunds(): Promise<{
+        processed: number;
+    }>;
+    assertTransition(orderType: string | undefined, fromStatus: string | undefined, toStatus: string): void;
 }
 export {};

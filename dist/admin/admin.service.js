@@ -598,6 +598,7 @@ let AdminService = class AdminService {
                 return { ok: true, id, status: cancelReason === 'restaurant_not_responded' ? 'auto_cancelled' : 'canceled' };
             }
             const fromStatus = order.order_status;
+            this.lifecycle.assertTransition(order.order_type, fromStatus, status);
             const data = { order_status: status };
             const tsCol = TIMESTAMP_COLUMN[status];
             if (tsCol)

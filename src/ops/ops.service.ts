@@ -312,6 +312,7 @@ export class OpsService {
         return { message: 'order_cancelled', order_status: 'canceled' };
       }
       const fromStatus = o.order_status;
+      this.lifecycle.assertTransition(o.order_type, fromStatus, newStatus); // no-op unless STRICT enabled
       const data: Record<string, unknown> = { order_status: newStatus };
       data[newStatus] = new Date();
       if (newStatus === 'confirmed') {
@@ -536,6 +537,7 @@ export class OpsService {
         return { message: res.cancelled ? 'no_rider_order_cancelled' : 'rider_reassigned', order_status: res.cancelled ? 'canceled' : String(o.order_status) };
       }
       const fromStatus = o.order_status;
+      this.lifecycle.assertTransition(o.order_type, fromStatus, newStatus); // no-op unless STRICT enabled
       const data: Record<string, unknown> = { order_status: newStatus };
       data[newStatus] = new Date();
       if ((newStatus === 'delivered' || newStatus === 'completed') && o.payment_method === 'cash_on_delivery') {
