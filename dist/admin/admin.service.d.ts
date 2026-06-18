@@ -166,6 +166,17 @@ export declare class AdminService {
         }[];
     }>;
     getOrder(id: number): Promise<{
+        earnings: {
+            customer_payment: number;
+            food_amount: number;
+            commission_pct: number;
+            eatofine_commission: number;
+            eatofine_platform_fee: number;
+            eatofine_earning: number;
+            restaurant_earning: number;
+            deliveryman_earning: number;
+            tax_amount: number;
+        };
         order: {
             id: number;
             order_amount: number;
@@ -289,6 +300,7 @@ export declare class AdminService {
             variant: string | null;
             food_details: unknown;
         }[];
+        earnings?: undefined;
     }>;
     updateOrderStatus(id: number, status: string, reason?: string): Promise<{
         ok: boolean;

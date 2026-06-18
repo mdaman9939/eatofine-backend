@@ -440,6 +440,7 @@ export class AdminService {
         mysql_id: number; mysql_user_id?: number; mysql_restaurant_id?: number; mysql_delivery_man_id?: number;
         order_amount?: number; coupon_discount_amount?: number; total_tax_amount?: number;
         delivery_charge?: number; restaurant_discount_amount?: number;
+        additional_charge?: number; extra_packaging_amount?: number;
         payment_status?: string; order_status?: string; payment_method?: string; order_type?: string;
         table_number?: string | null;
         coupon_code?: string | null; order_note?: string | null; delivery_address?: string | null;
@@ -456,7 +457,7 @@ export class AdminService {
           ? this.mongo.findByMysqlId<{ mysql_id: number; f_name: string | null; l_name: string | null; email: string | null; phone: string | null }>('users', order.mysql_user_id)
           : Promise.resolve(null),
         order.mysql_restaurant_id
-          ? this.mongo.findByMysqlId<{ mysql_id: number; name: string | null; phone: string | null; email: string | null; address: string | null; logo: string | null }>('restaurants', order.mysql_restaurant_id)
+          ? this.mongo.findByMysqlId<{ mysql_id: number; name: string | null; phone: string | null; email: string | null; address: string | null; logo: string | null; comission?: number }>('restaurants', order.mysql_restaurant_id)
           : Promise.resolve(null),
         order.mysql_delivery_man_id
           ? this.mongo.findByMysqlId<{ mysql_id: number; f_name: string | null; l_name: string | null; phone: string | null }>('delivery_men', order.mysql_delivery_man_id)
@@ -467,7 +468,39 @@ export class AdminService {
           variant?: string | null; food_details?: string | null;
         }>('order_details', { order_id: order.mysql_id }, { sort: { mysql_id: 1 } }),
       ]);
+
+      // ── Money distribution (who keeps what) ──────────────────────────────
+      // Mirrors the Pay-Per-Order settlement: Eatofine keeps commission on the
+      // restaurant's food + platform/additional fees; the restaurant gets the
+      // residual; tax goes to government; delivery to the delivery man. The four
+      // legs sum exactly to what the customer paid — no money is lost.
+      const r2e = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
+      const customerPayment = r2e(Number(order.order_amount ?? 0));
+      const taxAmt = r2e(Number(order.total_tax_amount ?? 0));
+      const deliveryAmt = r2e(Number(order.delivery_charge ?? 0));
+      const platformFee = r2e(Number(order.additional_charge ?? 0));
+      const restDiscount = r2e(Number(order.restaurant_discount_amount ?? 0));
+      const foodAmount = r2e(items.reduce((s, it) => s + Number(it.price ?? 0) * Number(it.quantity ?? 0) + Number(it.total_add_on_price ?? 0), 0));
+      const commissionPct = Math.max(0, Number(restaurant?.comission ?? 0));
+      const adminCommission = r2e(Math.max(0, foodAmount - restDiscount) * (commissionPct / 100));
+      const hasDm = order.mysql_delivery_man_id != null && Number(order.mysql_delivery_man_id) > 0;
+      const deliverymanEarning = hasDm ? deliveryAmt : 0;
+      const eatofineEarning = r2e(adminCommission + platformFee + (hasDm ? 0 : deliveryAmt));
+      const restaurantEarning = r2e(customerPayment - eatofineEarning - deliverymanEarning - taxAmt);
+      const earnings = {
+        customer_payment: customerPayment,
+        food_amount: foodAmount,
+        commission_pct: commissionPct,
+        eatofine_commission: adminCommission,
+        eatofine_platform_fee: platformFee,
+        eatofine_earning: eatofineEarning,
+        restaurant_earning: restaurantEarning,
+        deliveryman_earning: deliverymanEarning,
+        tax_amount: taxAmt,
+      };
+
       return {
+        earnings,
         order: {
           id: order.mysql_id,
           order_amount: Number(order.order_amount ?? 0),

@@ -405,7 +405,32 @@ let AdminService = class AdminService {
                     : Promise.resolve(null),
                 this.mongo.findMany('order_details', { order_id: order.mysql_id }, { sort: { mysql_id: 1 } }),
             ]);
+            const r2e = (n) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
+            const customerPayment = r2e(Number(order.order_amount ?? 0));
+            const taxAmt = r2e(Number(order.total_tax_amount ?? 0));
+            const deliveryAmt = r2e(Number(order.delivery_charge ?? 0));
+            const platformFee = r2e(Number(order.additional_charge ?? 0));
+            const restDiscount = r2e(Number(order.restaurant_discount_amount ?? 0));
+            const foodAmount = r2e(items.reduce((s, it) => s + Number(it.price ?? 0) * Number(it.quantity ?? 0) + Number(it.total_add_on_price ?? 0), 0));
+            const commissionPct = Math.max(0, Number(restaurant?.comission ?? 0));
+            const adminCommission = r2e(Math.max(0, foodAmount - restDiscount) * (commissionPct / 100));
+            const hasDm = order.mysql_delivery_man_id != null && Number(order.mysql_delivery_man_id) > 0;
+            const deliverymanEarning = hasDm ? deliveryAmt : 0;
+            const eatofineEarning = r2e(adminCommission + platformFee + (hasDm ? 0 : deliveryAmt));
+            const restaurantEarning = r2e(customerPayment - eatofineEarning - deliverymanEarning - taxAmt);
+            const earnings = {
+                customer_payment: customerPayment,
+                food_amount: foodAmount,
+                commission_pct: commissionPct,
+                eatofine_commission: adminCommission,
+                eatofine_platform_fee: platformFee,
+                eatofine_earning: eatofineEarning,
+                restaurant_earning: restaurantEarning,
+                deliveryman_earning: deliverymanEarning,
+                tax_amount: taxAmt,
+            };
             return {
+                earnings,
                 order: {
                     id: order.mysql_id,
                     order_amount: Number(order.order_amount ?? 0),
