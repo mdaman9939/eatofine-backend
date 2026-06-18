@@ -556,31 +556,29 @@ let EnhancementsService = class EnhancementsService {
             ]);
             const rMap = new Map(rs.map((r) => [String(r.mysql_id), { id: BigInt(r.mysql_id), name: r.name ?? null }]));
             const uMap = new Map(us.map((u) => [String(u.mysql_id), { id: BigInt(u.mysql_id), f_name: u.f_name ?? null, l_name: u.l_name ?? null, email: u.email ?? null }]));
-            return {
-                total: orders.length,
-                invoices: orders.map((o) => {
-                    const orderAmount = Number(o.order_amount ?? 0);
-                    const tax = Number(o.total_tax_amount ?? 0);
-                    const delivery = Number(o.delivery_charge ?? 0);
-                    const dt = (o.created_at_legacy ?? o.created_at) ?? new Date();
-                    const month = String(dt.getMonth() + 1).padStart(2, '0');
-                    const year = dt.getFullYear();
-                    return {
-                        invoice_no: `INV-${year}-${month}-${String(Number(o.mysql_id)).padStart(5, '0')}`,
-                        order_id: Number(o.mysql_id),
-                        issued_on: o.delivered ?? o.created_at_legacy ?? o.created_at,
-                        customer: o.mysql_user_id != null ? uMap.get(String(Number(o.mysql_user_id))) ?? null : null,
-                        restaurant: rMap.get(String(Number(o.mysql_restaurant_id))) ?? null,
-                        subtotal: orderAmount - tax - delivery,
-                        tax, delivery_charge: delivery, total: orderAmount,
-                        cgst: +(tax / 2).toFixed(2),
-                        sgst: +(tax / 2).toFixed(2),
-                        igst: 0,
-                        payment_method: o.payment_method,
-                        status: 'GENERATED',
-                    };
-                }),
-            };
+            const invoices = [];
+            for (const o of orders) {
+                const orderAmount = Number(o.order_amount ?? 0);
+                const tax = Number(o.total_tax_amount ?? 0);
+                const delivery = Number(o.delivery_charge ?? 0);
+                const dt = (o.created_at_legacy ?? o.created_at) ?? new Date();
+                const invoiceNo = await this.assignInvoiceNumber(o, 'customer_invoice_number', 'OBR', this.fyCode(dt), o.customer_invoice_number);
+                invoices.push({
+                    invoice_no: invoiceNo,
+                    order_id: Number(o.mysql_id),
+                    issued_on: o.delivered ?? o.created_at_legacy ?? o.created_at,
+                    customer: o.mysql_user_id != null ? uMap.get(String(Number(o.mysql_user_id))) ?? null : null,
+                    restaurant: rMap.get(String(Number(o.mysql_restaurant_id))) ?? null,
+                    subtotal: orderAmount - tax - delivery,
+                    tax, delivery_charge: delivery, total: orderAmount,
+                    cgst: +(tax / 2).toFixed(2),
+                    sgst: +(tax / 2).toFixed(2),
+                    igst: 0,
+                    payment_method: o.payment_method,
+                    status: 'GENERATED',
+                });
+            }
+            return { total: orders.length, invoices };
         }
         const orders = await this.prisma.orders.findMany({
             where: { order_status: 'delivered', payment_status: 'paid' },
@@ -601,10 +599,8 @@ let EnhancementsService = class EnhancementsService {
                 const tax = Number(o.total_tax_amount);
                 const delivery = Number(o.delivery_charge);
                 const dt = o.created_at ?? new Date();
-                const month = String(dt.getMonth() + 1).padStart(2, '0');
-                const year = dt.getFullYear();
                 return {
-                    invoice_no: `INV-${year}-${month}-${String(Number(o.id)).padStart(5, '0')}`,
+                    invoice_no: `OBR${this.fyCode(dt)}-${String(Number(o.id)).padStart(4, '0')}`,
                     order_id: Number(o.id),
                     issued_on: o.delivered ?? o.created_at,
                     customer: o.user_id ? uMap.get(String(o.user_id)) ?? null : null,

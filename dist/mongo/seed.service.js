@@ -1083,9 +1083,11 @@ let SeedService = class SeedService {
                 period.setDate(1);
                 const periodStart = new Date(period.getFullYear(), period.getMonth() - 1, 1);
                 const periodEnd = new Date(period.getFullYear(), period.getMonth(), 0);
+                const fySy = periodStart.getMonth() + 1 >= 4 ? periodStart.getFullYear() : periodStart.getFullYear() - 1;
+                const fyCode = `${String(fySy % 100).padStart(2, '0')}${String((fySy + 1) % 100).padStart(2, '0')}`;
                 await this.mongo.insertOne('vendor_invoices', {
                     mysql_id: next,
-                    invoice_number: `INV-2026-${String(next).padStart(5, '0')}`,
+                    invoice_number: `RES${fyCode}-${String(next).padStart(4, '0')}`,
                     vendor_id: vendor.mysql_id,
                     restaurant_id: restaurant?.mysql_id ?? null,
                     plan_type: 'commission',

@@ -169,19 +169,22 @@ export declare class EnhancementsService {
     }>;
     listInvoices(limit?: number, offset?: number): Promise<{
         total: number;
+        invoices: Record<string, unknown>[];
+    } | {
+        total: number;
         invoices: {
             invoice_no: string;
             order_id: number;
             issued_on: Date | null;
             customer: {
                 id: bigint;
+                email: string | null;
                 f_name: string | null;
                 l_name: string | null;
-                email: string | null;
             } | null;
             restaurant: {
                 id: bigint;
-                name: string | null;
+                name: string;
             } | null;
             subtotal: number;
             tax: number;
