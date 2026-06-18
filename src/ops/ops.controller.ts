@@ -37,11 +37,11 @@ export class OpsController {
   @UseGuards(AuthGuard)
   @RequireAuth('vendor')
   @UseInterceptors(AnyFilesInterceptor())
-  vendorUpdateStatus(@Req() req: AuthedRequest, @Body() body: { order_id?: number | string; status?: string; order_status?: string } = {}) {
+  vendorUpdateStatus(@Req() req: AuthedRequest, @Body() body: { order_id?: number | string; status?: string; order_status?: string; reason?: string } = {}) {
     const b = body ?? {};
     // The app sends the new state under `status` (UpdateStatusBody.toJson),
     // NOT `order_status` — reading the wrong key made it "" → rejected.
-    return this.ops.vendorUpdateStatus(req.actor!.id, Number(b.order_id ?? 0), String(b.status ?? b.order_status ?? ''));
+    return this.ops.vendorUpdateStatus(req.actor!.id, Number(b.order_id ?? 0), String(b.status ?? b.order_status ?? ''), b.reason);
   }
 
   @Post('vendor/order/assign-delivery-man')

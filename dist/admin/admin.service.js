@@ -49,6 +49,8 @@ const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
 const settlement_service_1 = require("../settlement/settlement.service");
 const decimal_1 = require("../common/decimal");
+const order_lifecycle_service_1 = require("../lifecycle/order-lifecycle.service");
+const order_lifecycle_constants_1 = require("../lifecycle/order-lifecycle.constants");
 const storage_url_1 = require("../common/storage-url");
 function vegToBool(v, fallback = true) {
     if (v === undefined || v === null)
@@ -69,8 +71,10 @@ const ORDER_STATUSES = [
     'refunded',
     'created',
     'ready_for_pickup',
+    'out_for_delivery',
     'served',
     'completed',
+    'auto_cancelled',
 ];
 const TIMESTAMP_COLUMN = {
     pending: 'pending',
@@ -89,10 +93,12 @@ let AdminService = class AdminService {
     prisma;
     mongo;
     settlement;
-    constructor(prisma, mongo, settlement) {
+    lifecycle;
+    constructor(prisma, mongo, settlement, lifecycle) {
         this.prisma = prisma;
         this.mongo = mongo;
         this.settlement = settlement;
+        this.lifecycle = lifecycle;
     }
     useMongo() {
         const v = (process.env.USE_MONGO_ADMIN ?? '1').toLowerCase();
@@ -451,6 +457,8 @@ let AdminService = class AdminService {
                     order_note: order.order_note ?? null,
                     delivery_address: order.delivery_address ?? null,
                     cancellation_reason: order.cancellation_reason ?? null,
+                    cancel_reason: order.cancel_reason ?? order.cancellation_reason ?? null,
+                    refund_status: order.refund_status ?? 'not_required',
                     canceled_by: order.canceled_by ?? null,
                     timeline: {
                         pending: order.pending ?? null,
@@ -584,20 +592,22 @@ let AdminService = class AdminService {
             const order = await this.mongo.findByMysqlId('orders', id);
             if (!order)
                 throw new common_1.NotFoundException({ errors: [{ code: 'order', message: 'Order not found' }] });
+            if (status === 'canceled' || status === 'auto_cancelled') {
+                const cancelReason = order_lifecycle_constants_1.CANCEL_REASONS.includes(reason) ? reason : 'admin_cancelled';
+                await this.lifecycle.cancelOrder(id, cancelReason, 'admin');
+                return { ok: true, id, status: cancelReason === 'restaurant_not_responded' ? 'auto_cancelled' : 'canceled' };
+            }
+            const fromStatus = order.order_status;
             const data = { order_status: status };
             const tsCol = TIMESTAMP_COLUMN[status];
             if (tsCol)
                 data[tsCol] = new Date();
-            if (status === 'delivered' && order.payment_method === 'cash_on_delivery') {
+            if ((status === 'delivered' || status === 'completed') && order.payment_method === 'cash_on_delivery') {
                 data.payment_status = 'paid';
             }
-            if (status === 'canceled') {
-                data.canceled_by = 'admin';
-                if (reason)
-                    data.cancellation_reason = reason;
-            }
             await this.mongo.updateOne('orders', { mysql_id: id }, data);
-            if (status === 'delivered') {
+            await this.lifecycle.recordTransition(id, fromStatus, status, 'admin').catch(() => undefined);
+            if (status === 'delivered' || status === 'completed') {
                 await this.settlement.settleOrder(id).catch(() => undefined);
             }
             return { ok: true, id, status };
@@ -4222,7 +4232,8 @@ exports.AdminService = AdminService = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
         mongo_data_service_1.MongoDataService,
-        settlement_service_1.SettlementService])
+        settlement_service_1.SettlementService,
+        order_lifecycle_service_1.OrderLifecycleService])
 ], AdminService);
 function bigToNumber(row) {
     const out = { ...row };

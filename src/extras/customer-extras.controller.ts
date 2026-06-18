@@ -19,6 +19,7 @@ import { AuthGuard, RequireAuth } from '../auth/auth.guard';
 import type { AuthedRequest } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { OrderLifecycleService } from '../lifecycle/order-lifecycle.service';
 import { storageFullUrl } from '../common/storage-url';
 import { resolveParticipant, findOrCreateConversation, participantProfile, type PartySlot } from './messaging.helper';
 
@@ -115,6 +116,7 @@ export class CustomerExtrasController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mongo: MongoDataService,
+    private readonly lifecycle: OrderLifecycleService,
   ) {}
 
   /** Feature flag — when set, extras read/write Mongo first. */
@@ -948,16 +950,12 @@ export class CustomerExtrasController {
         mysql_user_id: Number(req.actor!.id),
       });
       if (!order) return { message: 'order not found' };
-      await this.mongo.updateOne(
-        'orders',
-        { mysql_id: order.mysql_id },
-        {
-          order_status: 'canceled',
-          canceled: new Date(),
-          canceled_by: 'customer',
-          cancellation_reason: body.reason ?? null,
-        },
-      );
+      // Case 3 — a customer may cancel ONLY before preparation (pending/confirmed).
+      if (!this.lifecycle.canCancel(order as unknown as { order_status?: string }, 'customer')) {
+        return { message: 'This order can no longer be cancelled.' };
+      }
+      // Engine sets cancel_reason + refund_status, logs and notifies.
+      await this.lifecycle.cancelOrder(Number(order.mysql_id), 'customer_cancelled', 'customer');
       return { message: 'Order canceled' };
     }
 

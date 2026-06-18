@@ -54,6 +54,7 @@ const path = __importStar(require("path"));
 const auth_guard_1 = require("../auth/auth.guard");
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
+const order_lifecycle_service_1 = require("../lifecycle/order-lifecycle.service");
 const storage_url_1 = require("../common/storage-url");
 const messaging_helper_1 = require("./messaging.helper");
 const STORAGE_ROOT = (() => {
@@ -76,9 +77,11 @@ const toNum = (v) => {
 let CustomerExtrasController = class CustomerExtrasController {
     prisma;
     mongo;
-    constructor(prisma, mongo) {
+    lifecycle;
+    constructor(prisma, mongo, lifecycle) {
         this.prisma = prisma;
         this.mongo = mongo;
+        this.lifecycle = lifecycle;
     }
     useMongo() {
         const v = (process.env.USE_MONGO_EXTRAS ?? '1').toLowerCase();
@@ -715,12 +718,10 @@ let CustomerExtrasController = class CustomerExtrasController {
             });
             if (!order)
                 return { message: 'order not found' };
-            await this.mongo.updateOne('orders', { mysql_id: order.mysql_id }, {
-                order_status: 'canceled',
-                canceled: new Date(),
-                canceled_by: 'customer',
-                cancellation_reason: body.reason ?? null,
-            });
+            if (!this.lifecycle.canCancel(order, 'customer')) {
+                return { message: 'This order can no longer be cancelled.' };
+            }
+            await this.lifecycle.cancelOrder(Number(order.mysql_id), 'customer_cancelled', 'customer');
             return { message: 'Order canceled' };
         }
         const order = await this.prisma.orders.findFirst({ where: { id: BigInt(id), user_id: req.actor.id } });
@@ -1213,6 +1214,7 @@ exports.CustomerExtrasController = CustomerExtrasController = __decorate([
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
     (0, auth_guard_1.RequireAuth)('customer'),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
-        mongo_data_service_1.MongoDataService])
+        mongo_data_service_1.MongoDataService,
+        order_lifecycle_service_1.OrderLifecycleService])
 ], CustomerExtrasController);
 //# sourceMappingURL=customer-extras.controller.js.map

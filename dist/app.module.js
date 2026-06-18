@@ -33,6 +33,7 @@ const mongo_module_1 = require("./mongo/mongo.module");
 const migration_module_1 = require("./mongo/migration.module");
 const zone_module_1 = require("./zone/zone.module");
 const settlement_module_1 = require("./settlement/settlement.module");
+const order_lifecycle_module_1 = require("./lifecycle/order-lifecycle.module");
 const notifications_module_1 = require("./notifications/notifications.module");
 let AppModule = class AppModule {
 };
@@ -68,6 +69,7 @@ exports.AppModule = AppModule = __decorate([
             migration_module_1.MigrationModule,
             zone_module_1.ZoneModule,
             settlement_module_1.SettlementModule,
+            order_lifecycle_module_1.OrderLifecycleModule,
             notifications_module_1.NotificationsModule,
         ],
         controllers: [app_controller_1.AppController],

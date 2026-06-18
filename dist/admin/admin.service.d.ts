@@ -1,6 +1,7 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { SettlementService } from '../settlement/settlement.service';
+import { OrderLifecycleService } from '../lifecycle/order-lifecycle.service';
 export interface FoodWriteBody {
     name?: string;
     description?: string;
@@ -41,7 +42,8 @@ export declare class AdminService {
     private readonly prisma;
     private readonly mongo;
     private readonly settlement;
-    constructor(prisma: PrismaService, mongo: MongoDataService, settlement: SettlementService);
+    private readonly lifecycle;
+    constructor(prisma: PrismaService, mongo: MongoDataService, settlement: SettlementService, lifecycle: OrderLifecycleService);
     private useMongo;
     getMe(adminId: bigint): Promise<{
         id: number;
@@ -195,6 +197,8 @@ export declare class AdminService {
             order_note: string | null;
             delivery_address: string | null;
             cancellation_reason: string | null;
+            cancel_reason: string | null;
+            refund_status: string;
             canceled_by: string | null;
             timeline: {
                 pending: Date | null;
@@ -270,6 +274,8 @@ export declare class AdminService {
             };
             created_at: Date | null;
             table_number?: undefined;
+            cancel_reason?: undefined;
+            refund_status?: undefined;
         };
         user: {
             id: number;

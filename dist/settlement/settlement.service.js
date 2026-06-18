@@ -113,8 +113,8 @@ let SettlementService = class SettlementService {
         const order = await this.mongo.findByMysqlId('orders', orderId);
         if (!order)
             return { ok: false, reason: 'order_not_found' };
-        if (order.order_status !== 'delivered') {
-            return { ok: false, skipped: true, reason: `not_delivered (${order.order_status ?? 'unknown'})` };
+        if (order.order_status !== 'delivered' && order.order_status !== 'completed') {
+            return { ok: false, skipped: true, reason: `not_terminal (${order.order_status ?? 'unknown'})` };
         }
         const restaurantId = order.mysql_restaurant_id != null ? Number(order.mysql_restaurant_id) : null;
         if (!restaurantId)

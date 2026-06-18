@@ -24,6 +24,7 @@ import { MongoModule } from './mongo/mongo.module';
 import { MigrationModule } from './mongo/migration.module';
 import { ZoneModule } from './zone/zone.module';
 import { SettlementModule } from './settlement/settlement.module';
+import { OrderLifecycleModule } from './lifecycle/order-lifecycle.module';
 import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
@@ -68,6 +69,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     MigrationModule,
     ZoneModule,
     SettlementModule,
+    OrderLifecycleModule,
     NotificationsModule,
   ],
   controllers: [AppController],

@@ -14,17 +14,20 @@ const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
 const settlement_service_1 = require("../settlement/settlement.service");
+const order_lifecycle_service_1 = require("../lifecycle/order-lifecycle.service");
 const storage_url_1 = require("../common/storage-url");
-const VENDOR_STATUSES = ['accepted', 'confirmed', 'processing', 'handover'];
-const DM_STATUSES = ['confirmed', 'processing', 'handover', 'picked_up', 'delivered', 'canceled'];
+const VENDOR_STATUSES = ['accepted', 'confirmed', 'processing', 'handover', 'ready_for_pickup', 'served', 'completed', 'canceled'];
+const DM_STATUSES = ['confirmed', 'processing', 'handover', 'ready_for_pickup', 'picked_up', 'out_for_delivery', 'delivered', 'completed', 'canceled'];
 let OpsService = class OpsService {
     prisma;
     mongo;
     settlement;
-    constructor(prisma, mongo, settlement) {
+    lifecycle;
+    constructor(prisma, mongo, settlement, lifecycle) {
         this.prisma = prisma;
         this.mongo = mongo;
         this.settlement = settlement;
+        this.lifecycle = lifecycle;
     }
     useMongo() {
         const v = (process.env.USE_MONGO_OPS ?? '1').toLowerCase();
@@ -209,7 +212,7 @@ let OpsService = class OpsService {
                 : null,
         };
     }
-    async vendorUpdateStatus(vendorId, orderId, newStatus) {
+    async vendorUpdateStatus(vendorId, orderId, newStatus, reason) {
         if (!VENDOR_STATUSES.includes(newStatus)) {
             throw new common_1.BadRequestException({
                 errors: [{ code: 'order_status', message: `must be one of ${VENDOR_STATUSES.join(', ')}` }],
@@ -223,12 +226,25 @@ let OpsService = class OpsService {
             if (!o || Number(o.mysql_restaurant_id) !== Number(restaurant.mysql_id)) {
                 throw new common_1.NotFoundException({ errors: [{ code: 'order_id', message: 'not_found' }] });
             }
+            if (newStatus === 'canceled') {
+                const r = reason === 'item_unavailable' ? 'item_unavailable'
+                    : reason === 'restaurant_closed' ? 'restaurant_closed'
+                        : reason === 'restaurant_unavailable' ? 'restaurant_unavailable'
+                            : 'restaurant_cancelled';
+                await this.lifecycle.cancelOrder(Number(o.mysql_id), r, 'restaurant');
+                return { message: 'order_cancelled', order_status: 'canceled' };
+            }
+            const fromStatus = o.order_status;
             const data = { order_status: newStatus };
             data[newStatus] = new Date();
             if (newStatus === 'confirmed') {
                 data.payment_status = o.payment_method === 'cash_on_delivery' ? 'unpaid' : 'paid';
             }
             await this.mongo.updateOne('orders', { mysql_id: Number(o.mysql_id) }, data);
+            await this.lifecycle.recordTransition(Number(o.mysql_id), fromStatus, newStatus, 'restaurant').catch(() => undefined);
+            if (newStatus === 'completed') {
+                await this.settlement.settleOrder(Number(o.mysql_id)).catch(() => undefined);
+            }
             return { message: 'order_status_updated', order_status: newStatus };
         }
         const restaurant = await this.restaurantForVendor(vendorId);
@@ -415,13 +431,19 @@ let OpsService = class OpsService {
             if (!o || Number(o.mysql_delivery_man_id) !== Number(dmId)) {
                 throw new common_1.NotFoundException({ errors: [{ code: 'order_id', message: 'not_found' }] });
             }
+            if (newStatus === 'canceled') {
+                const res = await this.lifecycle.handleDeliveryRejection(Number(o.mysql_id), Number(dmId));
+                return { message: res.cancelled ? 'no_rider_order_cancelled' : 'rider_reassigned', order_status: res.cancelled ? 'canceled' : String(o.order_status) };
+            }
+            const fromStatus = o.order_status;
             const data = { order_status: newStatus };
             data[newStatus] = new Date();
-            if (newStatus === 'delivered' && o.payment_method === 'cash_on_delivery') {
+            if ((newStatus === 'delivered' || newStatus === 'completed') && o.payment_method === 'cash_on_delivery') {
                 data.payment_status = 'paid';
             }
             await this.mongo.updateOne('orders', { mysql_id: Number(o.mysql_id) }, data);
-            if (newStatus === 'delivered') {
+            await this.lifecycle.recordTransition(Number(o.mysql_id), fromStatus, newStatus, 'delivery_partner').catch(() => undefined);
+            if (newStatus === 'delivered' || newStatus === 'completed') {
                 await this.settlement.settleOrder(Number(o.mysql_id)).catch(() => undefined);
             }
             return { message: 'order_status_updated', order_status: newStatus };
@@ -451,6 +473,7 @@ exports.OpsService = OpsService = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
         mongo_data_service_1.MongoDataService,
-        settlement_service_1.SettlementService])
+        settlement_service_1.SettlementService,
+        order_lifecycle_service_1.OrderLifecycleService])
 ], OpsService);
 //# sourceMappingURL=ops.service.js.map

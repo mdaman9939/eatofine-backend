@@ -1,11 +1,13 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { SettlementService } from '../settlement/settlement.service';
+import { OrderLifecycleService } from '../lifecycle/order-lifecycle.service';
 export declare class OpsService {
     private readonly prisma;
     private readonly mongo;
     private readonly settlement;
-    constructor(prisma: PrismaService, mongo: MongoDataService, settlement: SettlementService);
+    private readonly lifecycle;
+    constructor(prisma: PrismaService, mongo: MongoDataService, settlement: SettlementService, lifecycle: OrderLifecycleService);
     private useMongo;
     private storageBase;
     private restaurantForVendor;
@@ -153,7 +155,7 @@ export declare class OpsService {
         canceled: Date | null;
         created_at: Date | null;
     }>;
-    vendorUpdateStatus(vendorId: bigint, orderId: number, newStatus: string): Promise<{
+    vendorUpdateStatus(vendorId: bigint, orderId: number, newStatus: string, reason?: string): Promise<{
         message: string;
         order_status: string;
     }>;

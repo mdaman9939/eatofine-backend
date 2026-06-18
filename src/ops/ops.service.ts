@@ -2,13 +2,14 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { SettlementService } from '../settlement/settlement.service';
+import { OrderLifecycleService } from '../lifecycle/order-lifecycle.service';
 import { storageBaseUrl } from '../common/storage-url';
 
-const VENDOR_STATUSES = ['accepted', 'confirmed', 'processing', 'handover'] as const;
+const VENDOR_STATUSES = ['accepted', 'confirmed', 'processing', 'handover', 'ready_for_pickup', 'served', 'completed', 'canceled'] as const;
 // The delivery app drives the full pickup→deliver flow and sends 'confirmed'
 // (accept handover), 'picked_up', 'delivered', and 'canceled'. The old 2-item
 // list rejected the others with "must be one of picked_up, delivered".
-const DM_STATUSES = ['confirmed', 'processing', 'handover', 'picked_up', 'delivered', 'canceled'] as const;
+const DM_STATUSES = ['confirmed', 'processing', 'handover', 'ready_for_pickup', 'picked_up', 'out_for_delivery', 'delivered', 'completed', 'canceled'] as const;
 
 type MongoOrderDoc = {
   mysql_id: number;
@@ -55,6 +56,7 @@ export class OpsService {
     private readonly prisma: PrismaService,
     private readonly mongo: MongoDataService,
     private readonly settlement: SettlementService,
+    private readonly lifecycle: OrderLifecycleService,
   ) {}
 
   /** Feature flag â€” when "1", ops reads/writes route to MongoDB instead of MySQL. */
@@ -287,7 +289,7 @@ export class OpsService {
     };
   }
 
-  async vendorUpdateStatus(vendorId: bigint, orderId: number, newStatus: string) {
+  async vendorUpdateStatus(vendorId: bigint, orderId: number, newStatus: string, reason?: string) {
     if (!VENDOR_STATUSES.includes(newStatus as (typeof VENDOR_STATUSES)[number])) {
       throw new BadRequestException({
         errors: [{ code: 'order_status', message: `must be one of ${VENDOR_STATUSES.join(', ')}` }],
@@ -300,12 +302,27 @@ export class OpsService {
       if (!o || Number(o.mysql_restaurant_id) !== Number(restaurant.mysql_id)) {
         throw new NotFoundException({ errors: [{ code: 'order_id', message: 'not_found' }] });
       }
+      // Restaurant rejects/cancels (Case 2 item_unavailable / Case 4 restaurant_cancelled).
+      if (newStatus === 'canceled') {
+        const r = reason === 'item_unavailable' ? 'item_unavailable'
+          : reason === 'restaurant_closed' ? 'restaurant_closed'
+            : reason === 'restaurant_unavailable' ? 'restaurant_unavailable'
+              : 'restaurant_cancelled';
+        await this.lifecycle.cancelOrder(Number(o.mysql_id), r, 'restaurant');
+        return { message: 'order_cancelled', order_status: 'canceled' };
+      }
+      const fromStatus = o.order_status;
       const data: Record<string, unknown> = { order_status: newStatus };
       data[newStatus] = new Date();
       if (newStatus === 'confirmed') {
         data.payment_status = o.payment_method === 'cash_on_delivery' ? 'unpaid' : 'paid';
       }
       await this.mongo.updateOne('orders', { mysql_id: Number(o.mysql_id) }, data);
+      await this.lifecycle.recordTransition(Number(o.mysql_id), fromStatus, newStatus, 'restaurant').catch(() => undefined);
+      // Settlement when a Take Away / Dine In order is completed at the counter.
+      if (newStatus === 'completed') {
+        await this.settlement.settleOrder(Number(o.mysql_id)).catch(() => undefined);
+      }
       return { message: 'order_status_updated', order_status: newStatus };
     }
     const restaurant = await this.restaurantForVendor(vendorId);
@@ -512,14 +529,22 @@ export class OpsService {
       if (!o || Number(o.mysql_delivery_man_id) !== Number(dmId)) {
         throw new NotFoundException({ errors: [{ code: 'order_id', message: 'not_found' }] });
       }
+      // A rider rejecting an order must NOT cancel it — unassign + reassign, and
+      // only cancel (delivery_partner_unavailable) if no rider is left.
+      if (newStatus === 'canceled') {
+        const res = await this.lifecycle.handleDeliveryRejection(Number(o.mysql_id), Number(dmId));
+        return { message: res.cancelled ? 'no_rider_order_cancelled' : 'rider_reassigned', order_status: res.cancelled ? 'canceled' : String(o.order_status) };
+      }
+      const fromStatus = o.order_status;
       const data: Record<string, unknown> = { order_status: newStatus };
       data[newStatus] = new Date();
-      if (newStatus === 'delivered' && o.payment_method === 'cash_on_delivery') {
+      if ((newStatus === 'delivered' || newStatus === 'completed') && o.payment_method === 'cash_on_delivery') {
         data.payment_status = 'paid';
       }
       await this.mongo.updateOne('orders', { mysql_id: Number(o.mysql_id) }, data);
-      // Idempotent Pay-Per-Order settlement on delivery (non-fatal).
-      if (newStatus === 'delivered') {
+      await this.lifecycle.recordTransition(Number(o.mysql_id), fromStatus, newStatus, 'delivery_partner').catch(() => undefined);
+      // Idempotent Pay-Per-Order settlement on the terminal state (non-fatal).
+      if (newStatus === 'delivered' || newStatus === 'completed') {
         await this.settlement.settleOrder(Number(o.mysql_id)).catch(() => undefined);
       }
       return { message: 'order_status_updated', order_status: newStatus };

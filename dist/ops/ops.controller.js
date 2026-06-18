@@ -33,7 +33,7 @@ let OpsController = class OpsController {
     }
     vendorUpdateStatus(req, body = {}) {
         const b = body ?? {};
-        return this.ops.vendorUpdateStatus(req.actor.id, Number(b.order_id ?? 0), String(b.status ?? b.order_status ?? ''));
+        return this.ops.vendorUpdateStatus(req.actor.id, Number(b.order_id ?? 0), String(b.status ?? b.order_status ?? ''), b.reason);
     }
     vendorAssignDM(req, body) {
         return this.ops.vendorAssignDeliveryMan(req.actor.id, body.order_id ?? 0, body.delivery_man_id ?? 0);

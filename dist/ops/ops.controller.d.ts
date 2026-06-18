@@ -206,6 +206,7 @@ export declare class OpsController {
         order_id?: number | string;
         status?: string;
         order_status?: string;
+        reason?: string;
     }): Promise<{
         message: string;
         order_status: string;

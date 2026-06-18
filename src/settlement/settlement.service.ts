@@ -251,10 +251,11 @@ export class SettlementService {
     const order = await this.mongo.findByMysqlId<OrderDoc>('orders', orderId);
     if (!order) return { ok: false, reason: 'order_not_found' };
 
-    // Settlement runs ONLY for delivered orders. Never for pending/confirmed/
-    // processing/out_for_delivery/canceled/failed/refunded.
-    if (order.order_status !== 'delivered') {
-      return { ok: false, skipped: true, reason: `not_delivered (${order.order_status ?? 'unknown'})` };
+    // Settlement runs ONLY for a terminal-success order — 'delivered' (delivery)
+    // or 'completed' (take-away / dine-in). Never for pending/confirmed/
+    // processing/out_for_delivery/canceled/auto_cancelled/refunded.
+    if (order.order_status !== 'delivered' && order.order_status !== 'completed') {
+      return { ok: false, skipped: true, reason: `not_terminal (${order.order_status ?? 'unknown'})` };
     }
     const restaurantId = order.mysql_restaurant_id != null ? Number(order.mysql_restaurant_id) : null;
     if (!restaurantId) return { ok: false, reason: 'order_has_no_restaurant' };

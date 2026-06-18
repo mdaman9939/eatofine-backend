@@ -4,6 +4,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { SettlementService } from '../settlement/settlement.service';
 import { toNum } from '../common/decimal';
+import { OrderLifecycleService } from '../lifecycle/order-lifecycle.service';
+import { CANCEL_REASONS, type CancelReason } from '../lifecycle/order-lifecycle.constants';
 import { storageFullUrl } from '../common/storage-url';
 
 /** Shared shape for the admin food create + update endpoints. */
@@ -62,8 +64,10 @@ const ORDER_STATUSES = [
   // delivery semantics, so no DM/notification logic is triggered for them.
   'created',
   'ready_for_pickup',
+  'out_for_delivery',
   'served',
   'completed',
+  'auto_cancelled',
 ] as const;
 type OrderStatus = (typeof ORDER_STATUSES)[number];
 
@@ -87,6 +91,7 @@ export class AdminService {
     private readonly prisma: PrismaService,
     private readonly mongo: MongoDataService,
     private readonly settlement: SettlementService,
+    private readonly lifecycle: OrderLifecycleService,
   ) {}
 
   /** Feature flag — when "1", admin reads route to MongoDB instead of MySQL. */
@@ -445,6 +450,7 @@ export class AdminService {
         table_number?: string | null;
         coupon_code?: string | null; order_note?: string | null; delivery_address?: string | null;
         cancellation_reason?: string | null; canceled_by?: string | null;
+        cancel_reason?: string | null; refund_status?: string | null;
         contact_person_name?: string | null; contact_person_number?: string | null;
         pending?: Date | null; accepted?: Date | null; confirmed?: Date | null;
         processing?: Date | null; handover?: Date | null; picked_up?: Date | null;
@@ -530,6 +536,8 @@ export class AdminService {
           order_note: order.order_note ?? null,
           delivery_address: order.delivery_address ?? null,
           cancellation_reason: order.cancellation_reason ?? null,
+          cancel_reason: order.cancel_reason ?? order.cancellation_reason ?? null,
+          refund_status: order.refund_status ?? 'not_required',
           canceled_by: order.canceled_by ?? null,
           timeline: {
             pending: order.pending ?? null,
@@ -662,23 +670,30 @@ export class AdminService {
       });
     }
     if (this.useMongo()) {
-      const order = await this.mongo.findByMysqlId<{ mysql_id: number; payment_method?: string }>('orders', id);
+      const order = await this.mongo.findByMysqlId<{ mysql_id: number; payment_method?: string; order_status?: string }>('orders', id);
       if (!order) throw new NotFoundException({ errors: [{ code: 'order', message: 'Order not found' }] });
+
+      // Cancellation → the lifecycle engine (sets cancel_reason + refund_status,
+      // logs, notifies). Admin can cancel from any active state.
+      if (status === 'canceled' || status === 'auto_cancelled') {
+        const cancelReason: CancelReason = CANCEL_REASONS.includes(reason as CancelReason) ? (reason as CancelReason) : 'admin_cancelled';
+        await this.lifecycle.cancelOrder(id, cancelReason, 'admin');
+        return { ok: true, id, status: cancelReason === 'restaurant_not_responded' ? 'auto_cancelled' : 'canceled' };
+      }
+
+      const fromStatus = order.order_status;
       const data: Record<string, unknown> = { order_status: status };
       const tsCol = TIMESTAMP_COLUMN[status as OrderStatus];
       if (tsCol) data[tsCol] = new Date();
-      if (status === 'delivered' && order.payment_method === 'cash_on_delivery') {
+      // Terminal (delivered/completed) marks COD paid + triggers settlement.
+      if ((status === 'delivered' || status === 'completed') && order.payment_method === 'cash_on_delivery') {
         data.payment_status = 'paid';
       }
-      if (status === 'canceled') {
-        data.canceled_by = 'admin';
-        if (reason) data.cancellation_reason = reason;
-      }
       await this.mongo.updateOne('orders', { mysql_id: id }, data);
-      // Pay-Per-Order settlement runs ONLY on delivery, and is idempotent — a
-      // re-delivered / retried status update will never double-credit wallets.
-      // Non-fatal: a settlement failure must not roll back the status change.
-      if (status === 'delivered') {
+      // Audit log + customer notification for the new status (non-fatal).
+      await this.lifecycle.recordTransition(id, fromStatus, status, 'admin').catch(() => undefined);
+      // Pay-Per-Order settlement runs only on the terminal state, idempotently.
+      if (status === 'delivered' || status === 'completed') {
         await this.settlement.settleOrder(id).catch(() => undefined);
       }
       return { ok: true, id, status };

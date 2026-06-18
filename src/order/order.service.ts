@@ -410,6 +410,9 @@ export class OrderService {
         mysql_zone_id: restaurant.mysql_zone_id,
         order_status: 'pending',
         payment_status: 'unpaid',
+        // Lifecycle defaults — refund only matters if the order is later cancelled.
+        cancel_reason: null,
+        refund_status: 'not_required',
         payment_method: paymentMethod,
         order_type: body.order_type ?? 'delivery',
         order_amount: finalAmount,

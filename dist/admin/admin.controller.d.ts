@@ -154,6 +154,8 @@ export declare class AdminController {
             order_note: string | null;
             delivery_address: string | null;
             cancellation_reason: string | null;
+            cancel_reason: string | null;
+            refund_status: string;
             canceled_by: string | null;
             timeline: {
                 pending: Date | null;
@@ -229,6 +231,8 @@ export declare class AdminController {
             };
             created_at: Date | null;
             table_number?: undefined;
+            cancel_reason?: undefined;
+            refund_status?: undefined;
         };
         user: {
             id: number;

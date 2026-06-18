@@ -1,6 +1,7 @@
 import type { AuthedRequest } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { OrderLifecycleService } from '../lifecycle/order-lifecycle.service';
 interface MulterFile {
     buffer: Buffer;
     originalname: string;
@@ -10,7 +11,8 @@ interface MulterFile {
 export declare class CustomerExtrasController {
     private readonly prisma;
     private readonly mongo;
-    constructor(prisma: PrismaService, mongo: MongoDataService);
+    private readonly lifecycle;
+    constructor(prisma: PrismaService, mongo: MongoDataService, lifecycle: OrderLifecycleService);
     private useMongo;
     wishList(req: AuthedRequest): Promise<{
         product: {
