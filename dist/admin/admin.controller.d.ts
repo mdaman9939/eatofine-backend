@@ -1288,6 +1288,10 @@ export declare class AdminController {
         id: number;
         status: boolean;
     }>;
+    updatePromotionalBanner(id: number, body: Record<string, unknown>): Promise<{
+        ok: true;
+        id: number;
+    }>;
     deletePromotionalBanner(id: number): Promise<{
         ok: boolean;
         id: number;
@@ -1752,6 +1756,10 @@ export declare class AdminController {
     advertisements(limit?: string, offset?: string): Promise<unknown>;
     createAdvertisement(body: Parameters<AdminService['createAdvertisement']>[0]): Promise<unknown>;
     deleteAdvertisement(id: number): Promise<unknown>;
+    updateAdvertisement(id: number, body: Record<string, unknown>): Promise<{
+        ok: true;
+        id: number;
+    }>;
     updateAdvertisementStatus(id: number, body: {
         status: 'approved' | 'denied' | 'pending' | 'paused' | 'expired' | 'running';
     }): Promise<unknown>;

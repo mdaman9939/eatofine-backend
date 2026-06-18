@@ -545,6 +545,10 @@ export class AdminController {
   togglePromotionalBanner(@Param('id', ParseIntPipe) id: number, @Body() body: { status: boolean }) {
     return this.admin.togglePromotionalBanner(id, body.status);
   }
+  @Patch('promotional-banners/:id')
+  updatePromotionalBanner(@Param('id', ParseIntPipe) id: number, @Body() body: Record<string, unknown>) {
+    return this.admin.updateRecord('promotional_banners', id, body, ['title', 'subtitle', 'type', 'target', 'cta_text', 'zone_id']);
+  }
 
   @Delete('promotional-banners/:id')
   deletePromotionalBanner(@Param('id', ParseIntPipe) id: number) {
@@ -988,6 +992,10 @@ export class AdminController {
   @Delete('advertisements/:id')
   deleteAdvertisement(@Param('id', ParseIntPipe) id: number) {
     return this.admin.deleteAdvertisement(id);
+  }
+  @Patch('advertisements/:id')
+  updateAdvertisement(@Param('id', ParseIntPipe) id: number, @Body() body: Record<string, unknown>) {
+    return this.admin.updateRecord('advertisements', id, body, ['title', 'description', 'add_type', 'priority', 'start_date', 'end_date', 'amount']);
   }
   @Patch('advertisements/:id/status')
   updateAdvertisementStatus(

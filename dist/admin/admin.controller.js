@@ -325,6 +325,9 @@ let AdminController = class AdminController {
     togglePromotionalBanner(id, body) {
         return this.admin.togglePromotionalBanner(id, body.status);
     }
+    updatePromotionalBanner(id, body) {
+        return this.admin.updateRecord('promotional_banners', id, body, ['title', 'subtitle', 'type', 'target', 'cta_text', 'zone_id']);
+    }
     deletePromotionalBanner(id) {
         return this.admin.deletePromotionalBanner(id);
     }
@@ -571,6 +574,9 @@ let AdminController = class AdminController {
     }
     deleteAdvertisement(id) {
         return this.admin.deleteAdvertisement(id);
+    }
+    updateAdvertisement(id, body) {
+        return this.admin.updateRecord('advertisements', id, body, ['title', 'description', 'add_type', 'priority', 'start_date', 'end_date', 'amount']);
     }
     updateAdvertisementStatus(id, body) {
         return this.admin.updateAdvertisementStatus(id, body.status);
@@ -1507,6 +1513,14 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "togglePromotionalBanner", null);
 __decorate([
+    (0, common_1.Patch)('promotional-banners/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updatePromotionalBanner", null);
+__decorate([
     (0, common_1.Delete)('promotional-banners/:id'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __metadata("design:type", Function),
@@ -1977,6 +1991,14 @@ __decorate([
     __metadata("design:paramtypes", [Number]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "deleteAdvertisement", null);
+__decorate([
+    (0, common_1.Patch)('advertisements/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateAdvertisement", null);
 __decorate([
     (0, common_1.Patch)('advertisements/:id/status'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
