@@ -29,6 +29,10 @@ export declare class EnhancementsController {
         id: number;
         status: boolean;
     }>;
+    updateSlab(id: number, body: Parameters<EnhancementsService['updateSlab']>[1]): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
     deleteSlab(id: number): Promise<{
         ok: boolean;
         id: number;

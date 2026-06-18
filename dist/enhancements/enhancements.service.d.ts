@@ -31,6 +31,17 @@ export declare class EnhancementsService {
     }): Promise<{
         ok: boolean;
     }>;
+    updateSlab(id: number, body: {
+        min_order_value?: number;
+        max_order_value?: number;
+        fixed_charge?: number;
+        extra_charge?: number;
+        gst_rate?: number;
+        gst_on_extra?: boolean;
+    }): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
     deleteSlab(id: number): Promise<{
         ok: boolean;
         id: number;

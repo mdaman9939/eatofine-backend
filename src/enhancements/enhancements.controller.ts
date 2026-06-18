@@ -30,6 +30,11 @@ export class EnhancementsController {
   toggleSlab(@Param('id', ParseIntPipe) id: number, @Body() body: { status: boolean }) {
     return this.svc.toggleSlabStatus(id, body.status);
   }
+  @Patch('business-plans/slabs/:id')
+  @HttpCode(200)
+  updateSlab(@Param('id', ParseIntPipe) id: number, @Body() body: Parameters<EnhancementsService['updateSlab']>[1]) {
+    return this.svc.updateSlab(id, body);
+  }
   @Delete('business-plans/slabs/:id')
   @HttpCode(200)
   deleteSlab(@Param('id', ParseIntPipe) id: number) {

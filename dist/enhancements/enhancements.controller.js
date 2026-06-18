@@ -36,6 +36,9 @@ let EnhancementsController = class EnhancementsController {
     toggleSlab(id, body) {
         return this.svc.toggleSlabStatus(id, body.status);
     }
+    updateSlab(id, body) {
+        return this.svc.updateSlab(id, body);
+    }
     deleteSlab(id) {
         return this.svc.deleteSlab(id);
     }
@@ -129,6 +132,15 @@ __decorate([
     __metadata("design:paramtypes", [Number, Object]),
     __metadata("design:returntype", void 0)
 ], EnhancementsController.prototype, "toggleSlab", null);
+__decorate([
+    (0, common_1.Patch)('business-plans/slabs/:id'),
+    (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], EnhancementsController.prototype, "updateSlab", null);
 __decorate([
     (0, common_1.Delete)('business-plans/slabs/:id'),
     (0, common_1.HttpCode)(200),

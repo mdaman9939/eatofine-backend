@@ -217,6 +217,28 @@ export class EnhancementsService {
     return { ok: true };
   }
 
+  async updateSlab(id: number, body: { min_order_value?: number; max_order_value?: number; fixed_charge?: number; extra_charge?: number; gst_rate?: number; gst_on_extra?: boolean }) {
+    const set: Record<string, unknown> = {};
+    if (body.min_order_value !== undefined) set.min_order_value = Number(body.min_order_value);
+    if (body.max_order_value !== undefined) set.max_order_value = Number(body.max_order_value);
+    if (body.fixed_charge !== undefined) set.fixed_charge = Number(body.fixed_charge);
+    if (body.extra_charge !== undefined) set.extra_charge = Number(body.extra_charge);
+    if (body.gst_rate !== undefined) set.gst_rate = Number(body.gst_rate);
+    if (body.gst_on_extra !== undefined) set.gst_on_extra = body.gst_on_extra ? 1 : 0;
+    if (Object.keys(set).length === 0) throw new BadRequestException({ errors: [{ code: 'body', message: 'no fields to update' }] });
+    set.updated_at = new Date();
+    if (this.useMongo()) {
+      await this.mongo.updateOne('business_plan_slabs', { mysql_id: Number(id) }, set);
+      return { ok: true, id };
+    }
+    const cols = Object.keys(set).filter((k) => k !== 'updated_at');
+    await this.prisma.$executeRawUnsafe(
+      `UPDATE business_plan_slabs SET ${cols.map((c) => `${c} = ?`).join(', ')}, updated_at = NOW() WHERE id = ?`,
+      ...cols.map((c) => set[c]), id,
+    );
+    return { ok: true, id };
+  }
+
   async deleteSlab(id: number) {
     if (this.useMongo()) {
       await this.mongo.deleteOne('business_plan_slabs', { mysql_id: Number(id) });
