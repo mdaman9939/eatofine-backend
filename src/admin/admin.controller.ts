@@ -1009,6 +1009,10 @@ export class AdminController {
   updateCashBackStatus(@Param('id', ParseIntPipe) id: number, @Body() body: { status: boolean }) {
     return this.admin.updateCashBackStatus(id, body.status);
   }
+  @Patch('cash-backs/:id')
+  updateCashBack(@Param('id', ParseIntPipe) id: number, @Body() body: Record<string, unknown>) {
+    return this.admin.updateRecord('cash_backs', id, body, ['title', 'customer_id', 'cashback_type', 'cashback_amount', 'min_purchase', 'max_discount', 'start_date', 'end_date', 'limit']);
+  }
   @Delete('cash-backs/:id')
   deleteCashBack(@Param('id', ParseIntPipe) id: number) {
     return this.admin.deleteCashBack(id);
@@ -1025,6 +1029,10 @@ export class AdminController {
   @Patch('wallet-bonuses/:id/status')
   updateWalletBonusStatus(@Param('id', ParseIntPipe) id: number, @Body() body: { status: boolean }) {
     return this.admin.updateWalletBonusStatus(id, body.status);
+  }
+  @Patch('wallet-bonuses/:id')
+  updateWalletBonus(@Param('id', ParseIntPipe) id: number, @Body() body: Record<string, unknown>) {
+    return this.admin.updateRecord('wallet_bonuses', id, body, ['title', 'bonus_type', 'bonus_amount', 'minimum_add_amount', 'maximum_bonus_amount', 'start_date', 'end_date']);
   }
   @Delete('wallet-bonuses/:id')
   deleteWalletBonus(@Param('id', ParseIntPipe) id: number) {
@@ -1202,6 +1210,10 @@ export class AdminController {
   createSocialMedia(@Body() body: { name: string; link: string }) {
     return this.admin.createSocialMedia(body);
   }
+  @Patch('social-media/:id')
+  updateSocialMedia(@Param('id', ParseIntPipe) id: number, @Body() body: Record<string, unknown>) {
+    return this.admin.updateRecord('social_media', id, body, ['name', 'link']);
+  }
   @Patch('social-media/:id/status')
   updateSocialMediaStatus(@Param('id', ParseIntPipe) id: number, @Body() body: { status: boolean }) {
     return this.admin.updateSocialMediaStatus(id, body.status);
@@ -1284,6 +1296,10 @@ export class AdminController {
   createShift(@Body() body: Parameters<AdminService['createShift']>[0]) {
     return this.admin.createShift(body);
   }
+  @Patch('shifts/:id')
+  updateShift(@Param('id', ParseIntPipe) id: number, @Body() body: Record<string, unknown>) {
+    return this.admin.updateRecord('shifts', id, body, ['name', 'start_time', 'end_time', 'is_full_day']);
+  }
   @Patch('shifts/:id/status')
   updateShiftStatus(@Param('id', ParseIntPipe) id: number, @Body() body: { status: boolean }) {
     return this.admin.updateShiftStatus(id, body.status);
@@ -1300,6 +1316,10 @@ export class AdminController {
   @Post('vehicles')
   createVehicle(@Body() body: Parameters<AdminService['createVehicle']>[0]) {
     return this.admin.createVehicle(body);
+  }
+  @Patch('vehicles/:id')
+  updateVehicle(@Param('id', ParseIntPipe) id: number, @Body() body: Record<string, unknown>) {
+    return this.admin.updateRecord('vehicles', id, body, ['type', 'starting_coverage_area', 'maximum_coverage_area', 'extra_charges']);
   }
   @Patch('vehicles/:id/status')
   updateVehicleStatus(@Param('id', ParseIntPipe) id: number, @Body() body: { status: boolean }) {
@@ -1318,6 +1338,10 @@ export class AdminController {
   createOrderCancelReason(@Body() body: { reason: string; user_type: string }) {
     return this.admin.createOrderCancelReason(body);
   }
+  @Patch('order-cancel-reasons/:id')
+  updateOrderCancelReason(@Param('id', ParseIntPipe) id: number, @Body() body: Record<string, unknown>) {
+    return this.admin.updateRecord('order_cancel_reasons', id, body, ['reason', 'user_type']);
+  }
   @Patch('order-cancel-reasons/:id/status')
   updateOrderCancelReasonStatus(@Param('id', ParseIntPipe) id: number, @Body() body: { status: boolean }) {
     return this.admin.updateOrderCancelReasonStatus(id, body.status);
@@ -1334,6 +1358,10 @@ export class AdminController {
   @Post('refund-reasons')
   createRefundReason(@Body() body: { reason: string }) {
     return this.admin.createRefundReason(body);
+  }
+  @Patch('refund-reasons/:id')
+  updateRefundReason(@Param('id', ParseIntPipe) id: number, @Body() body: Record<string, unknown>) {
+    return this.admin.updateRecord('refund_reasons', id, body, ['reason']);
   }
   @Delete('refund-reasons/:id')
   deleteRefundReason(@Param('id', ParseIntPipe) id: number) {

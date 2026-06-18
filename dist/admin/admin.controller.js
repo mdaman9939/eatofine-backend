@@ -584,6 +584,9 @@ let AdminController = class AdminController {
     updateCashBackStatus(id, body) {
         return this.admin.updateCashBackStatus(id, body.status);
     }
+    updateCashBack(id, body) {
+        return this.admin.updateRecord('cash_backs', id, body, ['title', 'customer_id', 'cashback_type', 'cashback_amount', 'min_purchase', 'max_discount', 'start_date', 'end_date', 'limit']);
+    }
     deleteCashBack(id) {
         return this.admin.deleteCashBack(id);
     }
@@ -595,6 +598,9 @@ let AdminController = class AdminController {
     }
     updateWalletBonusStatus(id, body) {
         return this.admin.updateWalletBonusStatus(id, body.status);
+    }
+    updateWalletBonus(id, body) {
+        return this.admin.updateRecord('wallet_bonuses', id, body, ['title', 'bonus_type', 'bonus_amount', 'minimum_add_amount', 'maximum_bonus_amount', 'start_date', 'end_date']);
     }
     deleteWalletBonus(id) {
         return this.admin.deleteWalletBonus(id);
@@ -703,6 +709,9 @@ let AdminController = class AdminController {
     createSocialMedia(body) {
         return this.admin.createSocialMedia(body);
     }
+    updateSocialMedia(id, body) {
+        return this.admin.updateRecord('social_media', id, body, ['name', 'link']);
+    }
     updateSocialMediaStatus(id, body) {
         return this.admin.updateSocialMediaStatus(id, body.status);
     }
@@ -760,6 +769,9 @@ let AdminController = class AdminController {
     createShift(body) {
         return this.admin.createShift(body);
     }
+    updateShift(id, body) {
+        return this.admin.updateRecord('shifts', id, body, ['name', 'start_time', 'end_time', 'is_full_day']);
+    }
     updateShiftStatus(id, body) {
         return this.admin.updateShiftStatus(id, body.status);
     }
@@ -771,6 +783,9 @@ let AdminController = class AdminController {
     }
     createVehicle(body) {
         return this.admin.createVehicle(body);
+    }
+    updateVehicle(id, body) {
+        return this.admin.updateRecord('vehicles', id, body, ['type', 'starting_coverage_area', 'maximum_coverage_area', 'extra_charges']);
     }
     updateVehicleStatus(id, body) {
         return this.admin.updateVehicleStatus(id, body.status);
@@ -784,6 +799,9 @@ let AdminController = class AdminController {
     createOrderCancelReason(body) {
         return this.admin.createOrderCancelReason(body);
     }
+    updateOrderCancelReason(id, body) {
+        return this.admin.updateRecord('order_cancel_reasons', id, body, ['reason', 'user_type']);
+    }
     updateOrderCancelReasonStatus(id, body) {
         return this.admin.updateOrderCancelReasonStatus(id, body.status);
     }
@@ -795,6 +813,9 @@ let AdminController = class AdminController {
     }
     createRefundReason(body) {
         return this.admin.createRefundReason(body);
+    }
+    updateRefundReason(id, body) {
+        return this.admin.updateRecord('refund_reasons', id, body, ['reason']);
     }
     deleteRefundReason(id) {
         return this.admin.deleteRefundReason(id);
@@ -1986,6 +2007,14 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "updateCashBackStatus", null);
 __decorate([
+    (0, common_1.Patch)('cash-backs/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateCashBack", null);
+__decorate([
     (0, common_1.Delete)('cash-backs/:id'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __metadata("design:type", Function),
@@ -2013,6 +2042,14 @@ __decorate([
     __metadata("design:paramtypes", [Number, Object]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "updateWalletBonusStatus", null);
+__decorate([
+    (0, common_1.Patch)('wallet-bonuses/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateWalletBonus", null);
 __decorate([
     (0, common_1.Delete)('wallet-bonuses/:id'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
@@ -2270,6 +2307,14 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "createSocialMedia", null);
 __decorate([
+    (0, common_1.Patch)('social-media/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateSocialMedia", null);
+__decorate([
     (0, common_1.Patch)('social-media/:id/status'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __param(1, (0, common_1.Body)()),
@@ -2407,6 +2452,14 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "createShift", null);
 __decorate([
+    (0, common_1.Patch)('shifts/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateShift", null);
+__decorate([
     (0, common_1.Patch)('shifts/:id/status'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __param(1, (0, common_1.Body)()),
@@ -2434,6 +2487,14 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "createVehicle", null);
+__decorate([
+    (0, common_1.Patch)('vehicles/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateVehicle", null);
 __decorate([
     (0, common_1.Patch)('vehicles/:id/status'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
@@ -2463,6 +2524,14 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "createOrderCancelReason", null);
 __decorate([
+    (0, common_1.Patch)('order-cancel-reasons/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateOrderCancelReason", null);
+__decorate([
     (0, common_1.Patch)('order-cancel-reasons/:id/status'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __param(1, (0, common_1.Body)()),
@@ -2490,6 +2559,14 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "createRefundReason", null);
+__decorate([
+    (0, common_1.Patch)('refund-reasons/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateRefundReason", null);
 __decorate([
     (0, common_1.Delete)('refund-reasons/:id'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),

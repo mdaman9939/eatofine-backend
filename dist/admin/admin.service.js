@@ -1775,6 +1775,31 @@ let AdminService = class AdminService {
         const created = await this.prisma.cuisines.create({ data: { name: body.name, image: body.image ?? null } });
         return { ok: true, id: Number(created.id) };
     }
+    async updateRecord(collection, id, body, allowed) {
+        if (!this.useMongo())
+            throw new common_1.BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+        const isDate = (k) => k.endsWith('_date');
+        const isNum = (k) => /(amount|charge|purchase|discount|limit|coverage_area|priority|position|parent_id|extra)/.test(k);
+        const set = {};
+        for (const k of allowed) {
+            if (!(k in body) || body[k] === undefined)
+                continue;
+            let v = body[k];
+            if (isDate(k))
+                v = v && typeof v === 'string' ? new Date(v) : null;
+            else if (isNum(k) && v !== null && v !== '')
+                v = Number(v);
+            set[k] = v;
+        }
+        if (Object.keys(set).length === 0)
+            throw new common_1.BadRequestException({ errors: [{ code: 'body', message: 'no fields to update' }] });
+        set.updated_at = new Date();
+        const exists = await this.mongo.findByMysqlId(collection, id);
+        if (!exists)
+            throw new common_1.NotFoundException({ errors: [{ code: 'record', message: 'Record not found' }] });
+        await this.mongo.updateOne(collection, { mysql_id: Number(id) }, set);
+        return { ok: true, id: Number(id) };
+    }
     async updateCuisine(id, body) {
         if (this.useMongo()) {
             const c = await this.mongo.findByMysqlId('cuisines', id);

@@ -1014,6 +1014,10 @@ export declare class AdminService {
         ok: boolean;
         id: number;
     }>;
+    updateRecord(collection: string, id: number, body: Record<string, unknown>, allowed: string[]): Promise<{
+        ok: true;
+        id: number;
+    }>;
     updateCuisine(id: number, body: {
         name?: string;
         status?: boolean;

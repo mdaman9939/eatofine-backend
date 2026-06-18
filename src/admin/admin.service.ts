@@ -1919,6 +1919,31 @@ export class AdminService {
     return { ok: true, id: Number(created.id) };
   }
 
+  /**
+   * Generic partial update for simple admin-managed collections (Edit actions).
+   * Whitelists `allowed` fields, coerces *_date → Date and money/number fields →
+   * Number, leaves strings/booleans/time-strings as-is, and stamps updated_at.
+   */
+  async updateRecord(collection: string, id: number, body: Record<string, unknown>, allowed: string[]): Promise<{ ok: true; id: number }> {
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    const isDate = (k: string) => k.endsWith('_date');
+    const isNum = (k: string) => /(amount|charge|purchase|discount|limit|coverage_area|priority|position|parent_id|extra)/.test(k);
+    const set: Record<string, unknown> = {};
+    for (const k of allowed) {
+      if (!(k in body) || body[k] === undefined) continue;
+      let v = body[k];
+      if (isDate(k)) v = v && typeof v === 'string' ? new Date(v) : null;
+      else if (isNum(k) && v !== null && v !== '') v = Number(v);
+      set[k] = v;
+    }
+    if (Object.keys(set).length === 0) throw new BadRequestException({ errors: [{ code: 'body', message: 'no fields to update' }] });
+    set.updated_at = new Date();
+    const exists = await this.mongo.findByMysqlId<{ mysql_id: number }>(collection, id);
+    if (!exists) throw new NotFoundException({ errors: [{ code: 'record', message: 'Record not found' }] });
+    await this.mongo.updateOne(collection, { mysql_id: Number(id) }, set);
+    return { ok: true, id: Number(id) };
+  }
+
   async updateCuisine(id: number, body: { name?: string; status?: boolean }) {
     if (this.useMongo()) {
       const c = await this.mongo.findByMysqlId<{ mysql_id: number }>('cuisines', id);

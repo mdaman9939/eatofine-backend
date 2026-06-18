@@ -1760,12 +1760,20 @@ export declare class AdminController {
     updateCashBackStatus(id: number, body: {
         status: boolean;
     }): Promise<unknown>;
+    updateCashBack(id: number, body: Record<string, unknown>): Promise<{
+        ok: true;
+        id: number;
+    }>;
     deleteCashBack(id: number): Promise<unknown>;
     walletBonuses(): Promise<unknown>;
     createWalletBonus(body: Parameters<AdminService['createWalletBonus']>[0]): Promise<unknown>;
     updateWalletBonusStatus(id: number, body: {
         status: boolean;
     }): Promise<unknown>;
+    updateWalletBonus(id: number, body: Record<string, unknown>): Promise<{
+        ok: true;
+        id: number;
+    }>;
     deleteWalletBonus(id: number): Promise<unknown>;
     accountTransactions(limit?: string, offset?: string): Promise<unknown>;
     walletTransactions(limit?: string, offset?: string): Promise<unknown>;
@@ -1819,6 +1827,10 @@ export declare class AdminController {
         name: string;
         link: string;
     }): Promise<unknown>;
+    updateSocialMedia(id: number, body: Record<string, unknown>): Promise<{
+        ok: true;
+        id: number;
+    }>;
     updateSocialMediaStatus(id: number, body: {
         status: boolean;
     }): Promise<unknown>;
@@ -1849,12 +1861,20 @@ export declare class AdminController {
     deleteSubscriptionPackage(id: number): Promise<unknown>;
     shifts(): Promise<unknown>;
     createShift(body: Parameters<AdminService['createShift']>[0]): Promise<unknown>;
+    updateShift(id: number, body: Record<string, unknown>): Promise<{
+        ok: true;
+        id: number;
+    }>;
     updateShiftStatus(id: number, body: {
         status: boolean;
     }): Promise<unknown>;
     deleteShift(id: number): Promise<unknown>;
     vehicles(): Promise<unknown>;
     createVehicle(body: Parameters<AdminService['createVehicle']>[0]): Promise<unknown>;
+    updateVehicle(id: number, body: Record<string, unknown>): Promise<{
+        ok: true;
+        id: number;
+    }>;
     updateVehicleStatus(id: number, body: {
         status: boolean;
     }): Promise<unknown>;
@@ -1864,6 +1884,10 @@ export declare class AdminController {
         reason: string;
         user_type: string;
     }): Promise<unknown>;
+    updateOrderCancelReason(id: number, body: Record<string, unknown>): Promise<{
+        ok: true;
+        id: number;
+    }>;
     updateOrderCancelReasonStatus(id: number, body: {
         status: boolean;
     }): Promise<unknown>;
@@ -1872,6 +1896,10 @@ export declare class AdminController {
     createRefundReason(body: {
         reason: string;
     }): Promise<unknown>;
+    updateRefundReason(id: number, body: Record<string, unknown>): Promise<{
+        ok: true;
+        id: number;
+    }>;
     deleteRefundReason(id: number): Promise<unknown>;
     refunds(limit?: string, offset?: string): Promise<unknown>;
     updateRefundStatus(id: number, body: {
