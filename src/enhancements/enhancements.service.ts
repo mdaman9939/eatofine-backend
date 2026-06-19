@@ -899,10 +899,9 @@ export class EnhancementsService {
         restaurant: {
           name: restaurant?.name ?? '—',
           // Legal/registered "business name" = the parent company the outlet is
-          // registered under. Falls back to the outlet name when not set.
-          business_name: (restaurant?.business_name && String(restaurant.business_name).trim() !== '')
-            ? String(restaurant.business_name)
-            : (restaurant?.name ?? '—'),
+          // registered under. A DISTINCT field from the outlet name — never
+          // defaulted to it (null when the admin hasn't set it).
+          business_name: ph(restaurant?.business_name),
           address: restaurant?.address ?? '—',
           gstin: ph(restaurant?.gstin),
           fssai: ph(restaurant?.fssai),
