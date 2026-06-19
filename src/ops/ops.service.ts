@@ -3,6 +3,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { SettlementService } from '../settlement/settlement.service';
 import { OrderLifecycleService } from '../lifecycle/order-lifecycle.service';
+import { RefundService } from '../refund/refund.service';
+import { scenarioForRestaurantReject, type ScenarioKey } from '../refund/refund-policy';
 import { storageBaseUrl } from '../common/storage-url';
 
 const VENDOR_STATUSES = ['accepted', 'confirmed', 'processing', 'handover', 'ready_for_pickup', 'served', 'completed', 'canceled'] as const;
@@ -57,6 +59,7 @@ export class OpsService {
     private readonly mongo: MongoDataService,
     private readonly settlement: SettlementService,
     private readonly lifecycle: OrderLifecycleService,
+    private readonly refund: RefundService,
   ) {}
 
   /** Feature flag â€” when "1", ops reads/writes route to MongoDB instead of MySQL. */
@@ -308,7 +311,25 @@ export class OpsService {
           : reason === 'restaurant_closed' ? 'restaurant_closed'
             : reason === 'restaurant_unavailable' ? 'restaurant_unavailable'
               : 'restaurant_cancelled';
+        // Capture the stage BEFORE the cancel mutates order_status — it decides
+        // which restaurant-rejection penalty scenario applies.
+        const preStatus = String(o.order_status ?? 'pending');
+        const hadDeliveryMan = o.mysql_delivery_man_id != null;
+        // Lifecycle owns the customer side: full refund to the user (prepaid),
+        // status, audit, notifications.
         await this.lifecycle.cancelOrder(Number(o.mysql_id), r, 'restaurant');
+        // Refund engine owns the partner side: park the penalty for admin review
+        // (no partner wallet moves until an admin confirms). The scenario is
+        // chosen from the order's stage, unless an admin has mapped this exact
+        // cancel reason to a specific fault scenario (configurable override).
+        let scenarioKey: ScenarioKey = scenarioForRestaurantReject(preStatus, hadDeliveryMan);
+        const override = await this.mongo.findOne<{ scenario_key?: string | null }>('order_cancel_reasons', {
+          user_type: 'restaurant',
+          scenario_key: { $nin: [null, ''] },
+          $or: [{ reason }, { reason: r }],
+        }).catch(() => null);
+        if (override?.scenario_key) scenarioKey = override.scenario_key as ScenarioKey;
+        await this.refund.proposePartnerPenalty(Number(o.mysql_id), scenarioKey, 'restaurant', r).catch(() => undefined);
         return { message: 'order_cancelled', order_status: 'canceled' };
       }
       const fromStatus = o.order_status;

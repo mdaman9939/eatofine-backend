@@ -273,9 +273,12 @@ export class DmChargesService {
         notes: 'No active slab matches the given distance.',
       };
     }
-    const extraKm = Math.max(0, input.distance_km - slab.min_km);
-    const extraCharge = +(extraKm * slab.extra_per_km).toFixed(2);
-    const baseTotal = slab.base_charge + extraCharge;
+    // Long-trip reward: a FLAT bonus added on top of the slab's base charge for
+    // any trip that falls in this (longer-distance) slab — NOT a per-km
+    // multiplier. Admins set a bigger reward on the longer-distance slabs so a
+    // partner who took a long trip is compensated better.
+    const longTripReward = +(Number(slab.extra_per_km) || 0).toFixed(2);
+    const baseTotal = slab.base_charge + longTripReward;
 
     const when = input.when ? new Date(input.when) : new Date();
     const dow = when.getDay();
@@ -306,7 +309,7 @@ export class DmChargesService {
       distance_km: input.distance_km,
       matched_slab: { id: slab.id, min_km: slab.min_km, max_km: slab.max_km, base_charge: slab.base_charge, extra_per_km: slab.extra_per_km },
       base_charge: slab.base_charge,
-      extra_charge: extraCharge,
+      extra_charge: longTripReward,
       surcharges: applicable,
       total: +(baseTotal + surchargeTotal).toFixed(2),
       notes: 'Per BRD §5.4 no GST is applied to delivery-partner-side charges.',

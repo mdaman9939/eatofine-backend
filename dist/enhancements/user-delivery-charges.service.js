@@ -349,9 +349,8 @@ let UserDeliveryChargesService = class UserDeliveryChargesService {
                 notes: 'No active slab matches the given distance.',
             };
         }
-        const extraKm = Math.max(0, input.distance_km - slab.min_km);
-        const extraCharge = +(extraKm * slab.extra_per_km).toFixed(2);
-        const baseTotal = slab.base_charge + extraCharge;
+        const longTripReward = +(Number(slab.extra_per_km) || 0).toFixed(2);
+        const baseTotal = slab.base_charge + longTripReward;
         const when = input.when ? new Date(input.when) : new Date();
         const dow = when.getDay();
         const hour = when.getHours();
@@ -399,7 +398,7 @@ let UserDeliveryChargesService = class UserDeliveryChargesService {
         return {
             distance_km: input.distance_km, order_value: input.order_value,
             matched_slab: { id: slab.id, min_km: slab.min_km, max_km: slab.max_km, base_charge: slab.base_charge, extra_per_km: slab.extra_per_km, gst_rate: slab.gst_rate },
-            base_charge: slab.base_charge, extra_charge: extraCharge,
+            base_charge: slab.base_charge, extra_charge: longTripReward,
             base_after_surge: baseAfterSurge,
             surge_multiplier: surgeMul,
             surcharges: applicable,

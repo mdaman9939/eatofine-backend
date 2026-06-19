@@ -49,5 +49,6 @@ export interface RefundEffects {
 }
 export declare const SCENARIOS: Record<ScenarioKey, ScenarioDefinition>;
 export declare function listScenarios(): Array<Pick<ScenarioDefinition, 'key' | 'cancelled_by' | 'label'>>;
+export declare function scenarioForRestaurantReject(preStatus: string, hasDeliveryMan: boolean): ScenarioKey;
 export declare function getScenario(key: ScenarioKey): ScenarioDefinition | null;
 export declare function applicableScenarios(stage: OrderStage): Array<Pick<ScenarioDefinition, 'key' | 'cancelled_by' | 'label'>>;

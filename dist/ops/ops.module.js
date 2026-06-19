@@ -11,12 +11,13 @@ const common_1 = require("@nestjs/common");
 const ops_controller_1 = require("./ops.controller");
 const ops_service_1 = require("./ops.service");
 const migration_module_1 = require("../mongo/migration.module");
+const refund_module_1 = require("../refund/refund.module");
 let OpsModule = class OpsModule {
 };
 exports.OpsModule = OpsModule;
 exports.OpsModule = OpsModule = __decorate([
     (0, common_1.Module)({
-        imports: [migration_module_1.MigrationModule],
+        imports: [migration_module_1.MigrationModule, refund_module_1.RefundModule],
         controllers: [ops_controller_1.OpsController],
         providers: [ops_service_1.OpsService],
     })

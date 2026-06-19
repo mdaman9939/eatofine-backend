@@ -12,6 +12,44 @@ export declare class RefundController {
         offset: number;
         items: Record<string, unknown>[];
     }>;
+    pending(limit?: string, offset?: string): Promise<{
+        total: number;
+        limit: number;
+        offset: number;
+        items: {
+            id: number;
+            order_id: number;
+            scenario: ScenarioKey;
+            scenario_label: string;
+            cancelled_by: string;
+            initiated_by: string | undefined;
+            reason: string | null | undefined;
+            order_amount: number;
+            penalty: {
+                target: string;
+                amount: number;
+            } | {
+                target: null;
+                amount: number;
+            };
+            effects: import("./refund-policy").RefundEffects;
+            created_at: Date | undefined;
+        }[];
+    }>;
+    confirmPending(decisionId: number, body: {
+        remarks: string;
+    }): Promise<{
+        ok: boolean;
+        decision_id: number;
+        status: string;
+    }>;
+    rejectPending(decisionId: number, body: {
+        remarks: string;
+    }): Promise<{
+        ok: boolean;
+        decision_id: number;
+        status: string;
+    }>;
     applicable(orderId: number): Promise<{
         order_id: number;
         stage: import("./refund-policy").OrderStage;

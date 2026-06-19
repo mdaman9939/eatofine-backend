@@ -26,6 +26,15 @@ let RefundController = class RefundController {
     ledger(limit, offset, actorType) {
         return this.svc.ledger(toInt(limit, 100), toInt(offset, 0), actorType);
     }
+    pending(limit, offset) {
+        return this.svc.listPending(toInt(limit, 50), toInt(offset, 0));
+    }
+    confirmPending(decisionId, body) {
+        return this.svc.confirmPending(decisionId, body?.remarks);
+    }
+    rejectPending(decisionId, body) {
+        return this.svc.rejectPending(decisionId, body?.remarks);
+    }
     applicable(orderId) {
         return this.svc.applicable(orderId);
     }
@@ -55,6 +64,30 @@ __decorate([
     __metadata("design:paramtypes", [String, String, String]),
     __metadata("design:returntype", void 0)
 ], RefundController.prototype, "ledger", null);
+__decorate([
+    (0, common_1.Get)('pending'),
+    __param(0, (0, common_1.Query)('limit')),
+    __param(1, (0, common_1.Query)('offset')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String]),
+    __metadata("design:returntype", void 0)
+], RefundController.prototype, "pending", null);
+__decorate([
+    (0, common_1.Post)('pending/:decisionId/confirm'),
+    __param(0, (0, common_1.Param)('decisionId', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], RefundController.prototype, "confirmPending", null);
+__decorate([
+    (0, common_1.Post)('pending/:decisionId/reject'),
+    __param(0, (0, common_1.Param)('decisionId', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], RefundController.prototype, "rejectPending", null);
 __decorate([
     (0, common_1.Get)(':orderId/applicable'),
     __param(0, (0, common_1.Param)('orderId', common_1.ParseIntPipe)),

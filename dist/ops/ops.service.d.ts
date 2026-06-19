@@ -2,12 +2,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { SettlementService } from '../settlement/settlement.service';
 import { OrderLifecycleService } from '../lifecycle/order-lifecycle.service';
+import { RefundService } from '../refund/refund.service';
 export declare class OpsService {
     private readonly prisma;
     private readonly mongo;
     private readonly settlement;
     private readonly lifecycle;
-    constructor(prisma: PrismaService, mongo: MongoDataService, settlement: SettlementService, lifecycle: OrderLifecycleService);
+    private readonly refund;
+    constructor(prisma: PrismaService, mongo: MongoDataService, settlement: SettlementService, lifecycle: OrderLifecycleService, refund: RefundService);
     private useMongo;
     private storageBase;
     private restaurantForVendor;

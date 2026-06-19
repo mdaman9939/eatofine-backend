@@ -1891,6 +1891,7 @@ export declare class AdminController {
     createOrderCancelReason(body: {
         reason: string;
         user_type: string;
+        scenario_key?: string;
     }): Promise<unknown>;
     updateOrderCancelReason(id: number, body: Record<string, unknown>): Promise<{
         ok: true;

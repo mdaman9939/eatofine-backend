@@ -2201,6 +2201,7 @@ declare module './admin.service' {
         createOrderCancelReason(body: {
             reason: string;
             user_type: string;
+            scenario_key?: string;
         }): Promise<unknown>;
         updateOrderCancelReasonStatus(id: number, status: boolean): Promise<unknown>;
         deleteOrderCancelReason(id: number): Promise<unknown>;

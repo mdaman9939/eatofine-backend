@@ -20,11 +20,13 @@ export declare class EnhancementsService {
         status: boolean;
         created_at: Date | null;
     }[]>;
+    private extraPctToAmount;
     createSlab(body: {
         min_order_value: number;
         max_order_value: number;
         fixed_charge: number;
         extra_charge?: number;
+        extra_charge_pct?: number;
         gst_rate?: number;
         gst_on_extra?: boolean;
         vendor_id?: number | null;
@@ -36,6 +38,7 @@ export declare class EnhancementsService {
         max_order_value?: number;
         fixed_charge?: number;
         extra_charge?: number;
+        extra_charge_pct?: number;
         gst_rate?: number;
         gst_on_extra?: boolean;
     }): Promise<{

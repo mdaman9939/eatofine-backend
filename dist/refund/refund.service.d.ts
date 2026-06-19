@@ -49,6 +49,56 @@ export declare class RefundService {
             cancelled_by: import("./refund-policy").CancelledBy;
         };
     }>;
+    proposePartnerPenalty(orderId: number, scenarioKey: ScenarioKey, initiatedBy: string, reasonText?: string): Promise<{
+        ok: false;
+        reason: string;
+        status?: undefined;
+        decision_id?: undefined;
+    } | {
+        ok: true;
+        status: "no_penalty";
+        reason?: undefined;
+        decision_id?: undefined;
+    } | {
+        ok: true;
+        status: "pending";
+        decision_id: number;
+        reason?: undefined;
+    }>;
+    confirmPending(decisionId: number, adminRemarks: string): Promise<{
+        ok: boolean;
+        decision_id: number;
+        status: string;
+    }>;
+    rejectPending(decisionId: number, adminRemarks: string): Promise<{
+        ok: boolean;
+        decision_id: number;
+        status: string;
+    }>;
+    listPending(limit?: number, offset?: number): Promise<{
+        total: number;
+        limit: number;
+        offset: number;
+        items: {
+            id: number;
+            order_id: number;
+            scenario: ScenarioKey;
+            scenario_label: string;
+            cancelled_by: string;
+            initiated_by: string | undefined;
+            reason: string | null | undefined;
+            order_amount: number;
+            penalty: {
+                target: string;
+                amount: number;
+            } | {
+                target: null;
+                amount: number;
+            };
+            effects: RefundEffects;
+            created_at: Date | undefined;
+        }[];
+    }>;
     historyFor(orderId: number): Promise<{
         order_id: number;
         decisions: Record<string, unknown>[];

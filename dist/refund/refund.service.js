@@ -142,6 +142,120 @@ let RefundService = class RefundService {
         await this.mongo.insertOne('refund_decisions', decision);
         return { ok: true, decision_id: decisionId, artefacts, effects, scenario };
     }
+    async proposePartnerPenalty(orderId, scenarioKey, initiatedBy, reasonText) {
+        const scenario = (0, refund_policy_1.getScenario)(scenarioKey);
+        if (!scenario)
+            return { ok: false, reason: 'unknown_scenario' };
+        const order = await this.mongo.findByMysqlId('orders', orderId);
+        if (!order)
+            return { ok: false, reason: 'order_not_found' };
+        const money = await this.moneyOf(order);
+        const effects = scenario.decide(money);
+        const restMoves = effects.restaurant_wallet.direction !== 'none' && effects.restaurant_wallet.amount > 0;
+        const dmMoves = effects.deliveryman_wallet.direction !== 'none' && effects.deliveryman_wallet.amount > 0;
+        if (!restMoves && !dmMoves) {
+            return { ok: true, status: 'no_penalty' };
+        }
+        const decisionId = await this.mongo.nextMysqlId('refund_decisions');
+        await this.mongo.insertOne('refund_decisions', {
+            mysql_id: decisionId,
+            order_id: orderId,
+            scenario: scenario.key,
+            scenario_label: scenario.label,
+            cancelled_by: scenario.cancelled_by,
+            status: 'pending',
+            review_kind: 'partner_penalty',
+            initiated_by: initiatedBy,
+            reason: reasonText ?? null,
+            restaurant_id: order.mysql_restaurant_id ?? null,
+            delivery_man_id: order.mysql_delivery_man_id ?? null,
+            effects,
+            artefacts: { wallet_ledger_ids: [] },
+            created_at: new Date(),
+        });
+        return { ok: true, status: 'pending', decision_id: decisionId };
+    }
+    async confirmPending(decisionId, adminRemarks) {
+        if (!adminRemarks || !adminRemarks.trim()) {
+            throw new common_1.BadRequestException({ errors: [{ code: 'remarks', message: 'Admin remarks are required.' }] });
+        }
+        const d = await this.mongo.findByMysqlId('refund_decisions', decisionId);
+        if (!d)
+            throw new common_1.NotFoundException({ errors: [{ code: 'decision', message: 'Decision not found' }] });
+        if (d.status !== 'pending')
+            throw new common_1.BadRequestException({ errors: [{ code: 'status', message: `Already ${d.status}` }] });
+        const e = d.effects;
+        const ledgerIds = [...(d.artefacts?.wallet_ledger_ids ?? [])];
+        const moves = [
+            ['restaurant', e.restaurant_wallet, d.restaurant_id ?? null],
+            ['deliveryman', e.deliveryman_wallet, d.delivery_man_id ?? null],
+        ];
+        for (const [actorType, w, actorId] of moves) {
+            if (w.direction === 'none' || w.amount <= 0)
+                continue;
+            const id = await this.writeLedger({
+                actor_type: actorType,
+                actor_id: actorId,
+                order_id: d.order_id,
+                direction: w.direction,
+                amount: w.amount,
+                note: `${w.note} (admin-confirmed)`,
+                scenario: d.scenario,
+            });
+            ledgerIds.push(id);
+            await this.moveActorWallet(actorType, actorId, w.direction, w.amount);
+        }
+        await this.mongo.updateOne('refund_decisions', { mysql_id: Number(decisionId) }, {
+            status: 'applied',
+            admin_remarks: adminRemarks,
+            reviewed_at: new Date(),
+            artefacts: { wallet_ledger_ids: ledgerIds },
+        });
+        return { ok: true, decision_id: decisionId, status: 'applied' };
+    }
+    async rejectPending(decisionId, adminRemarks) {
+        if (!adminRemarks || !adminRemarks.trim()) {
+            throw new common_1.BadRequestException({ errors: [{ code: 'remarks', message: 'Admin remarks are required.' }] });
+        }
+        const d = await this.mongo.findByMysqlId('refund_decisions', decisionId);
+        if (!d)
+            throw new common_1.NotFoundException({ errors: [{ code: 'decision', message: 'Decision not found' }] });
+        if (d.status !== 'pending')
+            throw new common_1.BadRequestException({ errors: [{ code: 'status', message: `Already ${d.status}` }] });
+        await this.mongo.updateOne('refund_decisions', { mysql_id: Number(decisionId) }, {
+            status: 'rejected', admin_remarks: adminRemarks, reviewed_at: new Date(),
+        });
+        return { ok: true, decision_id: decisionId, status: 'rejected' };
+    }
+    async listPending(limit = 50, offset = 0) {
+        const filter = { status: 'pending' };
+        const [rows, total] = await Promise.all([
+            this.mongo.findMany('refund_decisions', filter, { sort: { mysql_id: -1 }, limit, skip: offset }),
+            this.mongo.count('refund_decisions', filter),
+        ]);
+        const items = await Promise.all(rows.map(async (r) => {
+            const o = await this.mongo.findByMysqlId('orders', Number(r.order_id));
+            const penalty = r.effects.restaurant_wallet.direction === 'debit'
+                ? { target: 'restaurant', amount: r.effects.restaurant_wallet.amount }
+                : r.effects.deliveryman_wallet.direction === 'debit'
+                    ? { target: 'deliveryman', amount: r.effects.deliveryman_wallet.amount }
+                    : { target: null, amount: 0 };
+            return {
+                id: Number(r.mysql_id),
+                order_id: r.order_id,
+                scenario: r.scenario,
+                scenario_label: r.scenario_label,
+                cancelled_by: r.cancelled_by,
+                initiated_by: r.initiated_by,
+                reason: r.reason,
+                order_amount: Number(o?.order_amount ?? 0),
+                penalty,
+                effects: r.effects,
+                created_at: r.created_at,
+            };
+        }));
+        return { total, limit, offset, items };
+    }
     async historyFor(orderId) {
         const rows = await this.mongo.findMany('refund_decisions', { order_id: orderId }, {
             sort: { mysql_id: -1 }, limit: 20,

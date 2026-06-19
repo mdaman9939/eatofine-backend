@@ -399,6 +399,20 @@ export function listScenarios(): Array<Pick<ScenarioDefinition, 'key' | 'cancell
   return Object.values(SCENARIOS).map((s) => ({ key: s.key, cancelled_by: s.cancelled_by, label: s.label }));
 }
 
+/**
+ * Pick the restaurant-rejection scenario from the order's stage at reject time.
+ * Used by the auto-trigger when a restaurant cancels from the vendor app:
+ *   - still pending (not accepted yet) → no penalty
+ *   - accepted, no rider yet           → admin charge + GST penalty
+ *   - accepted, rider already assigned → admin charge + delivery + GST penalty
+ */
+export function scenarioForRestaurantReject(preStatus: string, hasDeliveryMan: boolean): ScenarioKey {
+  const s = String(preStatus || '').toLowerCase();
+  const notAccepted = s === 'pending' || s === 'failed' || s === '';
+  if (notAccepted) return 'RESTAURANT_REJECT_BEFORE_ACCEPT';
+  return hasDeliveryMan ? 'RESTAURANT_REJECT_AFTER_ACCEPT_WITH_DM' : 'RESTAURANT_REJECT_AFTER_ACCEPT_NO_DM';
+}
+
 export function getScenario(key: ScenarioKey): ScenarioDefinition | null {
   return SCENARIOS[key] ?? null;
 }

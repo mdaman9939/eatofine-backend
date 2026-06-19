@@ -31,6 +31,28 @@ export class RefundController {
     return this.svc.ledger(toInt(limit, 100), toInt(offset, 0), actorType);
   }
 
+  // ── Pending penalty reviews (auto-triggered partner penalties) ──────────
+  @Get('pending')
+  pending(@Query('limit') limit?: string, @Query('offset') offset?: string) {
+    return this.svc.listPending(toInt(limit, 50), toInt(offset, 0));
+  }
+
+  @Post('pending/:decisionId/confirm')
+  confirmPending(
+    @Param('decisionId', ParseIntPipe) decisionId: number,
+    @Body() body: { remarks: string },
+  ) {
+    return this.svc.confirmPending(decisionId, body?.remarks);
+  }
+
+  @Post('pending/:decisionId/reject')
+  rejectPending(
+    @Param('decisionId', ParseIntPipe) decisionId: number,
+    @Body() body: { remarks: string },
+  ) {
+    return this.svc.rejectPending(decisionId, body?.remarks);
+  }
+
   @Get(':orderId/applicable')
   applicable(@Param('orderId', ParseIntPipe) orderId: number) {
     return this.svc.applicable(orderId);

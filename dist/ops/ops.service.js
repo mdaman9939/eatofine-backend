@@ -15,6 +15,8 @@ const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
 const settlement_service_1 = require("../settlement/settlement.service");
 const order_lifecycle_service_1 = require("../lifecycle/order-lifecycle.service");
+const refund_service_1 = require("../refund/refund.service");
+const refund_policy_1 = require("../refund/refund-policy");
 const storage_url_1 = require("../common/storage-url");
 const VENDOR_STATUSES = ['accepted', 'confirmed', 'processing', 'handover', 'ready_for_pickup', 'served', 'completed', 'canceled'];
 const DM_STATUSES = ['confirmed', 'processing', 'handover', 'ready_for_pickup', 'picked_up', 'out_for_delivery', 'delivered', 'completed', 'canceled'];
@@ -23,11 +25,13 @@ let OpsService = class OpsService {
     mongo;
     settlement;
     lifecycle;
-    constructor(prisma, mongo, settlement, lifecycle) {
+    refund;
+    constructor(prisma, mongo, settlement, lifecycle, refund) {
         this.prisma = prisma;
         this.mongo = mongo;
         this.settlement = settlement;
         this.lifecycle = lifecycle;
+        this.refund = refund;
     }
     useMongo() {
         const v = (process.env.USE_MONGO_OPS ?? '1').toLowerCase();
@@ -231,7 +235,18 @@ let OpsService = class OpsService {
                     : reason === 'restaurant_closed' ? 'restaurant_closed'
                         : reason === 'restaurant_unavailable' ? 'restaurant_unavailable'
                             : 'restaurant_cancelled';
+                const preStatus = String(o.order_status ?? 'pending');
+                const hadDeliveryMan = o.mysql_delivery_man_id != null;
                 await this.lifecycle.cancelOrder(Number(o.mysql_id), r, 'restaurant');
+                let scenarioKey = (0, refund_policy_1.scenarioForRestaurantReject)(preStatus, hadDeliveryMan);
+                const override = await this.mongo.findOne('order_cancel_reasons', {
+                    user_type: 'restaurant',
+                    scenario_key: { $nin: [null, ''] },
+                    $or: [{ reason }, { reason: r }],
+                }).catch(() => null);
+                if (override?.scenario_key)
+                    scenarioKey = override.scenario_key;
+                await this.refund.proposePartnerPenalty(Number(o.mysql_id), scenarioKey, 'restaurant', r).catch(() => undefined);
                 return { message: 'order_cancelled', order_status: 'canceled' };
             }
             const fromStatus = o.order_status;
@@ -476,6 +491,7 @@ exports.OpsService = OpsService = __decorate([
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
         mongo_data_service_1.MongoDataService,
         settlement_service_1.SettlementService,
-        order_lifecycle_service_1.OrderLifecycleService])
+        order_lifecycle_service_1.OrderLifecycleService,
+        refund_service_1.RefundService])
 ], OpsService);
 //# sourceMappingURL=ops.service.js.map

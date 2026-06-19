@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SCENARIOS = void 0;
 exports.listScenarios = listScenarios;
+exports.scenarioForRestaurantReject = scenarioForRestaurantReject;
 exports.getScenario = getScenario;
 exports.applicableScenarios = applicableScenarios;
 const r2 = (n) => Math.round(n * 100) / 100;
@@ -280,6 +281,13 @@ exports.SCENARIOS = {
 };
 function listScenarios() {
     return Object.values(exports.SCENARIOS).map((s) => ({ key: s.key, cancelled_by: s.cancelled_by, label: s.label }));
+}
+function scenarioForRestaurantReject(preStatus, hasDeliveryMan) {
+    const s = String(preStatus || '').toLowerCase();
+    const notAccepted = s === 'pending' || s === 'failed' || s === '';
+    if (notAccepted)
+        return 'RESTAURANT_REJECT_BEFORE_ACCEPT';
+    return hasDeliveryMan ? 'RESTAURANT_REJECT_AFTER_ACCEPT_WITH_DM' : 'RESTAURANT_REJECT_AFTER_ACCEPT_NO_DM';
 }
 function getScenario(key) {
     return exports.SCENARIOS[key] ?? null;

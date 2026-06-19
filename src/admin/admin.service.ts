@@ -4827,7 +4827,7 @@ declare module './admin.service' {
     updateVehicleStatus(id: number, status: boolean): Promise<unknown>;
     deleteVehicle(id: number): Promise<unknown>;
     listOrderCancelReasons(): Promise<unknown>;
-    createOrderCancelReason(body: { reason: string; user_type: string }): Promise<unknown>;
+    createOrderCancelReason(body: { reason: string; user_type: string; scenario_key?: string }): Promise<unknown>;
     updateOrderCancelReasonStatus(id: number, status: boolean): Promise<unknown>;
     deleteOrderCancelReason(id: number): Promise<unknown>;
     listRefundReasons(): Promise<unknown>;
@@ -6894,6 +6894,7 @@ AdminService.prototype.createOrderCancelReason = async function (this: AdminServ
       mysql_id: mysqlId,
       reason: body.reason,
       user_type: body.user_type,
+      scenario_key: body.scenario_key ?? null,
       status: true,
       created_at: now,
       updated_at: now,

@@ -387,9 +387,12 @@ export class UserDeliveryChargesService {
         notes: 'No active slab matches the given distance.',
       };
     }
-    const extraKm = Math.max(0, input.distance_km - slab.min_km);
-    const extraCharge = +(extraKm * slab.extra_per_km).toFixed(2);
-    const baseTotal = slab.base_charge + extraCharge;
+    // Long-trip reward: a FLAT bonus added on top of the slab's base charge for
+    // any trip in this (longer-distance) slab — NOT a per-km multiplier. The
+    // whole delivery fee (incl. this reward) settles to the delivery partner, so
+    // a bigger reward on the longer slabs means a better payout for long trips.
+    const longTripReward = +(Number(slab.extra_per_km) || 0).toFixed(2);
+    const baseTotal = slab.base_charge + longTripReward;
 
     const when = input.when ? new Date(input.when) : new Date();
     const dow = when.getDay();
@@ -437,7 +440,7 @@ export class UserDeliveryChargesService {
     return {
       distance_km: input.distance_km, order_value: input.order_value,
       matched_slab: { id: slab.id, min_km: slab.min_km, max_km: slab.max_km, base_charge: slab.base_charge, extra_per_km: slab.extra_per_km, gst_rate: slab.gst_rate },
-      base_charge: slab.base_charge, extra_charge: extraCharge,
+      base_charge: slab.base_charge, extra_charge: longTripReward,
       base_after_surge: baseAfterSurge,
       surge_multiplier: surgeMul,
       surcharges: applicable,

@@ -64,10 +64,18 @@ let EnhancementsService = class EnhancementsService {
             status: !!r.status,
         }));
     }
+    extraPctToAmount(pct, maxOrderValue) {
+        const p = Number(pct) || 0;
+        const max = Number(maxOrderValue) || 0;
+        return +((p / 100) * max).toFixed(2);
+    }
     async createSlab(body) {
         if (typeof body.min_order_value !== 'number' || typeof body.max_order_value !== 'number') {
             throw new common_1.BadRequestException({ errors: [{ code: 'body', message: 'min/max_order_value required' }] });
         }
+        const extraCharge = body.extra_charge_pct !== undefined && body.extra_charge_pct !== null
+            ? this.extraPctToAmount(body.extra_charge_pct, body.max_order_value)
+            : (body.extra_charge ?? 0);
         if (this.useMongo()) {
             const nextId = await this.mongo.nextMysqlId('business_plan_slabs');
             const now = new Date();
@@ -77,7 +85,7 @@ let EnhancementsService = class EnhancementsService {
                 min_order_value: body.min_order_value,
                 max_order_value: body.max_order_value,
                 fixed_charge: body.fixed_charge,
-                extra_charge: body.extra_charge ?? 0,
+                extra_charge: extraCharge,
                 gst_rate: body.gst_rate ?? 18,
                 gst_on_extra: body.gst_on_extra ? 1 : 0,
                 status: 1,
@@ -88,7 +96,7 @@ let EnhancementsService = class EnhancementsService {
         }
         await this.prisma.$executeRawUnsafe(`INSERT INTO business_plan_slabs
        (vendor_id, min_order_value, max_order_value, fixed_charge, extra_charge, gst_rate, gst_on_extra, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())`, body.vendor_id ?? null, body.min_order_value, body.max_order_value, body.fixed_charge, body.extra_charge ?? 0, body.gst_rate ?? 18, body.gst_on_extra ? 1 : 0);
+       VALUES (?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())`, body.vendor_id ?? null, body.min_order_value, body.max_order_value, body.fixed_charge, extraCharge, body.gst_rate ?? 18, body.gst_on_extra ? 1 : 0);
         return { ok: true };
     }
     async updateSlab(id, body) {
@@ -99,8 +107,17 @@ let EnhancementsService = class EnhancementsService {
             set.max_order_value = Number(body.max_order_value);
         if (body.fixed_charge !== undefined)
             set.fixed_charge = Number(body.fixed_charge);
-        if (body.extra_charge !== undefined)
+        if (body.extra_charge_pct !== undefined && body.extra_charge_pct !== null) {
+            let max = body.max_order_value;
+            if (max === undefined) {
+                const existing = await this.mongo.findByMysqlId('business_plan_slabs', Number(id));
+                max = Number(existing?.max_order_value ?? 0);
+            }
+            set.extra_charge = this.extraPctToAmount(body.extra_charge_pct, max);
+        }
+        else if (body.extra_charge !== undefined) {
             set.extra_charge = Number(body.extra_charge);
+        }
         if (body.gst_rate !== undefined)
             set.gst_rate = Number(body.gst_rate);
         if (body.gst_on_extra !== undefined)

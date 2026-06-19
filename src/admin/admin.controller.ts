@@ -547,7 +547,7 @@ export class AdminController {
   }
   @Patch('promotional-banners/:id')
   updatePromotionalBanner(@Param('id', ParseIntPipe) id: number, @Body() body: Record<string, unknown>) {
-    return this.admin.updateRecord('promotional_banners', id, body, ['title', 'subtitle', 'type', 'target', 'cta_text', 'zone_id']);
+    return this.admin.updateRecord('promotional_banners', id, body, ['title', 'subtitle', 'type', 'target', 'cta_text', 'zone_id', 'image']);
   }
 
   @Delete('promotional-banners/:id')
@@ -995,7 +995,7 @@ export class AdminController {
   }
   @Patch('advertisements/:id')
   updateAdvertisement(@Param('id', ParseIntPipe) id: number, @Body() body: Record<string, unknown>) {
-    return this.admin.updateRecord('advertisements', id, body, ['title', 'description', 'add_type', 'priority', 'start_date', 'end_date', 'amount']);
+    return this.admin.updateRecord('advertisements', id, body, ['title', 'description', 'add_type', 'priority', 'start_date', 'end_date', 'amount', 'image', 'cover_image']);
   }
   @Patch('advertisements/:id/status')
   updateAdvertisementStatus(
@@ -1343,12 +1343,12 @@ export class AdminController {
     return this.admin.listOrderCancelReasons();
   }
   @Post('order-cancel-reasons')
-  createOrderCancelReason(@Body() body: { reason: string; user_type: string }) {
+  createOrderCancelReason(@Body() body: { reason: string; user_type: string; scenario_key?: string }) {
     return this.admin.createOrderCancelReason(body);
   }
   @Patch('order-cancel-reasons/:id')
   updateOrderCancelReason(@Param('id', ParseIntPipe) id: number, @Body() body: Record<string, unknown>) {
-    return this.admin.updateRecord('order_cancel_reasons', id, body, ['reason', 'user_type']);
+    return this.admin.updateRecord('order_cancel_reasons', id, body, ['reason', 'user_type', 'scenario_key']);
   }
   @Patch('order-cancel-reasons/:id/status')
   updateOrderCancelReasonStatus(@Param('id', ParseIntPipe) id: number, @Body() body: { status: boolean }) {

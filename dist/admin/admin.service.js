@@ -6229,6 +6229,7 @@ AdminService.prototype.createOrderCancelReason = async function (body) {
             mysql_id: mysqlId,
             reason: body.reason,
             user_type: body.user_type,
+            scenario_key: body.scenario_key ?? null,
             status: true,
             created_at: now,
             updated_at: now,

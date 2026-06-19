@@ -326,7 +326,7 @@ let AdminController = class AdminController {
         return this.admin.togglePromotionalBanner(id, body.status);
     }
     updatePromotionalBanner(id, body) {
-        return this.admin.updateRecord('promotional_banners', id, body, ['title', 'subtitle', 'type', 'target', 'cta_text', 'zone_id']);
+        return this.admin.updateRecord('promotional_banners', id, body, ['title', 'subtitle', 'type', 'target', 'cta_text', 'zone_id', 'image']);
     }
     deletePromotionalBanner(id) {
         return this.admin.deletePromotionalBanner(id);
@@ -576,7 +576,7 @@ let AdminController = class AdminController {
         return this.admin.deleteAdvertisement(id);
     }
     updateAdvertisement(id, body) {
-        return this.admin.updateRecord('advertisements', id, body, ['title', 'description', 'add_type', 'priority', 'start_date', 'end_date', 'amount']);
+        return this.admin.updateRecord('advertisements', id, body, ['title', 'description', 'add_type', 'priority', 'start_date', 'end_date', 'amount', 'image', 'cover_image']);
     }
     updateAdvertisementStatus(id, body) {
         return this.admin.updateAdvertisementStatus(id, body.status);
@@ -806,7 +806,7 @@ let AdminController = class AdminController {
         return this.admin.createOrderCancelReason(body);
     }
     updateOrderCancelReason(id, body) {
-        return this.admin.updateRecord('order_cancel_reasons', id, body, ['reason', 'user_type']);
+        return this.admin.updateRecord('order_cancel_reasons', id, body, ['reason', 'user_type', 'scenario_key']);
     }
     updateOrderCancelReasonStatus(id, body) {
         return this.admin.updateOrderCancelReasonStatus(id, body.status);

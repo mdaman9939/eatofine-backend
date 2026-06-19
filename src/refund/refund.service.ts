@@ -34,6 +34,23 @@ interface OrderTxnDoc {
   admin_commission?: number;
 }
 
+/** A stored refund_decisions row in the pending-review workflow. */
+interface PendingDecisionDoc {
+  mysql_id: number;
+  order_id: number;
+  scenario: ScenarioKey;
+  scenario_label: string;
+  cancelled_by: string;
+  status: 'pending' | 'applied' | 'rejected';
+  initiated_by?: string;
+  reason?: string | null;
+  restaurant_id?: number | null;
+  delivery_man_id?: number | null;
+  effects: RefundEffects;
+  artefacts?: { wallet_ledger_ids?: number[] };
+  created_at?: Date;
+}
+
 /**
  * The applied side-effects journal for an admin's refund/cancellation
  * decision. Stored back to mongo as a `refund_decisions` document so we
@@ -221,6 +238,142 @@ export class RefundService {
     await this.mongo.insertOne('refund_decisions', decision as unknown as Record<string, unknown>);
 
     return { ok: true, decision_id: decisionId, artefacts, effects, scenario };
+  }
+
+  // ── Pending-review workflow (auto-triggered partner penalties) ───────────
+  /**
+   * Called automatically when a restaurant (or any partner) self-cancels. The
+   * CUSTOMER refund is already handled by the lifecycle cancel (full refund to
+   * the user). Here we only deal with the PARTNER side: any wallet *credit*
+   * (compensation, e.g. the rider's delivery fee) and the partner *penalty*
+   * (wallet debit). The whole wallet bundle is parked as a `pending`
+   * `refund_decisions` row so an admin reviews + confirms before any partner
+   * money actually moves. No balances change until confirm().
+   *
+   * Returns status: 'pending' (needs review), 'no_penalty' (nothing to do), or
+   * 'order_not_found'.
+   */
+  async proposePartnerPenalty(orderId: number, scenarioKey: ScenarioKey, initiatedBy: string, reasonText?: string) {
+    const scenario = getScenario(scenarioKey);
+    if (!scenario) return { ok: false as const, reason: 'unknown_scenario' };
+    const order = await this.mongo.findByMysqlId<OrderDoc>('orders', orderId);
+    if (!order) return { ok: false as const, reason: 'order_not_found' };
+
+    const money = await this.moneyOf(order);
+    const effects = scenario.decide(money);
+
+    // Is there any partner money to move at all? (credit = compensation,
+    // debit = penalty). Before-accept rejections have neither → nothing to do.
+    const restMoves = effects.restaurant_wallet.direction !== 'none' && effects.restaurant_wallet.amount > 0;
+    const dmMoves = effects.deliveryman_wallet.direction !== 'none' && effects.deliveryman_wallet.amount > 0;
+    if (!restMoves && !dmMoves) {
+      return { ok: true as const, status: 'no_penalty' as const };
+    }
+
+    const decisionId = await this.mongo.nextMysqlId('refund_decisions');
+    await this.mongo.insertOne('refund_decisions', {
+      mysql_id: decisionId,
+      order_id: orderId,
+      scenario: scenario.key,
+      scenario_label: scenario.label,
+      cancelled_by: scenario.cancelled_by,
+      status: 'pending',
+      review_kind: 'partner_penalty',
+      initiated_by: initiatedBy,
+      reason: reasonText ?? null,
+      restaurant_id: order.mysql_restaurant_id ?? null,
+      delivery_man_id: order.mysql_delivery_man_id ?? null,
+      effects,
+      artefacts: { wallet_ledger_ids: [] as number[] },
+      created_at: new Date(),
+    });
+    return { ok: true as const, status: 'pending' as const, decision_id: decisionId };
+  }
+
+  /** Admin confirms a pending penalty review → actually move the partner
+   *  wallets (credit compensation + debit penalty) atomically + ledger. */
+  async confirmPending(decisionId: number, adminRemarks: string) {
+    if (!adminRemarks || !adminRemarks.trim()) {
+      throw new BadRequestException({ errors: [{ code: 'remarks', message: 'Admin remarks are required.' }] });
+    }
+    const d = await this.mongo.findByMysqlId<PendingDecisionDoc>('refund_decisions', decisionId);
+    if (!d) throw new NotFoundException({ errors: [{ code: 'decision', message: 'Decision not found' }] });
+    if (d.status !== 'pending') throw new BadRequestException({ errors: [{ code: 'status', message: `Already ${d.status}` }] });
+
+    const e = d.effects;
+    const ledgerIds: number[] = [...(d.artefacts?.wallet_ledger_ids ?? [])];
+
+    const moves: Array<['restaurant' | 'deliveryman', RefundEffects['restaurant_wallet'], number | null]> = [
+      ['restaurant', e.restaurant_wallet, d.restaurant_id ?? null],
+      ['deliveryman', e.deliveryman_wallet, d.delivery_man_id ?? null],
+    ];
+    for (const [actorType, w, actorId] of moves) {
+      if (w.direction === 'none' || w.amount <= 0) continue;
+      const id = await this.writeLedger({
+        actor_type: actorType,
+        actor_id: actorId,
+        order_id: d.order_id,
+        direction: w.direction,
+        amount: w.amount,
+        note: `${w.note} (admin-confirmed)`,
+        scenario: d.scenario,
+      });
+      ledgerIds.push(id);
+      await this.moveActorWallet(actorType, actorId, w.direction, w.amount);
+    }
+
+    await this.mongo.updateOne('refund_decisions', { mysql_id: Number(decisionId) }, {
+      status: 'applied',
+      admin_remarks: adminRemarks,
+      reviewed_at: new Date(),
+      artefacts: { wallet_ledger_ids: ledgerIds },
+    });
+    return { ok: true, decision_id: decisionId, status: 'applied' };
+  }
+
+  /** Admin waives a pending penalty → no partner money moves. */
+  async rejectPending(decisionId: number, adminRemarks: string) {
+    if (!adminRemarks || !adminRemarks.trim()) {
+      throw new BadRequestException({ errors: [{ code: 'remarks', message: 'Admin remarks are required.' }] });
+    }
+    const d = await this.mongo.findByMysqlId<PendingDecisionDoc>('refund_decisions', decisionId);
+    if (!d) throw new NotFoundException({ errors: [{ code: 'decision', message: 'Decision not found' }] });
+    if (d.status !== 'pending') throw new BadRequestException({ errors: [{ code: 'status', message: `Already ${d.status}` }] });
+    await this.mongo.updateOne('refund_decisions', { mysql_id: Number(decisionId) }, {
+      status: 'rejected', admin_remarks: adminRemarks, reviewed_at: new Date(),
+    });
+    return { ok: true, decision_id: decisionId, status: 'rejected' };
+  }
+
+  /** Pending penalty reviews queue — drives the admin "Refund Reviews" page. */
+  async listPending(limit = 50, offset = 0) {
+    const filter = { status: 'pending' };
+    const [rows, total] = await Promise.all([
+      this.mongo.findMany<PendingDecisionDoc>('refund_decisions', filter, { sort: { mysql_id: -1 }, limit, skip: offset }),
+      this.mongo.count('refund_decisions', filter),
+    ]);
+    const items = await Promise.all(rows.map(async (r) => {
+      const o = await this.mongo.findByMysqlId<OrderDoc & { order_amount?: number }>('orders', Number(r.order_id));
+      const penalty = r.effects.restaurant_wallet.direction === 'debit'
+        ? { target: 'restaurant', amount: r.effects.restaurant_wallet.amount }
+        : r.effects.deliveryman_wallet.direction === 'debit'
+          ? { target: 'deliveryman', amount: r.effects.deliveryman_wallet.amount }
+          : { target: null, amount: 0 };
+      return {
+        id: Number(r.mysql_id),
+        order_id: r.order_id,
+        scenario: r.scenario,
+        scenario_label: r.scenario_label,
+        cancelled_by: r.cancelled_by,
+        initiated_by: r.initiated_by,
+        reason: r.reason,
+        order_amount: Number(o?.order_amount ?? 0),
+        penalty,
+        effects: r.effects,
+        created_at: r.created_at,
+      };
+    }));
+    return { total, limit, offset, items };
   }
 
   /** Recent audit rows for an order — admin can see the full history of
