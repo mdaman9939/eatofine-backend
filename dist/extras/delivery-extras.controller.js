@@ -53,15 +53,18 @@ const path = __importStar(require("path"));
 const auth_guard_1 = require("../auth/auth.guard");
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
+const dm_wallet_service_1 = require("../wallet/dm-wallet.service");
 const storage_url_1 = require("../common/storage-url");
 const messaging_helper_1 = require("./messaging.helper");
 const image_compress_1 = require("../common/image-compress");
 let DeliveryExtrasController = class DeliveryExtrasController {
     prisma;
     mongo;
-    constructor(prisma, mongo) {
+    dmWallet;
+    constructor(prisma, mongo, dmWallet) {
         this.prisma = prisma;
         this.mongo = mongo;
+        this.dmWallet = dmWallet;
     }
     useMongo() {
         const v = (process.env.USE_MONGO_EXTRAS ?? '1').toLowerCase();
@@ -231,6 +234,8 @@ let DeliveryExtrasController = class DeliveryExtrasController {
                 collected_cash: Number(wallet?.collected_cash ?? 0),
                 total_withdrawn: Number(wallet?.total_withdrawn ?? 0),
                 pending_withdraw: Number(wallet?.pending_withdraw ?? 0),
+                available_to_withdraw: Math.max(0, Math.round((Number(wallet?.balance ?? 0) - Number(wallet?.pending_withdraw ?? 0) - Number(wallet?.collected_cash ?? 0)) * 100) / 100),
+                net_position: Math.round((Number(wallet?.balance ?? 0) - Number(wallet?.collected_cash ?? 0)) * 100) / 100,
             };
         }
         const d = await this.prisma.delivery_men.findUnique({ where: { id: req.actor.id } });
@@ -516,6 +521,45 @@ let DeliveryExtrasController = class DeliveryExtrasController {
         return { today, this_week: week, this_month: month, all_time: all };
     }
     disbursementReport() { return { data: [], total: 0 }; }
+    async payoutSummary(req) {
+        if (!this.useMongo())
+            return { balance: 0, available_to_withdraw: 0, collected_cash: 0, net_position: 0 };
+        return this.dmWallet.getPayoutSummary(Number(req.actor.id));
+    }
+    async walletTransactions(req, limit) {
+        if (!this.useMongo())
+            return { items: [] };
+        const items = await this.dmWallet.listTransactions(Number(req.actor.id), Math.min(200, Number(limit) || 50));
+        return { items };
+    }
+    async requestWithdraw(req, body = {}) {
+        const dmId = Number(req.actor.id);
+        const amount = Math.round((Number(body?.amount ?? 0) || 0) * 100) / 100;
+        if (!(amount > 0))
+            return { errors: [{ code: 'amount', message: 'amount must be greater than 0' }] };
+        if (!this.useMongo())
+            return { message: 'Withdrawal requested' };
+        const summary = await this.dmWallet.getPayoutSummary(dmId);
+        if (amount > summary.available_to_withdraw) {
+            return { errors: [{ code: 'amount', message: `Amount exceeds available payout (₹${summary.available_to_withdraw.toFixed(2)})${summary.collected_cash > 0 ? ` — you are holding ₹${summary.collected_cash.toFixed(2)} COD cash; deposit it first.` : ''}` }] };
+        }
+        const id = await this.mongo.nextMysqlId('withdraw_requests');
+        const now = new Date();
+        await this.mongo.insertOne('withdraw_requests', {
+            mysql_id: id,
+            delivery_man_id: dmId,
+            vendor_id: null,
+            amount,
+            approved: false,
+            processed: false,
+            type: 'deliveryman',
+            transaction_note: body?.note ?? null,
+            created_at: now,
+            updated_at: now,
+        });
+        await this.mongo.increment('delivery_man_wallets', { mysql_delivery_man_id: dmId }, { pending_withdraw: amount }, { mysql_delivery_man_id: dmId, delivery_man_id: dmId, created_at: now });
+        return { message: 'Withdrawal requested', id };
+    }
     walletPayments() { return { data: [], total_size: 0 }; }
     collectedCash() { return { message: 'recorded' }; }
     walletAdjustment() { return { message: 'recorded' }; }
@@ -838,6 +882,31 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], DeliveryExtrasController.prototype, "disbursementReport", null);
 __decorate([
+    (0, common_1.Get)('payout-summary'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], DeliveryExtrasController.prototype, "payoutSummary", null);
+__decorate([
+    (0, common_1.Get)('wallet-transactions'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('limit')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
+], DeliveryExtrasController.prototype, "walletTransactions", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Post)('withdraw-request'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.AnyFilesInterceptor)()),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
+], DeliveryExtrasController.prototype, "requestWithdraw", null);
+__decorate([
     (0, common_1.Get)('wallet-payment-list'),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
@@ -964,6 +1033,7 @@ exports.DeliveryExtrasController = DeliveryExtrasController = __decorate([
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
     (0, auth_guard_1.RequireAuth)('deliveryman'),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
-        mongo_data_service_1.MongoDataService])
+        mongo_data_service_1.MongoDataService,
+        dm_wallet_service_1.DmWalletService])
 ], DeliveryExtrasController);
 //# sourceMappingURL=delivery-extras.controller.js.map

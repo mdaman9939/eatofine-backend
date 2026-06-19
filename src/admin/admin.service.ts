@@ -3480,7 +3480,7 @@ export class AdminService {
     if (!this.useMongo()) return { items: [], total: 0 };
     const rows = await this.mongo.findMany<{
       mysql_id: number; name?: string; type?: string;
-      amount?: number; trigger?: string; status?: boolean | number;
+      amount?: number; trigger?: string; threshold?: number; period?: string; status?: boolean | number;
       claims_30d?: number; created_at?: Date | null;
     }>('dm_bonuses', {}, { sort: { mysql_id: -1 }, limit: 100 });
     return {
@@ -3491,6 +3491,10 @@ export class AdminService {
         type: r.type ?? 'rule',
         amount: Number(r.amount ?? 0),
         trigger: r.trigger ?? '',
+        // Auto-trigger config: award `amount` once the rider hits `threshold`
+        // delivered orders within `period`.
+        threshold: Number(r.threshold ?? 0),
+        period: r.period ?? 'daily',
         status: r.status === true || r.status === 1,
         claims_30d: Number(r.claims_30d ?? 0),
         created_at: r.created_at ?? null,
@@ -3498,18 +3502,21 @@ export class AdminService {
     };
   }
 
-  async createDmBonus(body: { name?: string; type?: string; amount?: number; trigger?: string }) {
+  async createDmBonus(body: { name?: string; type?: string; amount?: number; trigger?: string; threshold?: number; period?: string }) {
     if (!body.name || !body.amount) {
       throw new BadRequestException({ errors: [{ code: 'input', message: 'name and amount are required' }] });
     }
     if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
     const nextId = await this.mongo.nextMysqlId('dm_bonuses');
+    const period = ['daily', 'weekly', 'lifetime'].includes(String(body.period)) ? String(body.period) : 'daily';
     await this.mongo.insertOne('dm_bonuses', {
       mysql_id: nextId,
       name: body.name,
       type: body.type ?? 'rule',
       amount: Number(body.amount),
       trigger: body.trigger ?? '',
+      threshold: Number(body.threshold ?? 0),
+      period,
       status: true,
       claims_30d: 0,
       created_at: new Date(),
@@ -3587,29 +3594,40 @@ export class AdminService {
 
   async updateDmIncentiveStatus(id: number, status: 'approved' | 'rejected', reason?: string) {
     if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
-    const inc = await this.mongo.findByMysqlId<{ mysql_id: number; claim_amount?: number; dm_id?: number }>('dm_incentives', id);
+    const inc = await this.mongo.findByMysqlId<{ mysql_id: number; claim_amount?: number; dm_id?: number; status?: string }>('dm_incentives', id);
     if (!inc) throw new NotFoundException({ errors: [{ code: 'incentive', message: 'Not found' }] });
-    await this.mongo.updateOne('dm_incentives', { mysql_id: id }, {
-      status,
-      reason: status === 'rejected' ? (reason ?? null) : null,
-      decided_at: new Date(),
-      updated_at: new Date(),
-    });
-    // On approval — credit DM's wallet
-    if (status === 'approved' && inc.dm_id && inc.claim_amount) {
-      const wallet = await this.mongo.findOne<{ mysql_id: number; balance?: number }>(
-        'delivery_man_wallets', { delivery_man_id: inc.dm_id },
-      );
-      const newBalance = Number(wallet?.balance ?? 0) + Number(inc.claim_amount);
-      if (wallet) {
-        await this.mongo.updateOne('delivery_man_wallets', { delivery_man_id: inc.dm_id }, {
-          balance: newBalance,
-          total_earning: Number((wallet as { total_earning?: number }).total_earning ?? 0) + Number(inc.claim_amount),
-          updated_at: new Date(),
-        });
+
+    if (status === 'rejected') {
+      await this.mongo.updateOne('dm_incentives', { mysql_id: id }, {
+        status: 'rejected', reason: reason ?? null, decided_at: new Date(), updated_at: new Date(),
+      });
+      return { ok: true, id, status };
+    }
+
+    // Approve: atomically CLAIM the transition (status != approved → approved) so
+    // two concurrent approvals can't both credit. Only the caller that flips it
+    // proceeds to credit the wallet.
+    const claim = await this.mongo.updateOne(
+      'dm_incentives',
+      { mysql_id: id, status: { $ne: 'approved' } },
+      { status: 'approved', reason: null, decided_at: new Date(), updated_at: new Date() },
+    );
+    if (claim.matchedCount > 0 && inc.dm_id && inc.claim_amount) {
+      const dmId = Number(inc.dm_id);
+      const amt = Math.round((Number(inc.claim_amount) || 0) * 100) / 100;
+      // Same keying as settlement (mysql_delivery_man_id, seeds both ids) so the
+      // credit always lands on the canonical wallet doc — and upserts if the DM
+      // has no wallet yet.
+      if (amt > 0) {
+        await this.mongo.increment(
+          'delivery_man_wallets',
+          { mysql_delivery_man_id: dmId },
+          { balance: amt, total_earning: amt },
+          { mysql_delivery_man_id: dmId, delivery_man_id: dmId, created_at: new Date() },
+        );
       }
     }
-    return { ok: true, id, status };
+    return { ok: true, id, status: 'approved' };
   }
 
   // ── Subscription orders ──────────────────────────────────────────────
@@ -4768,6 +4786,8 @@ declare module './admin.service' {
     updateDisbursementStatus(id: number, status: string): Promise<unknown>;
     listWithdrawRequests(opts: ListOpts & { type?: string; approved?: boolean }): Promise<unknown>;
     approveWithdrawRequest(id: number, approve: boolean): Promise<unknown>;
+    listDmPayouts(): Promise<unknown>;
+    recordDmCashDeposit(id: number, amount: number): Promise<unknown>;
     listWithdrawalMethods(): Promise<unknown>;
     listOfflinePaymentMethods(): Promise<unknown>;
     createOfflinePaymentMethod(body: { method_name?: string; method_fields?: string; method_informations?: string }): Promise<unknown>;
@@ -5826,8 +5846,59 @@ AdminService.prototype.listWithdrawRequests = async function (this: AdminService
 
 AdminService.prototype.approveWithdrawRequest = async function (this: AdminService, id, approve) {
   if (this['useMongo']()) {
-    const w = await this['mongo'].findByMysqlId<{ mysql_id: number }>('withdraw_requests', Number(id));
+    const w = await this['mongo'].findByMysqlId<{ mysql_id: number; delivery_man_id?: number | null; amount?: number; processed?: boolean }>('withdraw_requests', Number(id));
     if (!w) throw new NotFoundException({ errors: [{ code: 'withdraw_request', message: 'not found' }] });
+    const dmId = w.delivery_man_id != null ? Number(w.delivery_man_id) : 0;
+    const amt = Math.round((Number(w.amount ?? 0) || 0) * 100) / 100;
+
+    // Approving a rider payout debits the wallet (and clears the reservation).
+    // The `processed` flag is flipped via an atomic CLAIM so two concurrent
+    // approvals can't double-debit — only the claimer moves money.
+    if (approve && dmId > 0 && amt > 0) {
+      // Re-verify funds at approval time — the balance may have dropped (penalty)
+      // since the request, and the rider must not be paid COD cash they hold.
+      const wallet = await this['mongo'].findOne<{ balance?: number; collected_cash?: number }>(
+        'delivery_man_wallets',
+        { $or: [{ mysql_delivery_man_id: dmId }, { delivery_man_id: dmId }] },
+      );
+      const available = Math.round(((Number(wallet?.balance ?? 0) || 0) - (Number(wallet?.collected_cash ?? 0) || 0)) * 100) / 100;
+      if (available < amt) {
+        throw new BadRequestException({ errors: [{ code: 'balance', message: `Insufficient available payout (₹${available.toFixed(2)}) — rider may be holding COD cash that must be deposited first.` }] });
+      }
+      const claim = await this['mongo'].updateOne(
+        'withdraw_requests',
+        { mysql_id: Number(id), processed: { $ne: true } },
+        { approved: true, processed: true, decided_at: new Date(), updated_at: new Date() },
+      );
+      if (claim.matchedCount > 0) {
+        await this['mongo'].increment(
+          'delivery_man_wallets',
+          { mysql_delivery_man_id: dmId },
+          { balance: -amt, total_withdrawn: amt, pending_withdraw: -amt },
+          { mysql_delivery_man_id: dmId, delivery_man_id: dmId, created_at: new Date() },
+        );
+      }
+      return { ok: true, id, approved: true };
+    }
+    // Revoking a previously-approved payout returns the money to the balance and
+    // re-reserves it as pending — also claimed atomically.
+    if (!approve && dmId > 0 && amt > 0) {
+      const claim = await this['mongo'].updateOne(
+        'withdraw_requests',
+        { mysql_id: Number(id), processed: true },
+        { approved: false, processed: false, decided_at: new Date(), updated_at: new Date() },
+      );
+      if (claim.matchedCount > 0) {
+        await this['mongo'].increment(
+          'delivery_man_wallets',
+          { mysql_delivery_man_id: dmId },
+          { balance: amt, total_withdrawn: -amt, pending_withdraw: amt },
+          { mysql_delivery_man_id: dmId, delivery_man_id: dmId, created_at: new Date() },
+        );
+      }
+      return { ok: true, id, approved: false };
+    }
+    // No wallet effect (vendor request) — just record status.
     await this['mongo'].updateOne('withdraw_requests', { mysql_id: Number(id) }, { approved: approve, updated_at: new Date() });
     return { ok: true, id, approved: approve };
   }
@@ -5835,6 +5906,69 @@ AdminService.prototype.approveWithdrawRequest = async function (this: AdminServi
   if (!w) throw new NotFoundException({ errors: [{ code: 'withdraw_request', message: 'not found' }] });
   await this['prisma'].withdraw_requests.update({ where: { id: w.id }, data: { approved: approve } });
   return { ok: true, id, approved: approve };
+};
+
+// Per-rider payout reconciliation — the net amount the platform owes each rider
+// (earnings already net of penalties) minus the COD cash they still hold.
+AdminService.prototype.listDmPayouts = async function (this: AdminService) {
+  if (!this['useMongo']()) return { items: [], total: 0 };
+  const r2 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
+  const wallets = await this['mongo'].findMany<Record<string, unknown>>('delivery_man_wallets', {}, { sort: { mysql_id: -1 }, limit: 1000 });
+  const dmIds = Array.from(new Set(wallets
+    .map((w) => Number(w.mysql_delivery_man_id ?? w.delivery_man_id ?? 0))
+    .filter((x) => x > 0)));
+  const dms = dmIds.length
+    ? await this['mongo'].findMany<{ mysql_id: number; f_name?: string; l_name?: string; phone?: string }>('delivery_men', { mysql_id: { $in: dmIds } })
+    : [];
+  const byId = new Map(dms.map((d) => [Number(d.mysql_id), d]));
+  const items = wallets.map((w) => {
+    const dmId = Number(w.mysql_delivery_man_id ?? w.delivery_man_id ?? 0);
+    const d = byId.get(dmId);
+    const balance = r2(Number(w.balance ?? 0));
+    const collected_cash = r2(Number(w.collected_cash ?? 0));
+    const pending_withdraw = r2(Number(w.pending_withdraw ?? 0));
+    return {
+      dm_id: dmId,
+      dm_name: d ? `${d.f_name ?? ''} ${d.l_name ?? ''}`.trim() || `DM #${dmId}` : `DM #${dmId}`,
+      phone: d?.phone ?? null,
+      balance,
+      total_earning: r2(Number(w.total_earning ?? 0)),
+      collected_cash,
+      pending_withdraw,
+      total_withdrawn: r2(Number(w.total_withdrawn ?? 0)),
+      available_to_withdraw: Math.max(0, r2(balance - pending_withdraw - collected_cash)),
+      net_position: r2(balance - collected_cash),
+    };
+  }).sort((a, b) => b.net_position - a.net_position);
+  return { total: items.length, items };
+};
+
+// Admin records that a rider deposited COD cash back to the platform — reduces
+// the rider's collected_cash (never below zero) + logs a wallet transaction.
+AdminService.prototype.recordDmCashDeposit = async function (this: AdminService, id, amount) {
+  if (!this['useMongo']()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+  const dmId = Number(id);
+  const amt = Math.round((Number(amount) || 0) * 100) / 100;
+  if (!dmId || amt <= 0) throw new BadRequestException({ errors: [{ code: 'amount', message: 'amount must be greater than 0' }] });
+  const wallet = await this['mongo'].findOne<{ collected_cash?: number }>('delivery_man_wallets', {
+    $or: [{ mysql_delivery_man_id: dmId }, { delivery_man_id: dmId }],
+  });
+  const current = Math.round((Number(wallet?.collected_cash ?? 0) || 0) * 100) / 100;
+  const dec = Math.min(current, amt);
+  if (dec > 0) {
+    await this['mongo'].increment(
+      'delivery_man_wallets',
+      { mysql_delivery_man_id: dmId },
+      { collected_cash: -dec },
+      { mysql_delivery_man_id: dmId, delivery_man_id: dmId, created_at: new Date() },
+    );
+    const txId = await this['mongo'].nextMysqlId('dm_wallet_transactions');
+    await this['mongo'].insertOne('dm_wallet_transactions', {
+      mysql_id: txId, mysql_delivery_man_id: dmId, delivery_man_id: dmId,
+      credit: 0, debit: 0, type: 'cash_deposit', reference: `deposit#dm:${dmId}`, deposited: dec, created_at: new Date(),
+    });
+  }
+  return { ok: true, deposited: dec, collected_cash: Math.round((current - dec) * 100) / 100 };
 };
 
 AdminService.prototype.listWithdrawalMethods = async function (this: AdminService) {

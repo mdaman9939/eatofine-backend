@@ -26,6 +26,7 @@ import { ZoneModule } from './zone/zone.module';
 import { SettlementModule } from './settlement/settlement.module';
 import { OrderLifecycleModule } from './lifecycle/order-lifecycle.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { DmWalletModule } from './wallet/dm-wallet.module';
 
 @Module({
   imports: [
@@ -70,6 +71,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     ZoneModule,
     SettlementModule,
     OrderLifecycleModule,
+    DmWalletModule,
     NotificationsModule,
   ],
   controllers: [AppController],

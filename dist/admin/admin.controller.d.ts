@@ -1337,6 +1337,8 @@ export declare class AdminController {
             type: string;
             amount: number;
             trigger: string;
+            threshold: number;
+            period: string;
             status: boolean;
             claims_30d: number;
             created_at: Date | null;
@@ -1347,6 +1349,8 @@ export declare class AdminController {
         type?: string;
         amount?: number;
         trigger?: string;
+        threshold?: number;
+        period?: string;
     }): Promise<{
         ok: boolean;
         id: number;
@@ -1357,6 +1361,10 @@ export declare class AdminController {
         ok: boolean;
         id: number;
         status: boolean;
+    }>;
+    updateDmBonus(id: number, body: Record<string, unknown>): Promise<{
+        ok: true;
+        id: number;
     }>;
     deleteDmBonus(id: number): Promise<{
         ok: boolean;
@@ -1382,14 +1390,14 @@ export declare class AdminController {
     approveDmIncentive(id: number): Promise<{
         ok: boolean;
         id: number;
-        status: "approved" | "rejected";
+        status: string;
     }>;
     rejectDmIncentive(id: number, body: {
         reason?: string;
     }): Promise<{
         ok: boolean;
         id: number;
-        status: "approved" | "rejected";
+        status: string;
     }>;
     subscriptionOrders(): Promise<{
         total: number;
@@ -1794,6 +1802,10 @@ export declare class AdminController {
     withdrawRequests(limit?: string, offset?: string, type?: string, approved?: string): Promise<unknown>;
     approveWithdrawRequest(id: number, body: {
         approved: boolean;
+    }): Promise<unknown>;
+    listDmPayouts(): Promise<unknown>;
+    recordDmCashDeposit(id: number, body: {
+        amount?: number;
     }): Promise<unknown>;
     withdrawalMethods(): Promise<unknown>;
     offlinePaymentMethods(): Promise<unknown>;

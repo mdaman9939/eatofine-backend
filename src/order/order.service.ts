@@ -424,6 +424,10 @@ export class OrderService {
         admin_discount_amount: couponAdminDiscount,
         additional_charge: additionalCharge,
         restaurant_discount_amount: couponRestaurantDiscount,
+        // Rider tips — accumulate here; credited to the assigned rider's wallet
+        // by DmWalletService (paid_out is the watermark of what's been credited).
+        dm_tips: 0,
+        dm_tips_paid_out: 0,
         otp,
         pending: now,
         items,

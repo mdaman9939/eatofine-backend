@@ -55,6 +55,7 @@ const auth_guard_1 = require("../auth/auth.guard");
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
 const order_lifecycle_service_1 = require("../lifecycle/order-lifecycle.service");
+const dm_wallet_service_1 = require("../wallet/dm-wallet.service");
 const storage_url_1 = require("../common/storage-url");
 const messaging_helper_1 = require("./messaging.helper");
 const STORAGE_ROOT = (() => {
@@ -78,10 +79,12 @@ let CustomerExtrasController = class CustomerExtrasController {
     prisma;
     mongo;
     lifecycle;
-    constructor(prisma, mongo, lifecycle) {
+    dmWallet;
+    constructor(prisma, mongo, lifecycle, dmWallet) {
         this.prisma = prisma;
         this.mongo = mongo;
         this.lifecycle = lifecycle;
+        this.dmWallet = dmWallet;
     }
     useMongo() {
         const v = (process.env.USE_MONGO_EXTRAS ?? '1').toLowerCase();
@@ -795,6 +798,28 @@ let CustomerExtrasController = class CustomerExtrasController {
         });
         return { message: 'Refund request submitted' };
     }
+    async addTip(req, body = {}) {
+        const b = body ?? {};
+        const orderId = Number(b.order_id ?? 0);
+        const amount = Math.round((Number(b.amount ?? 0) || 0) * 100) / 100;
+        if (!orderId)
+            return { errors: [{ code: 'order_id', message: 'order_id required' }] };
+        if (!(amount > 0))
+            return { errors: [{ code: 'amount', message: 'amount must be greater than 0' }] };
+        if (this.useMongo()) {
+            const order = await this.mongo.findOne('orders', {
+                mysql_id: orderId,
+                mysql_user_id: Number(req.actor.id),
+            });
+            if (!order)
+                return { message: 'order not found' };
+            const newTotal = Math.round(((Number(order.dm_tips ?? 0) || 0) + amount) * 100) / 100;
+            await this.mongo.updateOne('orders', { mysql_id: orderId }, { dm_tips: newTotal, updated_at: new Date() });
+            const credited = await this.dmWallet.reconcileTips(orderId).catch(() => 0);
+            return { message: 'Tip added', tip_total: newTotal, credited_to_rider: credited };
+        }
+        return { message: 'Tip added' };
+    }
     getOrderTax() {
         return { total_tax_amount: 0, tax_amount: 0 };
     }
@@ -1123,6 +1148,16 @@ __decorate([
 ], CustomerExtrasController.prototype, "refundRequest", null);
 __decorate([
     (0, common_1.HttpCode)(200),
+    (0, common_1.Post)('order/add-tip'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.AnyFilesInterceptor)()),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
+], CustomerExtrasController.prototype, "addTip", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
     (0, common_1.Post)('order/get-Tax'),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
@@ -1215,6 +1250,7 @@ exports.CustomerExtrasController = CustomerExtrasController = __decorate([
     (0, auth_guard_1.RequireAuth)('customer'),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
         mongo_data_service_1.MongoDataService,
-        order_lifecycle_service_1.OrderLifecycleService])
+        order_lifecycle_service_1.OrderLifecycleService,
+        dm_wallet_service_1.DmWalletService])
 ], CustomerExtrasController);
 //# sourceMappingURL=customer-extras.controller.js.map

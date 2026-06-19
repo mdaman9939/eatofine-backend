@@ -35,6 +35,7 @@ const zone_module_1 = require("./zone/zone.module");
 const settlement_module_1 = require("./settlement/settlement.module");
 const order_lifecycle_module_1 = require("./lifecycle/order-lifecycle.module");
 const notifications_module_1 = require("./notifications/notifications.module");
+const dm_wallet_module_1 = require("./wallet/dm-wallet.module");
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
@@ -70,6 +71,7 @@ exports.AppModule = AppModule = __decorate([
             zone_module_1.ZoneModule,
             settlement_module_1.SettlementModule,
             order_lifecycle_module_1.OrderLifecycleModule,
+            dm_wallet_module_1.DmWalletModule,
             notifications_module_1.NotificationsModule,
         ],
         controllers: [app_controller_1.AppController],

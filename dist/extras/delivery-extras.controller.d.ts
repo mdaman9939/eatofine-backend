@@ -1,10 +1,12 @@
 import type { AuthedRequest } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { DmWalletService } from '../wallet/dm-wallet.service';
 export declare class DeliveryExtrasController {
     private readonly prisma;
     private readonly mongo;
-    constructor(prisma: PrismaService, mongo: MongoDataService);
+    private readonly dmWallet;
+    constructor(prisma: PrismaService, mongo: MongoDataService, dmWallet: DmWalletService);
     private useMongo;
     private shapeDmOrder;
     private dmUserMap;
@@ -37,6 +39,8 @@ export declare class DeliveryExtrasController {
         collected_cash?: undefined;
         total_withdrawn?: undefined;
         pending_withdraw?: undefined;
+        available_to_withdraw?: undefined;
+        net_position?: undefined;
     } | {
         id: number;
         f_name: {} | null;
@@ -62,6 +66,8 @@ export declare class DeliveryExtrasController {
         collected_cash: number;
         total_withdrawn: number;
         pending_withdraw: number;
+        available_to_withdraw: number;
+        net_position: number;
     } | {
         id: number;
         f_name: string | null;
@@ -87,6 +93,8 @@ export declare class DeliveryExtrasController {
         image_full_url?: undefined;
         identity_image?: undefined;
         active?: undefined;
+        available_to_withdraw?: undefined;
+        net_position?: undefined;
     }>;
     private saveImage;
     updateProfile(req: AuthedRequest, body?: Record<string, unknown>, files?: {
@@ -178,6 +186,7 @@ export declare class DeliveryExtrasController {
         cancellation_note: string | null;
         tax_type: string | null;
         is_guest: boolean;
+        dm_tips: number;
         order_note: string | null;
         coupon_discount_title: string | null;
         transaction_reference: string | null;
@@ -193,7 +202,6 @@ export declare class DeliveryExtrasController {
         original_delivery_charge: import("@prisma/client/runtime/library").Decimal;
         adjusment: import("@prisma/client/runtime/library").Decimal;
         edited: boolean;
-        dm_tips: number;
         processing_time: string | null;
         free_delivery_by: string | null;
         refund_request_canceled: Date | null;
@@ -306,6 +314,7 @@ export declare class DeliveryExtrasController {
             cancellation_note: string | null;
             tax_type: string | null;
             is_guest: boolean;
+            dm_tips: number;
             order_note: string | null;
             coupon_discount_title: string | null;
             transaction_reference: string | null;
@@ -321,7 +330,6 @@ export declare class DeliveryExtrasController {
             original_delivery_charge: import("@prisma/client/runtime/library").Decimal;
             adjusment: import("@prisma/client/runtime/library").Decimal;
             edited: boolean;
-            dm_tips: number;
             processing_time: string | null;
             free_delivery_by: string | null;
             refund_request_canceled: Date | null;
@@ -502,6 +510,7 @@ export declare class DeliveryExtrasController {
         cancellation_note: string | null;
         tax_type: string | null;
         is_guest: boolean;
+        dm_tips: number;
         order_note: string | null;
         coupon_discount_title: string | null;
         transaction_reference: string | null;
@@ -517,7 +526,6 @@ export declare class DeliveryExtrasController {
         original_delivery_charge: import("@prisma/client/runtime/library").Decimal;
         adjusment: import("@prisma/client/runtime/library").Decimal;
         edited: boolean;
-        dm_tips: number;
         processing_time: string | null;
         free_delivery_by: string | null;
         refund_request_canceled: Date | null;
@@ -597,6 +605,49 @@ export declare class DeliveryExtrasController {
         data: never[];
         total: number;
     };
+    payoutSummary(req: AuthedRequest): Promise<{
+        balance: number;
+        total_earning: number;
+        collected_cash: number;
+        pending_withdraw: number;
+        total_withdrawn: number;
+        available_to_withdraw: number;
+        net_position: number;
+        cash_to_deposit: number;
+    } | {
+        balance: number;
+        available_to_withdraw: number;
+        collected_cash: number;
+        net_position: number;
+    }>;
+    walletTransactions(req: AuthedRequest, limit?: string): Promise<{
+        items: {
+            type: string;
+            credit: number;
+            debit: number;
+            reference: string;
+            at: Date | null;
+        }[];
+    }>;
+    requestWithdraw(req: AuthedRequest, body?: {
+        amount?: number | string;
+        note?: string;
+    }): Promise<{
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+        id?: undefined;
+    } | {
+        message: string;
+        errors?: undefined;
+        id?: undefined;
+    } | {
+        message: string;
+        id: number;
+        errors?: undefined;
+    }>;
     walletPayments(): {
         data: never[];
         total_size: number;

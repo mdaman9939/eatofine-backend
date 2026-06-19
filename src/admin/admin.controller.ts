@@ -587,13 +587,18 @@ export class AdminController {
 
   @Post('dm-bonuses')
   @HttpCode(200)
-  createDmBonus(@Body() body: { name?: string; type?: string; amount?: number; trigger?: string }) {
+  createDmBonus(@Body() body: { name?: string; type?: string; amount?: number; trigger?: string; threshold?: number; period?: string }) {
     return this.admin.createDmBonus(body);
   }
 
   @Patch('dm-bonuses/:id/status')
   toggleDmBonus(@Param('id', ParseIntPipe) id: number, @Body() body: { status: boolean }) {
     return this.admin.toggleDmBonus(id, body.status);
+  }
+
+  @Patch('dm-bonuses/:id')
+  updateDmBonus(@Param('id', ParseIntPipe) id: number, @Body() body: Record<string, unknown>) {
+    return this.admin.updateRecord('dm_bonuses', id, body, ['name', 'type', 'amount', 'trigger', 'threshold', 'period']);
   }
 
   @Delete('dm-bonuses/:id')
@@ -1099,6 +1104,18 @@ export class AdminController {
     @Body() body: { approved: boolean },
   ) {
     return this.admin.approveWithdrawRequest(id, body.approved);
+  }
+
+  // ── DM payouts / reconciliation ──────────────────────────────────────
+  @Get('dm-payouts')
+  listDmPayouts() {
+    return this.admin.listDmPayouts();
+  }
+
+  @Post('delivery-men/:id/cash-deposit')
+  @HttpCode(200)
+  recordDmCashDeposit(@Param('id', ParseIntPipe) id: number, @Body() body: { amount?: number }) {
+    return this.admin.recordDmCashDeposit(id, Number(body?.amount ?? 0));
   }
 
   @Get('withdrawal-methods')

@@ -293,6 +293,8 @@ let OrderService = class OrderService {
                 admin_discount_amount: couponAdminDiscount,
                 additional_charge: additionalCharge,
                 restaurant_discount_amount: couponRestaurantDiscount,
+                dm_tips: 0,
+                dm_tips_paid_out: 0,
                 otp,
                 pending: now,
                 items,

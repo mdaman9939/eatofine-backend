@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { DmWalletService } from '../wallet/dm-wallet.service';
 
 /**
  * Pay-Per-Order settlement engine (Zomato/Swiggy/Stripe style).
@@ -89,7 +90,10 @@ export class SettlementService {
   private readonly logger = new Logger('Settlement');
   private indexesReady = false;
 
-  constructor(private readonly mongo: MongoDataService) {}
+  constructor(
+    private readonly mongo: MongoDataService,
+    private readonly dmWallet: DmWalletService,
+  ) {}
 
   private async ensureIndexes(): Promise<void> {
     if (this.indexesReady) return;
@@ -321,6 +325,16 @@ export class SettlementService {
         b.deliveryman_earning,
         { owner_id: dmId, reference: `settlement#${orderId}` },
       );
+      // Extra rider earning channels — each idempotent, best-effort so a hiccup
+      // here never blocks the core settlement:
+      //   • tips    — pay any tip added before delivery
+      //   • bonuses — award completion bonuses whose threshold is now met
+      //   • COD     — track cash collected on a cash-on-delivery order
+      await this.dmWallet.reconcileTips(orderId).catch(() => undefined);
+      await this.dmWallet.evaluateBonuses(dmId).catch(() => undefined);
+      if ((order.payment_method ?? 'cash_on_delivery') === 'cash_on_delivery') {
+        await this.dmWallet.recordCod(dmId, orderId, Number(order.order_amount ?? 0)).catch(() => undefined);
+      }
     }
 
     await this.creditWalletOnce(

@@ -12,6 +12,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.SettlementService = void 0;
 const common_1 = require("@nestjs/common");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
+const dm_wallet_service_1 = require("../wallet/dm-wallet.service");
 const r2 = (n) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
 const num = (v) => {
     const n = Number(v);
@@ -19,10 +20,12 @@ const num = (v) => {
 };
 let SettlementService = class SettlementService {
     mongo;
+    dmWallet;
     logger = new common_1.Logger('Settlement');
     indexesReady = false;
-    constructor(mongo) {
+    constructor(mongo, dmWallet) {
         this.mongo = mongo;
+        this.dmWallet = dmWallet;
     }
     async ensureIndexes() {
         if (this.indexesReady)
@@ -159,6 +162,11 @@ let SettlementService = class SettlementService {
         const dmId = order.mysql_delivery_man_id != null ? Number(order.mysql_delivery_man_id) : 0;
         if (dmId > 0) {
             await this.creditWalletOnce(orderId, 'deliveryman', 'delivery_man_wallets', { mysql_delivery_man_id: dmId }, { delivery_man_id: dmId }, b.deliveryman_earning, { owner_id: dmId, reference: `settlement#${orderId}` });
+            await this.dmWallet.reconcileTips(orderId).catch(() => undefined);
+            await this.dmWallet.evaluateBonuses(dmId).catch(() => undefined);
+            if ((order.payment_method ?? 'cash_on_delivery') === 'cash_on_delivery') {
+                await this.dmWallet.recordCod(dmId, orderId, Number(order.order_amount ?? 0)).catch(() => undefined);
+            }
         }
         await this.creditWalletOnce(orderId, 'admin', 'admin_wallet', { key: 'platform' }, {}, b.admin_net, { owner_id: 0, reference: `settlement#${orderId}` });
         await this.writeLedgerOnce('platform_revenue_ledger', orderId, {
@@ -233,6 +241,7 @@ let SettlementService = class SettlementService {
 exports.SettlementService = SettlementService;
 exports.SettlementService = SettlementService = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [mongo_data_service_1.MongoDataService])
+    __metadata("design:paramtypes", [mongo_data_service_1.MongoDataService,
+        dm_wallet_service_1.DmWalletService])
 ], SettlementService);
 //# sourceMappingURL=settlement.service.js.map

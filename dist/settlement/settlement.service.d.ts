@@ -1,4 +1,5 @@
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { DmWalletService } from '../wallet/dm-wallet.service';
 export type DiscountOwner = 'admin' | 'restaurant' | 'shared';
 export interface SettlementBreakdown {
     food_amount: number;
@@ -19,9 +20,10 @@ export interface SettlementBreakdown {
 }
 export declare class SettlementService {
     private readonly mongo;
+    private readonly dmWallet;
     private readonly logger;
     private indexesReady;
-    constructor(mongo: MongoDataService);
+    constructor(mongo: MongoDataService, dmWallet: DmWalletService);
     private ensureIndexes;
     private resolveDiscounts;
     private computeBreakdown;

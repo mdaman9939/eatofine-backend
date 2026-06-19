@@ -308,6 +308,7 @@ export declare class VendorExtrasController {
         cancellation_note: string | null;
         tax_type: string | null;
         is_guest: boolean;
+        dm_tips: number;
         order_note: string | null;
         coupon_discount_title: string | null;
         transaction_reference: string | null;
@@ -323,7 +324,6 @@ export declare class VendorExtrasController {
         original_delivery_charge: import("@prisma/client/runtime/library").Decimal;
         adjusment: import("@prisma/client/runtime/library").Decimal;
         edited: boolean;
-        dm_tips: number;
         processing_time: string | null;
         free_delivery_by: string | null;
         refund_request_canceled: Date | null;
@@ -422,6 +422,7 @@ export declare class VendorExtrasController {
             cancellation_note: string | null;
             tax_type: string | null;
             is_guest: boolean;
+            dm_tips: number;
             order_note: string | null;
             coupon_discount_title: string | null;
             transaction_reference: string | null;
@@ -437,7 +438,6 @@ export declare class VendorExtrasController {
             original_delivery_charge: import("@prisma/client/runtime/library").Decimal;
             adjusment: import("@prisma/client/runtime/library").Decimal;
             edited: boolean;
-            dm_tips: number;
             processing_time: string | null;
             free_delivery_by: string | null;
             refund_request_canceled: Date | null;
@@ -534,6 +534,7 @@ export declare class VendorExtrasController {
         cancellation_note: string | null;
         tax_type: string | null;
         is_guest: boolean;
+        dm_tips: number;
         order_note: string | null;
         coupon_discount_title: string | null;
         transaction_reference: string | null;
@@ -549,7 +550,6 @@ export declare class VendorExtrasController {
         original_delivery_charge: import("@prisma/client/runtime/library").Decimal;
         adjusment: import("@prisma/client/runtime/library").Decimal;
         edited: boolean;
-        dm_tips: number;
         processing_time: string | null;
         free_delivery_by: string | null;
         refund_request_canceled: Date | null;

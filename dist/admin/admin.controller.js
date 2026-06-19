@@ -352,6 +352,9 @@ let AdminController = class AdminController {
     toggleDmBonus(id, body) {
         return this.admin.toggleDmBonus(id, body.status);
     }
+    updateDmBonus(id, body) {
+        return this.admin.updateRecord('dm_bonuses', id, body, ['name', 'type', 'amount', 'trigger', 'threshold', 'period']);
+    }
     deleteDmBonus(id) {
         return this.admin.deleteDmBonus(id);
     }
@@ -639,6 +642,12 @@ let AdminController = class AdminController {
     }
     approveWithdrawRequest(id, body) {
         return this.admin.approveWithdrawRequest(id, body.approved);
+    }
+    listDmPayouts() {
+        return this.admin.listDmPayouts();
+    }
+    recordDmCashDeposit(id, body) {
+        return this.admin.recordDmCashDeposit(id, Number(body?.amount ?? 0));
     }
     withdrawalMethods() {
         return this.admin.listWithdrawalMethods();
@@ -1579,6 +1588,14 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "toggleDmBonus", null);
 __decorate([
+    (0, common_1.Patch)('dm-bonuses/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateDmBonus", null);
+__decorate([
     (0, common_1.Delete)('dm-bonuses/:id'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __metadata("design:type", Function),
@@ -2146,6 +2163,21 @@ __decorate([
     __metadata("design:paramtypes", [Number, Object]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "approveWithdrawRequest", null);
+__decorate([
+    (0, common_1.Get)('dm-payouts'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "listDmPayouts", null);
+__decorate([
+    (0, common_1.Post)('delivery-men/:id/cash-deposit'),
+    (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "recordDmCashDeposit", null);
 __decorate([
     (0, common_1.Get)('withdrawal-methods'),
     __metadata("design:type", Function),

@@ -20,6 +20,7 @@ import type { AuthedRequest } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { OrderLifecycleService } from '../lifecycle/order-lifecycle.service';
+import { DmWalletService } from '../wallet/dm-wallet.service';
 import { storageFullUrl } from '../common/storage-url';
 import { resolveParticipant, findOrCreateConversation, participantProfile, type PartySlot } from './messaging.helper';
 
@@ -117,6 +118,7 @@ export class CustomerExtrasController {
     private readonly prisma: PrismaService,
     private readonly mongo: MongoDataService,
     private readonly lifecycle: OrderLifecycleService,
+    private readonly dmWallet: DmWalletService,
   ) {}
 
   /** Feature flag — when set, extras read/write Mongo first. */
@@ -1043,6 +1045,38 @@ export class CustomerExtrasController {
       },
     });
     return { message: 'Refund request submitted' };
+  }
+
+  // Add a tip for the delivery rider on an order. Accumulates on the order and
+  // pays the assigned rider immediately (if already assigned/settled); otherwise
+  // settlement credits it when the rider completes the trip. Posted as
+  // multipart/form-data by the app, so it needs a multipart interceptor.
+  @HttpCode(200)
+  @Post('order/add-tip')
+  @UseInterceptors(AnyFilesInterceptor())
+  async addTip(
+    @Req() req: AuthedRequest,
+    @Body() body: { order_id?: number | string; amount?: number | string } = {},
+  ) {
+    const b = body ?? {};
+    const orderId = Number(b.order_id ?? 0);
+    const amount = Math.round((Number(b.amount ?? 0) || 0) * 100) / 100;
+    if (!orderId) return { errors: [{ code: 'order_id', message: 'order_id required' }] };
+    if (!(amount > 0)) return { errors: [{ code: 'amount', message: 'amount must be greater than 0' }] };
+
+    if (this.useMongo()) {
+      const order = await this.mongo.findOne<MongoOrderDoc & { dm_tips?: number }>('orders', {
+        mysql_id: orderId,
+        mysql_user_id: Number(req.actor!.id),
+      });
+      if (!order) return { message: 'order not found' };
+      const newTotal = Math.round(((Number(order.dm_tips ?? 0) || 0) + amount) * 100) / 100;
+      await this.mongo.updateOne('orders', { mysql_id: orderId }, { dm_tips: newTotal, updated_at: new Date() });
+      // Credit the rider now if one is assigned; the watermark prevents double pay.
+      const credited = await this.dmWallet.reconcileTips(orderId).catch(() => 0);
+      return { message: 'Tip added', tip_total: newTotal, credited_to_rider: credited };
+    }
+    return { message: 'Tip added' };
   }
 
   @HttpCode(200)

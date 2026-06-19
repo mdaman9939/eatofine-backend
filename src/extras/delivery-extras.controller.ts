@@ -6,6 +6,7 @@ import { AuthGuard, RequireAuth } from '../auth/auth.guard';
 import type { AuthedRequest } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { DmWalletService } from '../wallet/dm-wallet.service';
 import { storageFullUrl } from '../common/storage-url';
 import { resolveParticipant, findOrCreateConversation, participantProfile, type PartySlot } from './messaging.helper';
 import { compressImage } from '../common/image-compress';
@@ -23,6 +24,7 @@ export class DeliveryExtrasController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mongo: MongoDataService,
+    private readonly dmWallet: DmWalletService,
   ) {}
 
   private useMongo(): boolean {
@@ -223,6 +225,10 @@ export class DeliveryExtrasController {
         collected_cash: Number(wallet?.collected_cash ?? 0),
         total_withdrawn: Number(wallet?.total_withdrawn ?? 0),
         pending_withdraw: Number(wallet?.pending_withdraw ?? 0),
+        // Net payout position (earnings − COD cash held − reserved). Single
+        // source of truth so the rider sees exactly what is withdrawable.
+        available_to_withdraw: Math.max(0, Math.round((Number(wallet?.balance ?? 0) - Number(wallet?.pending_withdraw ?? 0) - Number(wallet?.collected_cash ?? 0)) * 100) / 100),
+        net_position: Math.round((Number(wallet?.balance ?? 0) - Number(wallet?.collected_cash ?? 0)) * 100) / 100,
       };
     }
     const d = await this.prisma.delivery_men.findUnique({ where: { id: req.actor!.id } });
@@ -574,6 +580,67 @@ export class DeliveryExtrasController {
 
   @Get('get-disbursement-report')
   disbursementReport() { return { data: [], total: 0 }; }
+
+  // Net payout position for the rider — what's actually withdrawable after
+  // netting COD cash-in-hand and any in-flight withdrawal.
+  @Get('payout-summary')
+  async payoutSummary(@Req() req: AuthedRequest) {
+    if (!this.useMongo()) return { balance: 0, available_to_withdraw: 0, collected_cash: 0, net_position: 0 };
+    return this.dmWallet.getPayoutSummary(Number(req.actor!.id));
+  }
+
+  // Unified wallet history (earnings, tips, bonus, COD, deposits + penalties).
+  @Get('wallet-transactions')
+  async walletTransactions(@Req() req: AuthedRequest, @Query('limit') limit?: string) {
+    if (!this.useMongo()) return { items: [] };
+    const items = await this.dmWallet.listTransactions(Number(req.actor!.id), Math.min(200, Number(limit) || 50));
+    return { items };
+  }
+
+  // Rider requests a payout. Reserves the amount as `pending_withdraw` and logs a
+  // `withdraw_requests` row for the admin to approve (admin approval debits the
+  // balance). Posted as multipart/form-data by the app.
+  @HttpCode(200)
+  @Post('withdraw-request')
+  @UseInterceptors(AnyFilesInterceptor())
+  async requestWithdraw(
+    @Req() req: AuthedRequest,
+    @Body() body: { amount?: number | string; note?: string } = {},
+  ) {
+    const dmId = Number(req.actor!.id);
+    const amount = Math.round((Number(body?.amount ?? 0) || 0) * 100) / 100;
+    if (!(amount > 0)) return { errors: [{ code: 'amount', message: 'amount must be greater than 0' }] };
+    if (!this.useMongo()) return { message: 'Withdrawal requested' };
+
+    // Availability nets the COD cash the rider is still holding — a rider who
+    // owes the platform cash can't withdraw earnings until they deposit it.
+    const summary = await this.dmWallet.getPayoutSummary(dmId);
+    if (amount > summary.available_to_withdraw) {
+      return { errors: [{ code: 'amount', message: `Amount exceeds available payout (₹${summary.available_to_withdraw.toFixed(2)})${summary.collected_cash > 0 ? ` — you are holding ₹${summary.collected_cash.toFixed(2)} COD cash; deposit it first.` : ''}` }] };
+    }
+    const id = await this.mongo.nextMysqlId('withdraw_requests');
+    const now = new Date();
+    await this.mongo.insertOne('withdraw_requests', {
+      mysql_id: id,
+      delivery_man_id: dmId,
+      vendor_id: null,
+      amount,
+      approved: false,
+      processed: false,
+      type: 'deliveryman',
+      transaction_note: body?.note ?? null,
+      created_at: now,
+      updated_at: now,
+    });
+    // Reserve the funds so the rider can't request the same balance twice.
+    await this.mongo.increment(
+      'delivery_man_wallets',
+      { mysql_delivery_man_id: dmId },
+      { pending_withdraw: amount },
+      { mysql_delivery_man_id: dmId, delivery_man_id: dmId, created_at: now },
+    );
+    return { message: 'Withdrawal requested', id };
+  }
 
   @Get('wallet-payment-list')
   walletPayments() { return { data: [], total_size: 0 }; }

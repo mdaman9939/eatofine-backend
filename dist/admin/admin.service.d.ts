@@ -1553,6 +1553,8 @@ export declare class AdminService {
             type: string;
             amount: number;
             trigger: string;
+            threshold: number;
+            period: string;
             status: boolean;
             claims_30d: number;
             created_at: Date | null;
@@ -1563,6 +1565,8 @@ export declare class AdminService {
         type?: string;
         amount?: number;
         trigger?: string;
+        threshold?: number;
+        period?: string;
     }): Promise<{
         ok: boolean;
         id: number;
@@ -1596,7 +1600,7 @@ export declare class AdminService {
     updateDmIncentiveStatus(id: number, status: 'approved' | 'rejected', reason?: string): Promise<{
         ok: boolean;
         id: number;
-        status: "approved" | "rejected";
+        status: string;
     }>;
     listSubscriptionOrders(): Promise<{
         total: number;
@@ -2062,6 +2066,8 @@ declare module './admin.service' {
             approved?: boolean;
         }): Promise<unknown>;
         approveWithdrawRequest(id: number, approve: boolean): Promise<unknown>;
+        listDmPayouts(): Promise<unknown>;
+        recordDmCashDeposit(id: number, amount: number): Promise<unknown>;
         listWithdrawalMethods(): Promise<unknown>;
         listOfflinePaymentMethods(): Promise<unknown>;
         createOfflinePaymentMethod(body: {

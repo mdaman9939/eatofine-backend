@@ -2,6 +2,7 @@ import type { AuthedRequest } from '../auth/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { OrderLifecycleService } from '../lifecycle/order-lifecycle.service';
+import { DmWalletService } from '../wallet/dm-wallet.service';
 interface MulterFile {
     buffer: Buffer;
     originalname: string;
@@ -12,7 +13,8 @@ export declare class CustomerExtrasController {
     private readonly prisma;
     private readonly mongo;
     private readonly lifecycle;
-    constructor(prisma: PrismaService, mongo: MongoDataService, lifecycle: OrderLifecycleService);
+    private readonly dmWallet;
+    constructor(prisma: PrismaService, mongo: MongoDataService, lifecycle: OrderLifecycleService, dmWallet: DmWalletService);
     private useMongo;
     wishList(req: AuthedRequest): Promise<{
         product: {
@@ -389,6 +391,7 @@ export declare class CustomerExtrasController {
         cancellation_note: string | null;
         tax_type: string | null;
         is_guest: boolean;
+        dm_tips: number;
         order_note: string | null;
         coupon_discount_title: string | null;
         transaction_reference: string | null;
@@ -404,7 +407,6 @@ export declare class CustomerExtrasController {
         original_delivery_charge: import("@prisma/client/runtime/library").Decimal;
         adjusment: import("@prisma/client/runtime/library").Decimal;
         edited: boolean;
-        dm_tips: number;
         processing_time: string | null;
         free_delivery_by: string | null;
         refund_request_canceled: Date | null;
@@ -502,6 +504,28 @@ export declare class CustomerExtrasController {
         message?: undefined;
     } | {
         message: string;
+        errors?: undefined;
+    }>;
+    addTip(req: AuthedRequest, body?: {
+        order_id?: number | string;
+        amount?: number | string;
+    }): Promise<{
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+        tip_total?: undefined;
+        credited_to_rider?: undefined;
+    } | {
+        message: string;
+        errors?: undefined;
+        tip_total?: undefined;
+        credited_to_rider?: undefined;
+    } | {
+        message: string;
+        tip_total: number;
+        credited_to_rider: number;
         errors?: undefined;
     }>;
     getOrderTax(): {

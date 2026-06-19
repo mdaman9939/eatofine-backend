@@ -3141,6 +3141,8 @@ let AdminService = class AdminService {
                 type: r.type ?? 'rule',
                 amount: Number(r.amount ?? 0),
                 trigger: r.trigger ?? '',
+                threshold: Number(r.threshold ?? 0),
+                period: r.period ?? 'daily',
                 status: r.status === true || r.status === 1,
                 claims_30d: Number(r.claims_30d ?? 0),
                 created_at: r.created_at ?? null,
@@ -3154,12 +3156,15 @@ let AdminService = class AdminService {
         if (!this.useMongo())
             throw new common_1.BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
         const nextId = await this.mongo.nextMysqlId('dm_bonuses');
+        const period = ['daily', 'weekly', 'lifetime'].includes(String(body.period)) ? String(body.period) : 'daily';
         await this.mongo.insertOne('dm_bonuses', {
             mysql_id: nextId,
             name: body.name,
             type: body.type ?? 'rule',
             amount: Number(body.amount),
             trigger: body.trigger ?? '',
+            threshold: Number(body.threshold ?? 0),
+            period,
             status: true,
             claims_30d: 0,
             created_at: new Date(),
@@ -3228,24 +3233,21 @@ let AdminService = class AdminService {
         const inc = await this.mongo.findByMysqlId('dm_incentives', id);
         if (!inc)
             throw new common_1.NotFoundException({ errors: [{ code: 'incentive', message: 'Not found' }] });
-        await this.mongo.updateOne('dm_incentives', { mysql_id: id }, {
-            status,
-            reason: status === 'rejected' ? (reason ?? null) : null,
-            decided_at: new Date(),
-            updated_at: new Date(),
-        });
-        if (status === 'approved' && inc.dm_id && inc.claim_amount) {
-            const wallet = await this.mongo.findOne('delivery_man_wallets', { delivery_man_id: inc.dm_id });
-            const newBalance = Number(wallet?.balance ?? 0) + Number(inc.claim_amount);
-            if (wallet) {
-                await this.mongo.updateOne('delivery_man_wallets', { delivery_man_id: inc.dm_id }, {
-                    balance: newBalance,
-                    total_earning: Number(wallet.total_earning ?? 0) + Number(inc.claim_amount),
-                    updated_at: new Date(),
-                });
+        if (status === 'rejected') {
+            await this.mongo.updateOne('dm_incentives', { mysql_id: id }, {
+                status: 'rejected', reason: reason ?? null, decided_at: new Date(), updated_at: new Date(),
+            });
+            return { ok: true, id, status };
+        }
+        const claim = await this.mongo.updateOne('dm_incentives', { mysql_id: id, status: { $ne: 'approved' } }, { status: 'approved', reason: null, decided_at: new Date(), updated_at: new Date() });
+        if (claim.matchedCount > 0 && inc.dm_id && inc.claim_amount) {
+            const dmId = Number(inc.dm_id);
+            const amt = Math.round((Number(inc.claim_amount) || 0) * 100) / 100;
+            if (amt > 0) {
+                await this.mongo.increment('delivery_man_wallets', { mysql_delivery_man_id: dmId }, { balance: amt, total_earning: amt }, { mysql_delivery_man_id: dmId, delivery_man_id: dmId, created_at: new Date() });
             }
         }
-        return { ok: true, id, status };
+        return { ok: true, id, status: 'approved' };
     }
     async listSubscriptionOrders() {
         if (!this.useMongo())
@@ -5179,6 +5181,27 @@ AdminService.prototype.approveWithdrawRequest = async function (id, approve) {
         const w = await this['mongo'].findByMysqlId('withdraw_requests', Number(id));
         if (!w)
             throw new common_1.NotFoundException({ errors: [{ code: 'withdraw_request', message: 'not found' }] });
+        const dmId = w.delivery_man_id != null ? Number(w.delivery_man_id) : 0;
+        const amt = Math.round((Number(w.amount ?? 0) || 0) * 100) / 100;
+        if (approve && dmId > 0 && amt > 0) {
+            const wallet = await this['mongo'].findOne('delivery_man_wallets', { $or: [{ mysql_delivery_man_id: dmId }, { delivery_man_id: dmId }] });
+            const available = Math.round(((Number(wallet?.balance ?? 0) || 0) - (Number(wallet?.collected_cash ?? 0) || 0)) * 100) / 100;
+            if (available < amt) {
+                throw new common_1.BadRequestException({ errors: [{ code: 'balance', message: `Insufficient available payout (₹${available.toFixed(2)}) — rider may be holding COD cash that must be deposited first.` }] });
+            }
+            const claim = await this['mongo'].updateOne('withdraw_requests', { mysql_id: Number(id), processed: { $ne: true } }, { approved: true, processed: true, decided_at: new Date(), updated_at: new Date() });
+            if (claim.matchedCount > 0) {
+                await this['mongo'].increment('delivery_man_wallets', { mysql_delivery_man_id: dmId }, { balance: -amt, total_withdrawn: amt, pending_withdraw: -amt }, { mysql_delivery_man_id: dmId, delivery_man_id: dmId, created_at: new Date() });
+            }
+            return { ok: true, id, approved: true };
+        }
+        if (!approve && dmId > 0 && amt > 0) {
+            const claim = await this['mongo'].updateOne('withdraw_requests', { mysql_id: Number(id), processed: true }, { approved: false, processed: false, decided_at: new Date(), updated_at: new Date() });
+            if (claim.matchedCount > 0) {
+                await this['mongo'].increment('delivery_man_wallets', { mysql_delivery_man_id: dmId }, { balance: amt, total_withdrawn: -amt, pending_withdraw: amt }, { mysql_delivery_man_id: dmId, delivery_man_id: dmId, created_at: new Date() });
+            }
+            return { ok: true, id, approved: false };
+        }
         await this['mongo'].updateOne('withdraw_requests', { mysql_id: Number(id) }, { approved: approve, updated_at: new Date() });
         return { ok: true, id, approved: approve };
     }
@@ -5187,6 +5210,61 @@ AdminService.prototype.approveWithdrawRequest = async function (id, approve) {
         throw new common_1.NotFoundException({ errors: [{ code: 'withdraw_request', message: 'not found' }] });
     await this['prisma'].withdraw_requests.update({ where: { id: w.id }, data: { approved: approve } });
     return { ok: true, id, approved: approve };
+};
+AdminService.prototype.listDmPayouts = async function () {
+    if (!this['useMongo']())
+        return { items: [], total: 0 };
+    const r2 = (n) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
+    const wallets = await this['mongo'].findMany('delivery_man_wallets', {}, { sort: { mysql_id: -1 }, limit: 1000 });
+    const dmIds = Array.from(new Set(wallets
+        .map((w) => Number(w.mysql_delivery_man_id ?? w.delivery_man_id ?? 0))
+        .filter((x) => x > 0)));
+    const dms = dmIds.length
+        ? await this['mongo'].findMany('delivery_men', { mysql_id: { $in: dmIds } })
+        : [];
+    const byId = new Map(dms.map((d) => [Number(d.mysql_id), d]));
+    const items = wallets.map((w) => {
+        const dmId = Number(w.mysql_delivery_man_id ?? w.delivery_man_id ?? 0);
+        const d = byId.get(dmId);
+        const balance = r2(Number(w.balance ?? 0));
+        const collected_cash = r2(Number(w.collected_cash ?? 0));
+        const pending_withdraw = r2(Number(w.pending_withdraw ?? 0));
+        return {
+            dm_id: dmId,
+            dm_name: d ? `${d.f_name ?? ''} ${d.l_name ?? ''}`.trim() || `DM #${dmId}` : `DM #${dmId}`,
+            phone: d?.phone ?? null,
+            balance,
+            total_earning: r2(Number(w.total_earning ?? 0)),
+            collected_cash,
+            pending_withdraw,
+            total_withdrawn: r2(Number(w.total_withdrawn ?? 0)),
+            available_to_withdraw: Math.max(0, r2(balance - pending_withdraw - collected_cash)),
+            net_position: r2(balance - collected_cash),
+        };
+    }).sort((a, b) => b.net_position - a.net_position);
+    return { total: items.length, items };
+};
+AdminService.prototype.recordDmCashDeposit = async function (id, amount) {
+    if (!this['useMongo']())
+        throw new common_1.BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    const dmId = Number(id);
+    const amt = Math.round((Number(amount) || 0) * 100) / 100;
+    if (!dmId || amt <= 0)
+        throw new common_1.BadRequestException({ errors: [{ code: 'amount', message: 'amount must be greater than 0' }] });
+    const wallet = await this['mongo'].findOne('delivery_man_wallets', {
+        $or: [{ mysql_delivery_man_id: dmId }, { delivery_man_id: dmId }],
+    });
+    const current = Math.round((Number(wallet?.collected_cash ?? 0) || 0) * 100) / 100;
+    const dec = Math.min(current, amt);
+    if (dec > 0) {
+        await this['mongo'].increment('delivery_man_wallets', { mysql_delivery_man_id: dmId }, { collected_cash: -dec }, { mysql_delivery_man_id: dmId, delivery_man_id: dmId, created_at: new Date() });
+        const txId = await this['mongo'].nextMysqlId('dm_wallet_transactions');
+        await this['mongo'].insertOne('dm_wallet_transactions', {
+            mysql_id: txId, mysql_delivery_man_id: dmId, delivery_man_id: dmId,
+            credit: 0, debit: 0, type: 'cash_deposit', reference: `deposit#dm:${dmId}`, deposited: dec, created_at: new Date(),
+        });
+    }
+    return { ok: true, deposited: dec, collected_cash: Math.round((current - dec) * 100) / 100 };
 };
 AdminService.prototype.listWithdrawalMethods = async function () {
     if (this['useMongo']()) {
