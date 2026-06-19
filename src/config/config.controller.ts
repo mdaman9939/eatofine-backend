@@ -98,7 +98,14 @@ export class ConfigController {
       language: [{ key: 'en', value: 'English' }],
       toggle_veg_non_veg: await this.bs.getBool('toggle_veg_non_veg'),
       toggle_dm_registration: await this.bs.getBool('toggle_dm_registration'),
-      toggle_restaurant_registration: await this.bs.getBool('toggle_restaurant_registration'),
+      // Self-registration is ON by default; admin can disable it from the
+      // Restaurant Registration settings page (mirrors the register endpoint).
+      toggle_restaurant_registration: await this.bs.getBoolDefault('toggle_restaurant_registration', true),
+      // Custom fields the restaurant-app shows under "Additional Data" on the
+      // sign-up form. Admin defines these (Restaurant Registration settings);
+      // an empty list means the app hides the section entirely.
+      restaurant_additional_join_us_page_data:
+        (await this.bs.getJson<{ data?: unknown[] }>('restaurant_additional_join_us_page_data')) ?? { data: [] },
       schedule_order_slot_duration: await this.bs.getInt('schedule_order_slot_duration'),
       // User subscription-order configuration (admin → Subscription Orders).
       subscription_status: await this.bs.getInt('subscription_status', 1),

@@ -3636,6 +3636,70 @@ export class AdminService {
     return { ok: true, id, status: 'approved' };
   }
 
+  /** Admin-create an incentive claim for a rider. This is the ENTRY POINT for the
+   *  incentive workflow — there is no rider-facing claim submission, so a claim
+   *  must be raised here, then Approved (which credits the wallet) or Rejected.
+   *  New claims always start `pending`; approving is the only thing that pays. */
+  async createDmIncentive(body: { dm_id?: number; period?: string; deliveries?: number; claim_amount?: number }) {
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    const dmId = Number(body.dm_id ?? 0);
+    const amt = Math.round((Number(body.claim_amount) || 0) * 100) / 100;
+    if (dmId <= 0) throw new BadRequestException({ errors: [{ code: 'dm_id', message: 'Select a delivery man' }] });
+    if (amt <= 0) throw new BadRequestException({ errors: [{ code: 'claim_amount', message: 'Claim amount must be greater than 0' }] });
+    const nextId = await this.mongo.nextMysqlId('dm_incentives');
+    await this.mongo.insertOne('dm_incentives', {
+      mysql_id: nextId,
+      dm_id: dmId,
+      period: String(body.period ?? '').trim() || '—',
+      deliveries: Number(body.deliveries ?? 0),
+      claim_amount: amt,
+      status: 'pending',
+      reason: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+    return { ok: true, id: nextId };
+  }
+
+  /** Edit a still-PENDING claim (fix the period / deliveries / amount before a
+   *  decision). Approved claims are locked — their amount already hit the wallet,
+   *  so editing them would desync the ledger. */
+  async updateDmIncentive(id: number, body: { period?: string; deliveries?: number; claim_amount?: number }) {
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    const inc = await this.mongo.findByMysqlId<{ mysql_id: number; status?: string }>('dm_incentives', id);
+    if (!inc) throw new NotFoundException({ errors: [{ code: 'incentive', message: 'Not found' }] });
+    if (inc.status === 'approved') {
+      throw new BadRequestException({ errors: [{ code: 'status', message: 'Approved claims are locked (already credited) — cannot edit' }] });
+    }
+    const data: Record<string, unknown> = { updated_at: new Date() };
+    if (body.period !== undefined) data.period = String(body.period);
+    if (body.deliveries !== undefined) data.deliveries = Number(body.deliveries);
+    if (body.claim_amount !== undefined) data.claim_amount = Math.round((Number(body.claim_amount) || 0) * 100) / 100;
+    await this.mongo.updateOne('dm_incentives', { mysql_id: id }, data);
+    return { ok: true, id };
+  }
+
+  /** Remove a claim that was raised in error. Approved claims are kept (the money
+   *  already moved — deleting would hide a real payout from the audit trail). */
+  async deleteDmIncentive(id: number) {
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    const inc = await this.mongo.findByMysqlId<{ mysql_id: number; status?: string }>('dm_incentives', id);
+    if (!inc) return { ok: true, id };
+    if (inc.status === 'approved') {
+      throw new BadRequestException({ errors: [{ code: 'status', message: 'Approved claims are locked (already credited) — cannot delete' }] });
+    }
+    await this.mongo.deleteOne('dm_incentives', { mysql_id: id });
+    return { ok: true, id };
+  }
+
+  /** Remove an abusive / spam rider review from the public listing. Reviews are
+   *  customer-written feedback on a delivery man; deletion is a moderation tool. */
+  async deleteDmReview(id: number) {
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    await this.mongo.deleteOne('d_m_reviews', { mysql_id: id });
+    return { ok: true, id };
+  }
+
   // ── Subscription orders ──────────────────────────────────────────────
 
   async listSubscriptionOrders() {
@@ -4790,6 +4854,7 @@ declare module './admin.service' {
     listCashbackHistories(opts: ListOpts): Promise<unknown>;
     listDisbursements(opts: ListOpts & { type?: string }): Promise<unknown>;
     updateDisbursementStatus(id: number, status: string): Promise<unknown>;
+    generateDmDisbursements(): Promise<unknown>;
     listWithdrawRequests(opts: ListOpts & { type?: string; approved?: boolean }): Promise<unknown>;
     approveWithdrawRequest(id: number, approve: boolean): Promise<unknown>;
     listDmPayouts(): Promise<unknown>;
@@ -5782,31 +5847,109 @@ AdminService.prototype.updateDisbursementStatus = async function (this: AdminSer
   if (!allowed.includes(status)) {
     throw new BadRequestException({ errors: [{ code: 'status', message: `status must be one of ${allowed.join(', ')}` }] });
   }
-  if (this['useMongo']()) {
-    const d = await this['mongo'].findByMysqlId<{ mysql_id: number; initiated_at?: Date | null }>('disbursements', Number(id));
-    if (!d) throw new NotFoundException({ errors: [{ code: 'disbursement', message: 'not found' }] });
+  // Build the status doc (milestone dates + optional paid_out flag) for a transition.
+  const buildData = (from: string, to: string, initiatedAt: Date | null | undefined, setPaidOut: boolean | null): Record<string, unknown> => {
     const now = new Date();
-    const data: Record<string, unknown> = { status, updated_at: now };
-    // Stamp / clear the milestone dates. Transitions are reversible (admin can
-    // un-initiate or mark unpaid in case of miscommunication) so we also clear
-    // the dates that no longer apply.
-    if (status === 'pending') {
-      data.initiated_at = null;
-      data.paid_at = null;
-    } else if (status === 'processing') {
-      if (!d.initiated_at) data.initiated_at = now;
-      data.paid_at = null; // un-paid: it is initiated but not yet paid
-    } else if (status === 'disbursed') {
-      data.paid_at = now;
-      if (!d.initiated_at) data.initiated_at = now; // paid directly from pending
+    const data: Record<string, unknown> = { status: to, updated_at: now };
+    if (to === 'pending') { data.initiated_at = null; data.paid_at = null; }
+    else if (to === 'processing') { if (!initiatedAt) data.initiated_at = now; data.paid_at = null; }
+    else if (to === 'disbursed') { data.paid_at = now; if (!initiatedAt) data.initiated_at = now; }
+    else if (to === 'canceled') { /* keep dates as-is for the record */ }
+    if (setPaidOut !== null) data.paid_out = setPaidOut;
+    return data;
+  };
+
+  if (this['useMongo']()) {
+    const d = await this['mongo'].findByMysqlId<{ mysql_id: number; status?: string; initiated_at?: Date | null; total_amount?: number; mysql_delivery_man_id?: number | null; delivery_man_id?: number | null }>('disbursements', Number(id));
+    if (!d) throw new NotFoundException({ errors: [{ code: 'disbursement', message: 'not found' }] });
+    const from = String(d.status ?? 'pending');
+    const dmId = Number(d.mysql_delivery_man_id ?? d.delivery_man_id ?? 0);
+    const amt = Math.round((Number(d.total_amount ?? 0) || 0) * 100) / 100;
+
+    // DELIVERYMAN disbursements actually move money through the rider wallet,
+    // mirroring the withdrawal lifecycle so the same balance can never be paid
+    // twice across disbursements + withdraw-requests:
+    //   reserved (pending/processing): pending_withdraw holds the amount
+    //   disbursed:  reservation → real debit (balance−, total_withdrawn+)
+    //   canceled:   reservation released (or, from disbursed, money returned)
+    if (dmId > 0 && amt > 0 && from !== status) {
+      const reserved = (s: string) => s === 'pending' || s === 'processing';
+      const wInc: Record<string, number> = {};
+      let setPaidOut: boolean | null = null;
+      if (reserved(from) && status === 'disbursed') {
+        wInc.balance = -amt; wInc.pending_withdraw = -amt; wInc.total_withdrawn = amt; setPaidOut = true;
+      } else if (reserved(from) && status === 'canceled') {
+        wInc.pending_withdraw = -amt; // release the reservation
+      } else if (from === 'disbursed' && reserved(status)) {
+        wInc.balance = amt; wInc.pending_withdraw = amt; wInc.total_withdrawn = -amt; setPaidOut = false; // un-pay → reserved again
+      } else if (from === 'disbursed' && status === 'canceled') {
+        wInc.balance = amt; wInc.total_withdrawn = -amt; setPaidOut = false; // un-pay, no reservation
+      } else if (from === 'canceled' && reserved(status)) {
+        wInc.pending_withdraw = amt; // re-reserve
+      } else if (from === 'canceled' && status === 'disbursed') {
+        wInc.balance = -amt; wInc.total_withdrawn = amt; setPaidOut = true; // pay straight from canceled
+      }
+      // Gate any real debit on funds being there (net of COD cash-in-hand).
+      if ((wInc.balance ?? 0) < 0) {
+        const w = await this['mongo'].findOne<{ balance?: number; collected_cash?: number }>('delivery_man_wallets', { $or: [{ mysql_delivery_man_id: dmId }, { delivery_man_id: dmId }] });
+        const available = Math.round(((Number(w?.balance ?? 0)) - (Number(w?.collected_cash ?? 0))) * 100) / 100;
+        if (available < amt) {
+          throw new BadRequestException({ errors: [{ code: 'funds', message: `Rider has only ₹${available.toFixed(2)} available (net of cash-in-hand) — cannot disburse ₹${amt.toFixed(2)}.` }] });
+        }
+      }
+      // Claim the transition atomically so two admins can't double-move money.
+      const claim = await this['mongo'].updateOne('disbursements', { mysql_id: Number(id), status: from }, buildData(from, status, d.initiated_at, setPaidOut));
+      if (!claim.matchedCount) return { ok: true, id, status, skipped: true };
+      if (Object.keys(wInc).length) {
+        await this['mongo'].increment('delivery_man_wallets', { mysql_delivery_man_id: dmId }, wInc, { mysql_delivery_man_id: dmId, delivery_man_id: dmId, created_at: new Date() });
+      }
+      return { ok: true, id, status };
     }
-    await this['mongo'].updateOne('disbursements', { mysql_id: Number(id) }, data);
+
+    // Restaurant disbursements (or zero-amount rows): status bookkeeping only.
+    await this['mongo'].updateOne('disbursements', { mysql_id: Number(id) }, buildData(from, status, d.initiated_at, null));
     return { ok: true, id, status };
   }
   const d = await this['prisma'].disbursements.findUnique({ where: { id: BigInt(id) }, select: { id: true } });
   if (!d) throw new NotFoundException({ errors: [{ code: 'disbursement', message: 'not found' }] });
   await this['prisma'].disbursements.update({ where: { id: d.id }, data: { status } });
   return { ok: true, id, status };
+};
+
+/** Create one PENDING payout row per rider who has a positive withdrawable
+ *  balance, reserving that amount on the wallet (pending_withdraw) so it can't
+ *  also be paid via a withdraw-request. Skips riders who already have an open
+ *  (pending/processing) disbursement. Marking the row Disbursed later does the
+ *  real debit. Returns how many were created. */
+AdminService.prototype.generateDmDisbursements = async function (this: AdminService) {
+  if (!this['useMongo']()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+  const wallets = await this['mongo'].findMany<{ mysql_delivery_man_id?: number; delivery_man_id?: number; balance?: number; collected_cash?: number; pending_withdraw?: number }>('delivery_man_wallets', {}, { limit: 5000 });
+  let created = 0;
+  for (const w of wallets) {
+    const dmId = Number(w.mysql_delivery_man_id ?? w.delivery_man_id ?? 0);
+    if (dmId <= 0) continue;
+    const available = Math.round(Math.max(0, (Number(w.balance ?? 0)) - (Number(w.pending_withdraw ?? 0)) - (Number(w.collected_cash ?? 0))) * 100) / 100;
+    if (available <= 0) continue;
+    const open = await this['mongo'].findOne('disbursements', { mysql_delivery_man_id: dmId, status: { $in: ['pending', 'processing'] } });
+    if (open) continue;
+    const nextId = await this['mongo'].nextMysqlId('disbursements');
+    const now = new Date();
+    await this['mongo'].insertOne('disbursements', {
+      mysql_id: nextId,
+      mysql_delivery_man_id: dmId,
+      delivery_man_id: dmId,
+      total_amount: available,
+      status: 'pending',
+      payment_method: 'cash',
+      paid_out: false,
+      created_at: now,
+      updated_at: now,
+    });
+    // Reserve the funds so a withdraw-request can't grab the same money.
+    await this['mongo'].increment('delivery_man_wallets', { mysql_delivery_man_id: dmId }, { pending_withdraw: available }, { mysql_delivery_man_id: dmId, delivery_man_id: dmId, created_at: now });
+    created++;
+  }
+  return { ok: true, created };
 };
 
 AdminService.prototype.listWithdrawRequests = async function (this: AdminService, opts) {
@@ -6067,20 +6210,33 @@ AdminService.prototype.listProvideDMEarnings = async function (this: AdminServic
   const limit = opts.limit ?? 50;
   const offset = opts.offset ?? 0;
   if (this['useMongo']()) {
+    // The REAL rider earnings ledger: every credit DmWalletService writes —
+    // delivery fee (settlement), tips and completion bonuses. (The legacy
+    // `provide_d_m_earnings` table is never populated, so the page was blank.)
+    const filter: Record<string, unknown> = { credit: { $gt: 0 } };
     const [rows, total] = await Promise.all([
-      this['mongo'].findMany<Record<string, unknown>>('provide_d_m_earnings', {}, {
+      this['mongo'].findMany<Record<string, unknown>>('dm_wallet_transactions', filter, {
         limit,
         skip: offset,
         sort: { mysql_id: -1 },
       }),
-      this['mongo'].count('provide_d_m_earnings'),
+      this['mongo'].count('dm_wallet_transactions', filter),
     ]);
+    const dmNames = await nameMapFor(this['mongo'], 'delivery_men', rows.map((r) => readFk(r, 'delivery_man_id')), personLabel);
     return paginate(
-      rows.map((r) => ({
-        ...r,
-        id: Number(r.mysql_id),
-        amount: r.amount !== undefined && r.amount !== null ? Number(r.amount) : 0,
-      })),
+      rows.map((r) => {
+        const dmId = readFk(r, 'delivery_man_id');
+        return {
+          id: Number(r.mysql_id),
+          delivery_man_id: dmId,
+          dm_name: dmId !== null ? (dmNames.get(dmId) ?? null) : null,
+          amount: Number(r.credit ?? 0),
+          // `type` is the earning channel: delivery / tip / bonus.
+          method: String(r.type ?? 'earning'),
+          ref: String(r.reference ?? ''),
+          created_at: (r.created_at as Date | null) ?? null,
+        };
+      }),
       total,
       limit,
       offset,

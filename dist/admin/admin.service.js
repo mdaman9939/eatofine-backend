@@ -3257,6 +3257,66 @@ let AdminService = class AdminService {
         }
         return { ok: true, id, status: 'approved' };
     }
+    async createDmIncentive(body) {
+        if (!this.useMongo())
+            throw new common_1.BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+        const dmId = Number(body.dm_id ?? 0);
+        const amt = Math.round((Number(body.claim_amount) || 0) * 100) / 100;
+        if (dmId <= 0)
+            throw new common_1.BadRequestException({ errors: [{ code: 'dm_id', message: 'Select a delivery man' }] });
+        if (amt <= 0)
+            throw new common_1.BadRequestException({ errors: [{ code: 'claim_amount', message: 'Claim amount must be greater than 0' }] });
+        const nextId = await this.mongo.nextMysqlId('dm_incentives');
+        await this.mongo.insertOne('dm_incentives', {
+            mysql_id: nextId,
+            dm_id: dmId,
+            period: String(body.period ?? '').trim() || '—',
+            deliveries: Number(body.deliveries ?? 0),
+            claim_amount: amt,
+            status: 'pending',
+            reason: null,
+            created_at: new Date(),
+            updated_at: new Date(),
+        });
+        return { ok: true, id: nextId };
+    }
+    async updateDmIncentive(id, body) {
+        if (!this.useMongo())
+            throw new common_1.BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+        const inc = await this.mongo.findByMysqlId('dm_incentives', id);
+        if (!inc)
+            throw new common_1.NotFoundException({ errors: [{ code: 'incentive', message: 'Not found' }] });
+        if (inc.status === 'approved') {
+            throw new common_1.BadRequestException({ errors: [{ code: 'status', message: 'Approved claims are locked (already credited) — cannot edit' }] });
+        }
+        const data = { updated_at: new Date() };
+        if (body.period !== undefined)
+            data.period = String(body.period);
+        if (body.deliveries !== undefined)
+            data.deliveries = Number(body.deliveries);
+        if (body.claim_amount !== undefined)
+            data.claim_amount = Math.round((Number(body.claim_amount) || 0) * 100) / 100;
+        await this.mongo.updateOne('dm_incentives', { mysql_id: id }, data);
+        return { ok: true, id };
+    }
+    async deleteDmIncentive(id) {
+        if (!this.useMongo())
+            throw new common_1.BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+        const inc = await this.mongo.findByMysqlId('dm_incentives', id);
+        if (!inc)
+            return { ok: true, id };
+        if (inc.status === 'approved') {
+            throw new common_1.BadRequestException({ errors: [{ code: 'status', message: 'Approved claims are locked (already credited) — cannot delete' }] });
+        }
+        await this.mongo.deleteOne('dm_incentives', { mysql_id: id });
+        return { ok: true, id };
+    }
+    async deleteDmReview(id) {
+        if (!this.useMongo())
+            throw new common_1.BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+        await this.mongo.deleteOne('d_m_reviews', { mysql_id: id });
+        return { ok: true, id };
+    }
     async listSubscriptionOrders() {
         if (!this.useMongo())
             return { items: [], total: 0 };
@@ -5121,27 +5181,83 @@ AdminService.prototype.updateDisbursementStatus = async function (id, status) {
     if (!allowed.includes(status)) {
         throw new common_1.BadRequestException({ errors: [{ code: 'status', message: `status must be one of ${allowed.join(', ')}` }] });
     }
+    const buildData = (from, to, initiatedAt, setPaidOut) => {
+        const now = new Date();
+        const data = { status: to, updated_at: now };
+        if (to === 'pending') {
+            data.initiated_at = null;
+            data.paid_at = null;
+        }
+        else if (to === 'processing') {
+            if (!initiatedAt)
+                data.initiated_at = now;
+            data.paid_at = null;
+        }
+        else if (to === 'disbursed') {
+            data.paid_at = now;
+            if (!initiatedAt)
+                data.initiated_at = now;
+        }
+        else if (to === 'canceled') { }
+        if (setPaidOut !== null)
+            data.paid_out = setPaidOut;
+        return data;
+    };
     if (this['useMongo']()) {
         const d = await this['mongo'].findByMysqlId('disbursements', Number(id));
         if (!d)
             throw new common_1.NotFoundException({ errors: [{ code: 'disbursement', message: 'not found' }] });
-        const now = new Date();
-        const data = { status, updated_at: now };
-        if (status === 'pending') {
-            data.initiated_at = null;
-            data.paid_at = null;
+        const from = String(d.status ?? 'pending');
+        const dmId = Number(d.mysql_delivery_man_id ?? d.delivery_man_id ?? 0);
+        const amt = Math.round((Number(d.total_amount ?? 0) || 0) * 100) / 100;
+        if (dmId > 0 && amt > 0 && from !== status) {
+            const reserved = (s) => s === 'pending' || s === 'processing';
+            const wInc = {};
+            let setPaidOut = null;
+            if (reserved(from) && status === 'disbursed') {
+                wInc.balance = -amt;
+                wInc.pending_withdraw = -amt;
+                wInc.total_withdrawn = amt;
+                setPaidOut = true;
+            }
+            else if (reserved(from) && status === 'canceled') {
+                wInc.pending_withdraw = -amt;
+            }
+            else if (from === 'disbursed' && reserved(status)) {
+                wInc.balance = amt;
+                wInc.pending_withdraw = amt;
+                wInc.total_withdrawn = -amt;
+                setPaidOut = false;
+            }
+            else if (from === 'disbursed' && status === 'canceled') {
+                wInc.balance = amt;
+                wInc.total_withdrawn = -amt;
+                setPaidOut = false;
+            }
+            else if (from === 'canceled' && reserved(status)) {
+                wInc.pending_withdraw = amt;
+            }
+            else if (from === 'canceled' && status === 'disbursed') {
+                wInc.balance = -amt;
+                wInc.total_withdrawn = amt;
+                setPaidOut = true;
+            }
+            if ((wInc.balance ?? 0) < 0) {
+                const w = await this['mongo'].findOne('delivery_man_wallets', { $or: [{ mysql_delivery_man_id: dmId }, { delivery_man_id: dmId }] });
+                const available = Math.round(((Number(w?.balance ?? 0)) - (Number(w?.collected_cash ?? 0))) * 100) / 100;
+                if (available < amt) {
+                    throw new common_1.BadRequestException({ errors: [{ code: 'funds', message: `Rider has only ₹${available.toFixed(2)} available (net of cash-in-hand) — cannot disburse ₹${amt.toFixed(2)}.` }] });
+                }
+            }
+            const claim = await this['mongo'].updateOne('disbursements', { mysql_id: Number(id), status: from }, buildData(from, status, d.initiated_at, setPaidOut));
+            if (!claim.matchedCount)
+                return { ok: true, id, status, skipped: true };
+            if (Object.keys(wInc).length) {
+                await this['mongo'].increment('delivery_man_wallets', { mysql_delivery_man_id: dmId }, wInc, { mysql_delivery_man_id: dmId, delivery_man_id: dmId, created_at: new Date() });
+            }
+            return { ok: true, id, status };
         }
-        else if (status === 'processing') {
-            if (!d.initiated_at)
-                data.initiated_at = now;
-            data.paid_at = null;
-        }
-        else if (status === 'disbursed') {
-            data.paid_at = now;
-            if (!d.initiated_at)
-                data.initiated_at = now;
-        }
-        await this['mongo'].updateOne('disbursements', { mysql_id: Number(id) }, data);
+        await this['mongo'].updateOne('disbursements', { mysql_id: Number(id) }, buildData(from, status, d.initiated_at, null));
         return { ok: true, id, status };
     }
     const d = await this['prisma'].disbursements.findUnique({ where: { id: BigInt(id) }, select: { id: true } });
@@ -5149,6 +5265,39 @@ AdminService.prototype.updateDisbursementStatus = async function (id, status) {
         throw new common_1.NotFoundException({ errors: [{ code: 'disbursement', message: 'not found' }] });
     await this['prisma'].disbursements.update({ where: { id: d.id }, data: { status } });
     return { ok: true, id, status };
+};
+AdminService.prototype.generateDmDisbursements = async function () {
+    if (!this['useMongo']())
+        throw new common_1.BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    const wallets = await this['mongo'].findMany('delivery_man_wallets', {}, { limit: 5000 });
+    let created = 0;
+    for (const w of wallets) {
+        const dmId = Number(w.mysql_delivery_man_id ?? w.delivery_man_id ?? 0);
+        if (dmId <= 0)
+            continue;
+        const available = Math.round(Math.max(0, (Number(w.balance ?? 0)) - (Number(w.pending_withdraw ?? 0)) - (Number(w.collected_cash ?? 0))) * 100) / 100;
+        if (available <= 0)
+            continue;
+        const open = await this['mongo'].findOne('disbursements', { mysql_delivery_man_id: dmId, status: { $in: ['pending', 'processing'] } });
+        if (open)
+            continue;
+        const nextId = await this['mongo'].nextMysqlId('disbursements');
+        const now = new Date();
+        await this['mongo'].insertOne('disbursements', {
+            mysql_id: nextId,
+            mysql_delivery_man_id: dmId,
+            delivery_man_id: dmId,
+            total_amount: available,
+            status: 'pending',
+            payment_method: 'cash',
+            paid_out: false,
+            created_at: now,
+            updated_at: now,
+        });
+        await this['mongo'].increment('delivery_man_wallets', { mysql_delivery_man_id: dmId }, { pending_withdraw: available }, { mysql_delivery_man_id: dmId, delivery_man_id: dmId, created_at: now });
+        created++;
+    }
+    return { ok: true, created };
 };
 AdminService.prototype.listWithdrawRequests = async function (opts) {
     const limit = opts.limit ?? 50;
@@ -5370,19 +5519,28 @@ AdminService.prototype.listProvideDMEarnings = async function (opts) {
     const limit = opts.limit ?? 50;
     const offset = opts.offset ?? 0;
     if (this['useMongo']()) {
+        const filter = { credit: { $gt: 0 } };
         const [rows, total] = await Promise.all([
-            this['mongo'].findMany('provide_d_m_earnings', {}, {
+            this['mongo'].findMany('dm_wallet_transactions', filter, {
                 limit,
                 skip: offset,
                 sort: { mysql_id: -1 },
             }),
-            this['mongo'].count('provide_d_m_earnings'),
+            this['mongo'].count('dm_wallet_transactions', filter),
         ]);
-        return paginate(rows.map((r) => ({
-            ...r,
-            id: Number(r.mysql_id),
-            amount: r.amount !== undefined && r.amount !== null ? Number(r.amount) : 0,
-        })), total, limit, offset);
+        const dmNames = await nameMapFor(this['mongo'], 'delivery_men', rows.map((r) => readFk(r, 'delivery_man_id')), personLabel);
+        return paginate(rows.map((r) => {
+            const dmId = readFk(r, 'delivery_man_id');
+            return {
+                id: Number(r.mysql_id),
+                delivery_man_id: dmId,
+                dm_name: dmId !== null ? (dmNames.get(dmId) ?? null) : null,
+                amount: Number(r.credit ?? 0),
+                method: String(r.type ?? 'earning'),
+                ref: String(r.reference ?? ''),
+                created_at: r.created_at ?? null,
+            };
+        }), total, limit, offset);
     }
     const [rows, total] = await Promise.all([
         this['prisma'].provide_d_m_earnings.findMany({ orderBy: { id: 'desc' }, take: limit, skip: offset }),

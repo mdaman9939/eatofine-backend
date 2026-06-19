@@ -1,9 +1,11 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { BusinessSettingsService } from '../business-settings/business-settings.service';
 export declare class AuthExtrasController {
     private readonly prisma;
     private readonly mongo;
-    constructor(prisma: PrismaService, mongo: MongoDataService);
+    private readonly bs;
+    constructor(prisma: PrismaService, mongo: MongoDataService, bs: BusinessSettingsService);
     private useMongo;
     private identifier;
     private findAccount;
@@ -100,9 +102,13 @@ export declare class AuthExtrasController {
         message: string;
         errors?: undefined;
     }>;
-    vendorRegister(_body: unknown): {
+    vendorRegister(body?: Record<string, unknown>, files?: Express.Multer.File[]): Promise<{
+        restaurant_id: number;
+        package_id: number | null;
         message: string;
-    };
+    }>;
+    private storageDir;
+    private saveUploaded;
     packageRenew(): {
         message: string;
     };

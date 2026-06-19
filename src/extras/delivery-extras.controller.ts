@@ -229,6 +229,9 @@ export class DeliveryExtrasController {
         // source of truth so the rider sees exactly what is withdrawable.
         available_to_withdraw: Math.max(0, Math.round((Number(wallet?.balance ?? 0) - Number(wallet?.pending_withdraw ?? 0) - Number(wallet?.collected_cash ?? 0)) * 100) / 100),
         net_position: Math.round((Number(wallet?.balance ?? 0) - Number(wallet?.collected_cash ?? 0)) * 100) / 100,
+        // Shift status — false means the rider is off-shift and won't be offered
+        // new orders until their shift window (app can show an "off shift" banner).
+        on_shift: await this.isOnShift(d),
       };
     }
     const d = await this.prisma.delivery_men.findUnique({ where: { id: req.actor!.id } });
@@ -402,6 +405,8 @@ export class DeliveryExtrasController {
     const actorId = Number(req.actor!.id);
     if (this.useMongo()) {
       const dm = await this.mongo.findByMysqlId<Record<string, unknown>>('delivery_men', actorId);
+      // Shift gate: outside the rider's shift window, no new orders are offered.
+      if (!(await this.isOnShift(dm))) return { orders: [], total_size: 0 };
       const zoneId = dm?.mysql_zone_id ?? dm?.zone_id;
       const rows = await this.mongo.findMany<Record<string, unknown>>(
         'orders',
@@ -496,11 +501,36 @@ export class DeliveryExtrasController {
     return [];
   }
 
+  /** True if the rider may take new orders right now: no shift assigned, a
+   *  full-day shift, or the current UTC time falls inside the shift window
+   *  (supports overnight windows that wrap past midnight). Times are stored as a
+   *  Date stamped at the shift's HH:MM in UTC. */
+  private async isOnShift(dm: Record<string, unknown> | null | undefined): Promise<boolean> {
+    if (!dm) return true;
+    const shiftId = Number((dm.shift_id as number) ?? 0);
+    if (!shiftId) return true; // no shift assigned → always available
+    const shift = await this.mongo.findByMysqlId<Record<string, unknown>>('shifts', shiftId);
+    if (!shift || shift.is_full_day) return true;
+    const start = shift.start_time ? new Date(shift.start_time as string) : null;
+    const end = shift.end_time ? new Date(shift.end_time as string) : null;
+    if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return true;
+    const now = new Date();
+    const nowM = now.getUTCHours() * 60 + now.getUTCMinutes();
+    const sM = start.getUTCHours() * 60 + start.getUTCMinutes();
+    const eM = end.getUTCHours() * 60 + end.getUTCMinutes();
+    return sM <= eM ? (nowM >= sM && nowM < eM) : (nowM >= sM || nowM < eM);
+  }
+
   @HttpCode(200)
   @Post('accept-order')
   async acceptOrder(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
     const orderId = Number(body.order_id ?? body.id ?? 0);
     if (this.useMongo() && orderId > 0) {
+      // Shift gate: a rider who is off-shift can't pick up new orders.
+      const me = await this.mongo.findByMysqlId<Record<string, unknown>>('delivery_men', Number(req.actor!.id));
+      if (!(await this.isOnShift(me))) {
+        return { errors: [{ code: 'shift', message: 'You are off shift — new orders are paused until your shift window.' }] };
+      }
       const o = await this.mongo.findByMysqlId<{ mysql_id: number; mysql_delivery_man_id?: number | null; delivery_man_id?: number | null }>('orders', orderId);
       if (!o) return { errors: [{ code: 'order', message: 'Order not found' }] };
       const assigned = Number(o.mysql_delivery_man_id ?? o.delivery_man_id ?? 0);

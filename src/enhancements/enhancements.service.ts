@@ -1028,17 +1028,39 @@ export class EnhancementsService {
 
   // ── BRD §5.4 — TDS Report ────────────────────────────────────────
   async tdsReport(opts: { vendor_id?: number; rate?: number; threshold?: number }) {
-    let defaults: { default_rate: number; threshold: number };
-    try { defaults = await this.getTdsSettings(); }
-    catch { defaults = { default_rate: 2, threshold: 30000 }; }
+    let defaults: { default_rate: number; threshold: number; financial_year_start: Date | string | null };
+    try {
+      const s = await this.getTdsSettings();
+      defaults = { default_rate: s.default_rate, threshold: s.threshold, financial_year_start: s.financial_year_start ?? null };
+    } catch {
+      defaults = { default_rate: 2, threshold: 30000, financial_year_start: null };
+    }
     const rate = opts.rate ?? defaults.default_rate;
     const threshold = opts.threshold ?? defaults.threshold;
+    // Section 194C thresholds reset every financial year, so the report only
+    // counts delivered orders whose effective date falls on/after the configured
+    // FY-start. Effective date mirrors the invoice logic (delivered →
+    // created_at_legacy → created_at). When no valid FY-start is configured we
+    // count all orders, preserving the previous behaviour.
+    const fyStartRaw = defaults.financial_year_start ? new Date(defaults.financial_year_start) : null;
+    const fyStart = fyStartRaw && !Number.isNaN(fyStartRaw.getTime()) ? fyStartRaw : null;
 
     if (this.useMongo()) {
       const match: Record<string, unknown> = { order_status: 'delivered', payment_status: 'paid' };
       if (opts.vendor_id) {
         const r = await this.mongo.findOne<MongoRestaurantDoc>('restaurants', { mysql_vendor_id: Number(opts.vendor_id) });
         if (r) match.mysql_restaurant_id = Number(r.mysql_id);
+      }
+      if (fyStart) {
+        // Effective order date = delivered → created_at_legacy → created_at (all
+        // stored as BSON Dates). Compare against the FY-start with $expr so we can
+        // coalesce before the >= check.
+        match.$expr = {
+          $gte: [
+            { $ifNull: ['$delivered', { $ifNull: ['$created_at_legacy', '$created_at'] }] },
+            fyStart,
+          ],
+        };
       }
       const groups = await this.mongo.aggregate<{
         _id: number;
@@ -1062,6 +1084,7 @@ export class EnhancementsService {
       const rMap = new Map(restaurants.map((r) => [String(r.mysql_id), r]));
       return {
         tds_rate: rate, threshold,
+        financial_year_start: fyStart,
         rows: groups.map((g) => {
           const r = rMap.get(String(Number(g._id)));
           const grossPayout = Number(g.total ?? 0);
@@ -1088,7 +1111,7 @@ export class EnhancementsService {
       };
     }
 
-    const where: { order_status: string; payment_status: string; restaurant_id?: bigint } = {
+    const where: { order_status: string; payment_status: string; restaurant_id?: bigint; delivered?: { gte: Date } } = {
       order_status: 'delivered', payment_status: 'paid',
     };
     if (opts.vendor_id) {
@@ -1097,6 +1120,7 @@ export class EnhancementsService {
       });
       if (r) where.restaurant_id = r.id;
     }
+    if (fyStart) where.delivered = { gte: fyStart };
     const groups = await this.prisma.orders.groupBy({
       by: ['restaurant_id'], where,
       _sum: { order_amount: true },
@@ -1113,6 +1137,7 @@ export class EnhancementsService {
     const rMap = new Map(restaurants.map((r) => [String(r.id), r]));
     return {
       tds_rate: rate, threshold,
+      financial_year_start: fyStart,
       rows: groups.map((g) => {
         const r = rMap.get(String(g.restaurant_id));
         const grossPayout = Number(g._sum.order_amount ?? 0);

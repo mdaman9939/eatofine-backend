@@ -53,6 +53,7 @@ const messaging_helper_1 = require("./messaging.helper");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const auth_guard_1 = require("../auth/auth.guard");
+const auth_service_1 = require("../auth/auth.service");
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
 const storage_url_1 = require("../common/storage-url");
@@ -75,9 +76,25 @@ let VendorExtrasController = class VendorExtrasController {
     static { VendorExtrasController_1 = this; }
     prisma;
     mongo;
-    constructor(prisma, mongo) {
+    auth;
+    constructor(prisma, mongo, auth) {
         this.prisma = prisma;
         this.mongo = mongo;
+        this.auth = auth;
+    }
+    async resolveVendor(req) {
+        if (req.actor?.kind === 'vendor')
+            return req.actor;
+        const header = req.header('authorization') ?? '';
+        const token = header.replace(/^Bearer\s+/i, '').trim();
+        if (!token)
+            return null;
+        const actor = await this.auth.findActorByToken(token);
+        if (actor?.kind === 'vendor') {
+            req.actor = actor;
+            return actor;
+        }
+        return null;
     }
     useMongo() {
         const v = (process.env.USE_MONGO_EXTRAS ?? '1').toLowerCase();
@@ -2387,7 +2404,13 @@ let VendorExtrasController = class VendorExtrasController {
     async setBusinessPlan(req, body = {}) {
         if (!this.useMongo())
             return { message: 'plan updated', redirect_url: null, success: true };
-        const restaurant = await this.vendorRestaurant(req).catch(() => null);
+        const actor = await this.resolveVendor(req);
+        let restaurant = actor ? await this.vendorRestaurant(req).catch(() => null) : null;
+        if (!restaurant && body.restaurant_id !== undefined) {
+            const r = await this.mongo.findByMysqlId('restaurants', Number(body.restaurant_id)).catch(() => null);
+            if (r && r.approval_status === 'pending')
+                restaurant = r;
+        }
         if (!restaurant)
             return { errors: [{ code: 'restaurant', message: 'restaurant not found' }] };
         const plan = String(body.business_plan ?? 'commission');
@@ -3335,6 +3358,7 @@ __decorate([
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('business_plan'),
+    (0, auth_guard_1.RequireAuth)(),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -3420,6 +3444,7 @@ exports.VendorExtrasController = VendorExtrasController = VendorExtrasController
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
     (0, auth_guard_1.RequireAuth)('vendor'),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
-        mongo_data_service_1.MongoDataService])
+        mongo_data_service_1.MongoDataService,
+        auth_service_1.AuthService])
 ], VendorExtrasController);
 //# sourceMappingURL=vendor-extras.controller.js.map

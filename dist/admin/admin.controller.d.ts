@@ -1387,6 +1387,15 @@ export declare class AdminController {
             created_at: Date | null;
         }[];
     }>;
+    createDmIncentive(body: {
+        dm_id?: number;
+        period?: string;
+        deliveries?: number;
+        claim_amount?: number;
+    }): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
     approveDmIncentive(id: number): Promise<{
         ok: boolean;
         id: number;
@@ -1398,6 +1407,18 @@ export declare class AdminController {
         ok: boolean;
         id: number;
         status: string;
+    }>;
+    updateDmIncentive(id: number, body: {
+        period?: string;
+        deliveries?: number;
+        claim_amount?: number;
+    }): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
+    deleteDmIncentive(id: number): Promise<{
+        ok: boolean;
+        id: number;
     }>;
     subscriptionOrders(): Promise<{
         total: number;
@@ -1796,6 +1817,7 @@ export declare class AdminController {
     loyaltyTransactions(limit?: string, offset?: string): Promise<unknown>;
     cashbackHistories(limit?: string, offset?: string): Promise<unknown>;
     disbursements(limit?: string, offset?: string, type?: string): Promise<unknown>;
+    generateDmDisbursements(): Promise<unknown>;
     updateDisbursementStatus(id: number, body: {
         status: string;
     }): Promise<unknown>;
@@ -1832,6 +1854,10 @@ export declare class AdminController {
         reply: string;
     }): Promise<unknown>;
     dmReviews(limit?: string, offset?: string): Promise<unknown>;
+    deleteDmReview(id: number): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
     faqs(): Promise<unknown>;
     createFAQ(body: Parameters<AdminService['createFAQ']>[0]): Promise<unknown>;
     updateFAQ(id: number, body: {

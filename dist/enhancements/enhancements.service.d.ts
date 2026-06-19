@@ -221,7 +221,7 @@ export declare class EnhancementsService {
         order_date: Date;
         restaurant: {
             name: string;
-            business_name: string;
+            business_name: string | null;
             address: string;
             gstin: string | null;
             fssai: string | null;
@@ -348,6 +348,7 @@ export declare class EnhancementsService {
     }): Promise<{
         tds_rate: number;
         threshold: number;
+        financial_year_start: Date | null;
         rows: {
             restaurant_id: number;
             restaurant: string | null;

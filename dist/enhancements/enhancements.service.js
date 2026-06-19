@@ -750,9 +750,7 @@ let EnhancementsService = class EnhancementsService {
                 order_date: dt,
                 restaurant: {
                     name: restaurant?.name ?? '—',
-                    business_name: (restaurant?.business_name && String(restaurant.business_name).trim() !== '')
-                        ? String(restaurant.business_name)
-                        : (restaurant?.name ?? '—'),
+                    business_name: ph(restaurant?.business_name),
                     address: restaurant?.address ?? '—',
                     gstin: ph(restaurant?.gstin),
                     fssai: ph(restaurant?.fssai),
@@ -885,19 +883,30 @@ let EnhancementsService = class EnhancementsService {
     async tdsReport(opts) {
         let defaults;
         try {
-            defaults = await this.getTdsSettings();
+            const s = await this.getTdsSettings();
+            defaults = { default_rate: s.default_rate, threshold: s.threshold, financial_year_start: s.financial_year_start ?? null };
         }
         catch {
-            defaults = { default_rate: 2, threshold: 30000 };
+            defaults = { default_rate: 2, threshold: 30000, financial_year_start: null };
         }
         const rate = opts.rate ?? defaults.default_rate;
         const threshold = opts.threshold ?? defaults.threshold;
+        const fyStartRaw = defaults.financial_year_start ? new Date(defaults.financial_year_start) : null;
+        const fyStart = fyStartRaw && !Number.isNaN(fyStartRaw.getTime()) ? fyStartRaw : null;
         if (this.useMongo()) {
             const match = { order_status: 'delivered', payment_status: 'paid' };
             if (opts.vendor_id) {
                 const r = await this.mongo.findOne('restaurants', { mysql_vendor_id: Number(opts.vendor_id) });
                 if (r)
                     match.mysql_restaurant_id = Number(r.mysql_id);
+            }
+            if (fyStart) {
+                match.$expr = {
+                    $gte: [
+                        { $ifNull: ['$delivered', { $ifNull: ['$created_at_legacy', '$created_at'] }] },
+                        fyStart,
+                    ],
+                };
             }
             const groups = await this.mongo.aggregate('orders', [
                 { $match: match },
@@ -917,6 +926,7 @@ let EnhancementsService = class EnhancementsService {
             const rMap = new Map(restaurants.map((r) => [String(r.mysql_id), r]));
             return {
                 tds_rate: rate, threshold,
+                financial_year_start: fyStart,
                 rows: groups.map((g) => {
                     const r = rMap.get(String(Number(g._id)));
                     const grossPayout = Number(g.total ?? 0);
@@ -952,6 +962,8 @@ let EnhancementsService = class EnhancementsService {
             if (r)
                 where.restaurant_id = r.id;
         }
+        if (fyStart)
+            where.delivered = { gte: fyStart };
         const groups = await this.prisma.orders.groupBy({
             by: ['restaurant_id'], where,
             _sum: { order_amount: true },
@@ -968,6 +980,7 @@ let EnhancementsService = class EnhancementsService {
         const rMap = new Map(restaurants.map((r) => [String(r.id), r]));
         return {
             tds_rate: rate, threshold,
+            financial_year_start: fyStart,
             rows: groups.map((g) => {
                 const r = rMap.get(String(g.restaurant_id));
                 const grossPayout = Number(g._sum.order_amount ?? 0);

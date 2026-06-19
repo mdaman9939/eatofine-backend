@@ -332,6 +332,9 @@ export class SettlementService {
       //   • COD     — track cash collected on a cash-on-delivery order
       await this.dmWallet.reconcileTips(orderId).catch(() => undefined);
       await this.dmWallet.evaluateBonuses(dmId).catch(() => undefined);
+      // Auto-raise a pending incentive claim when the rider hits the configured
+      // period delivery target (admin approves to pay — never auto-credits).
+      await this.dmWallet.evaluateIncentives(dmId).catch(() => undefined);
       if ((order.payment_method ?? 'cash_on_delivery') === 'cash_on_delivery') {
         await this.dmWallet.recordCod(dmId, orderId, Number(order.order_amount ?? 0)).catch(() => undefined);
       }

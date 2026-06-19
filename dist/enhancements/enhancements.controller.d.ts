@@ -145,7 +145,7 @@ export declare class EnhancementsController {
         order_date: Date;
         restaurant: {
             name: string;
-            business_name: string;
+            business_name: string | null;
             address: string;
             gstin: string | null;
             fssai: string | null;
@@ -268,6 +268,7 @@ export declare class EnhancementsController {
     tds(vid?: string, rate?: string, threshold?: string): Promise<{
         tds_rate: number;
         threshold: number;
+        financial_year_start: Date | null;
         rows: {
             restaurant_id: number;
             restaurant: string | null;
@@ -430,6 +431,8 @@ export declare class EnhancementsController {
         free_delivery: boolean;
         notes: string;
         base_after_surge?: undefined;
+        vehicle_extra?: undefined;
+        vehicle_tier?: undefined;
         subtotal?: undefined;
     } | {
         distance_km: number;
@@ -447,6 +450,8 @@ export declare class EnhancementsController {
         base_after_surge: number;
         surge_multiplier: number;
         surcharges: import("./user-delivery-charges.service").UserApplicableSurcharge[];
+        vehicle_extra: number;
+        vehicle_tier: string | null;
         gst_amount: number;
         subtotal: number;
         total: number;

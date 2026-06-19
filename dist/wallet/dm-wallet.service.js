@@ -26,6 +26,7 @@ let DmWalletService = class DmWalletService {
                 await this.mongo.ensureIndex('dm_bonus_awards', { dm_id: 1, bonus_id: 1, period_key: 1 }, { unique: true, name: 'uniq_dm_bonus_period' });
                 await this.mongo.ensureIndex('dm_cod_collections', { order_id: 1 }, { unique: true, name: 'uniq_cod_order' });
                 await this.mongo.ensureIndex('dm_wallet_transactions', { mysql_id: 1 }, { unique: true, name: 'uniq_id' });
+                await this.mongo.ensureIndex('dm_incentive_awards', { dm_id: 1, period_key: 1 }, { unique: true, name: 'uniq_dm_incentive_period' });
             })().catch((e) => {
                 this.indexing = null;
                 throw e;
@@ -126,6 +127,67 @@ let DmWalletService = class DmWalletService {
             awarded++;
         }
         return awarded;
+    }
+    async readIncentiveConfig() {
+        const rows = await this.mongo.findMany('business_settings', {
+            key: { $in: ['dm_incentive_enabled', 'dm_incentive_per_delivery', 'dm_incentive_target_period', 'dm_incentive_target_deliveries'] },
+        });
+        const map = new Map(rows.map((r) => [String(r.key), String(r.value ?? '')]));
+        return {
+            enabled: /^(1|true|yes|on)$/i.test(map.get('dm_incentive_enabled') ?? '0'),
+            perDelivery: Number(map.get('dm_incentive_per_delivery') ?? 0) || 0,
+            targetPeriod: map.get('dm_incentive_target_period') || 'weekly',
+            targetDeliveries: Number(map.get('dm_incentive_target_deliveries') ?? 0) || 0,
+        };
+    }
+    incentiveWindow(period, when) {
+        if (period === 'monthly') {
+            const d = new Date(when);
+            const start = new Date(d.getFullYear(), d.getMonth(), 1);
+            start.setHours(0, 0, 0, 0);
+            return { key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, since: start };
+        }
+        return this.periodWindow(period === 'weekly' ? 'weekly' : 'daily', when);
+    }
+    async evaluateIncentives(dmId, whenIso) {
+        if (!dmId)
+            return false;
+        await this.ensureIndexes();
+        const cfg = await this.readIncentiveConfig();
+        if (!cfg.enabled || cfg.perDelivery <= 0 || cfg.targetDeliveries <= 0)
+            return false;
+        const when = whenIso ? new Date(whenIso) : new Date();
+        const { key, since } = this.incentiveWindow(cfg.targetPeriod, when);
+        const filter = {
+            mysql_delivery_man_id: Number(dmId),
+            order_status: { $in: ['delivered', 'completed'] },
+        };
+        if (since)
+            filter.created_at = { $gte: since };
+        const count = await this.mongo.count('orders', filter);
+        if (count < cfg.targetDeliveries)
+            return false;
+        const periodKey = `${cfg.targetPeriod}:${key}`;
+        const claimed = await this.mongo.tryInsertUnique('dm_incentive_awards', {
+            dm_id: Number(dmId), period_key: periodKey, created_at: new Date(),
+        });
+        if (!claimed)
+            return false;
+        const amount = r2(cfg.perDelivery * count);
+        const nextId = await this.mongo.nextMysqlId('dm_incentives');
+        await this.mongo.insertOne('dm_incentives', {
+            mysql_id: nextId,
+            dm_id: Number(dmId),
+            period: `${cfg.targetPeriod} ${key}`,
+            deliveries: count,
+            claim_amount: amount,
+            status: 'pending',
+            reason: null,
+            auto: true,
+            created_at: new Date(),
+            updated_at: new Date(),
+        });
+        return true;
     }
     async recordCod(dmId, orderId, amount) {
         const amt = r2(amount);

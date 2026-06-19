@@ -10,6 +10,9 @@ export declare class DmWalletService {
     reconcileTips(orderId: number): Promise<number>;
     private periodWindow;
     evaluateBonuses(dmId: number, whenIso?: string): Promise<number>;
+    private readIncentiveConfig;
+    private incentiveWindow;
+    evaluateIncentives(dmId: number, whenIso?: string): Promise<boolean>;
     recordCod(dmId: number, orderId: number, amount: number): Promise<void>;
     getWallet(dmId: number): Promise<WalletDoc | null>;
     getPayoutSummary(dmId: number): Promise<{

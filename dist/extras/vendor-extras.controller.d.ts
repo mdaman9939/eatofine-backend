@@ -1,10 +1,13 @@
 import type { AuthedRequest } from '../auth/auth.guard';
+import { AuthService } from '../auth/auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 export declare class VendorExtrasController {
     private readonly prisma;
     private readonly mongo;
-    constructor(prisma: PrismaService, mongo: MongoDataService);
+    private readonly auth;
+    constructor(prisma: PrismaService, mongo: MongoDataService, auth: AuthService);
+    private resolveVendor;
     private useMongo;
     private vendorRestaurant;
     private vendorRestaurantIds;

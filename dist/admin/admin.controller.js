@@ -361,11 +361,20 @@ let AdminController = class AdminController {
     listDmIncentives(status) {
         return this.admin.listDmIncentives(status);
     }
+    createDmIncentive(body) {
+        return this.admin.createDmIncentive(body);
+    }
     approveDmIncentive(id) {
         return this.admin.updateDmIncentiveStatus(id, 'approved');
     }
     rejectDmIncentive(id, body) {
         return this.admin.updateDmIncentiveStatus(id, 'rejected', body.reason);
+    }
+    updateDmIncentive(id, body) {
+        return this.admin.updateDmIncentive(id, body);
+    }
+    deleteDmIncentive(id) {
+        return this.admin.deleteDmIncentive(id);
     }
     subscriptionOrders() {
         return this.admin.listSubscriptionOrders();
@@ -629,6 +638,9 @@ let AdminController = class AdminController {
     disbursements(limit, offset, type) {
         return this.admin.listDisbursements({ limit: toInt(limit, 50), offset: toInt(offset, 0), type: type || undefined });
     }
+    generateDmDisbursements() {
+        return this.admin.generateDmDisbursements();
+    }
     updateDisbursementStatus(id, body) {
         return this.admin.updateDisbursementStatus(id, body.status);
     }
@@ -699,6 +711,9 @@ let AdminController = class AdminController {
     }
     dmReviews(limit, offset) {
         return this.admin.listDMReviews({ limit: toInt(limit, 50), offset: toInt(offset, 0) });
+    }
+    deleteDmReview(id) {
+        return this.admin.deleteDmReview(id);
     }
     faqs() {
         return this.admin.listFAQs();
@@ -1610,6 +1625,14 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "listDmIncentives", null);
 __decorate([
+    (0, common_1.Post)('dm-incentives'),
+    (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "createDmIncentive", null);
+__decorate([
     (0, common_1.Patch)('dm-incentives/:id/approve'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __metadata("design:type", Function),
@@ -1624,6 +1647,21 @@ __decorate([
     __metadata("design:paramtypes", [Number, Object]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "rejectDmIncentive", null);
+__decorate([
+    (0, common_1.Patch)('dm-incentives/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateDmIncentive", null);
+__decorate([
+    (0, common_1.Delete)('dm-incentives/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "deleteDmIncentive", null);
 __decorate([
     (0, common_1.Get)('subscription-orders'),
     __metadata("design:type", Function),
@@ -2138,6 +2176,13 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "disbursements", null);
 __decorate([
+    (0, common_1.Post)('disbursements/generate'),
+    (0, common_1.HttpCode)(200),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "generateDmDisbursements", null);
+__decorate([
     (0, common_1.Patch)('disbursements/:id/status'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __param(1, (0, common_1.Body)()),
@@ -2306,6 +2351,13 @@ __decorate([
     __metadata("design:paramtypes", [String, String]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "dmReviews", null);
+__decorate([
+    (0, common_1.Delete)('dm-reviews/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "deleteDmReview", null);
 __decorate([
     (0, common_1.Get)('faqs'),
     __metadata("design:type", Function),

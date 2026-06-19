@@ -132,6 +132,8 @@ export declare class UserDeliveryChargesService {
         free_delivery: boolean;
         notes: string;
         base_after_surge?: undefined;
+        vehicle_extra?: undefined;
+        vehicle_tier?: undefined;
         subtotal?: undefined;
     } | {
         distance_km: number;
@@ -149,11 +151,14 @@ export declare class UserDeliveryChargesService {
         base_after_surge: number;
         surge_multiplier: number;
         surcharges: UserApplicableSurcharge[];
+        vehicle_extra: number;
+        vehicle_tier: string | null;
         gst_amount: number;
         subtotal: number;
         total: number;
         free_delivery: boolean;
         notes?: undefined;
     }>;
+    private vehicleTierExtra;
 }
 export {};

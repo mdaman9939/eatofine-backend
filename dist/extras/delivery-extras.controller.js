@@ -236,6 +236,7 @@ let DeliveryExtrasController = class DeliveryExtrasController {
                 pending_withdraw: Number(wallet?.pending_withdraw ?? 0),
                 available_to_withdraw: Math.max(0, Math.round((Number(wallet?.balance ?? 0) - Number(wallet?.pending_withdraw ?? 0) - Number(wallet?.collected_cash ?? 0)) * 100) / 100),
                 net_position: Math.round((Number(wallet?.balance ?? 0) - Number(wallet?.collected_cash ?? 0)) * 100) / 100,
+                on_shift: await this.isOnShift(d),
             };
         }
         const d = await this.prisma.delivery_men.findUnique({ where: { id: req.actor.id } });
@@ -380,6 +381,8 @@ let DeliveryExtrasController = class DeliveryExtrasController {
         const actorId = Number(req.actor.id);
         if (this.useMongo()) {
             const dm = await this.mongo.findByMysqlId('delivery_men', actorId);
+            if (!(await this.isOnShift(dm)))
+                return { orders: [], total_size: 0 };
             const zoneId = dm?.mysql_zone_id ?? dm?.zone_id;
             const rows = await this.mongo.findMany('orders', {
                 mysql_delivery_man_id: { $in: [null, 0] },
@@ -461,9 +464,32 @@ let DeliveryExtrasController = class DeliveryExtrasController {
         }
         return [];
     }
+    async isOnShift(dm) {
+        if (!dm)
+            return true;
+        const shiftId = Number(dm.shift_id ?? 0);
+        if (!shiftId)
+            return true;
+        const shift = await this.mongo.findByMysqlId('shifts', shiftId);
+        if (!shift || shift.is_full_day)
+            return true;
+        const start = shift.start_time ? new Date(shift.start_time) : null;
+        const end = shift.end_time ? new Date(shift.end_time) : null;
+        if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()))
+            return true;
+        const now = new Date();
+        const nowM = now.getUTCHours() * 60 + now.getUTCMinutes();
+        const sM = start.getUTCHours() * 60 + start.getUTCMinutes();
+        const eM = end.getUTCHours() * 60 + end.getUTCMinutes();
+        return sM <= eM ? (nowM >= sM && nowM < eM) : (nowM >= sM || nowM < eM);
+    }
     async acceptOrder(req, body = {}) {
         const orderId = Number(body.order_id ?? body.id ?? 0);
         if (this.useMongo() && orderId > 0) {
+            const me = await this.mongo.findByMysqlId('delivery_men', Number(req.actor.id));
+            if (!(await this.isOnShift(me))) {
+                return { errors: [{ code: 'shift', message: 'You are off shift — new orders are paused until your shift window.' }] };
+            }
             const o = await this.mongo.findByMysqlId('orders', orderId);
             if (!o)
                 return { errors: [{ code: 'order', message: 'Order not found' }] };

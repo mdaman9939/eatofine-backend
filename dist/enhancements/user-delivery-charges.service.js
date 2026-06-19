@@ -390,9 +390,10 @@ let UserDeliveryChargesService = class UserDeliveryChargesService {
         }
         const surchargeTotal = applicable.reduce((a, b) => a + b.amount, 0);
         const surchargeGst = applicable.reduce((a, b) => a + b.gst_amount, 0);
+        const vehicle = await this.vehicleTierExtra(input.distance_km);
         const baseAfterSurge = +(baseTotal * surgeMul).toFixed(2);
         const baseGstAmount = +(baseAfterSurge * slab.gst_rate / 100).toFixed(2);
-        const subtotal = +(baseAfterSurge + surchargeTotal).toFixed(2);
+        const subtotal = +(baseAfterSurge + surchargeTotal + vehicle.amount).toFixed(2);
         const gstTotal = +(baseGstAmount + surchargeGst).toFixed(2);
         const total = +(subtotal + gstTotal).toFixed(2);
         return {
@@ -402,10 +403,28 @@ let UserDeliveryChargesService = class UserDeliveryChargesService {
             base_after_surge: baseAfterSurge,
             surge_multiplier: surgeMul,
             surcharges: applicable,
+            vehicle_extra: vehicle.amount,
+            vehicle_tier: vehicle.amount > 0 ? vehicle.label : null,
             gst_amount: gstTotal,
             subtotal, total,
             free_delivery: false,
         };
+    }
+    async vehicleTierExtra(distanceKm) {
+        if (!this.useMongo())
+            return { amount: 0, label: '' };
+        const rows = await this.mongo.findMany('vehicles', { status: { $in: [true, 1] } }, { sort: { starting_coverage_area: 1, mysql_id: 1 } });
+        for (const v of rows) {
+            const extra = Number(v.extra_charges ?? 0);
+            const start = Number(v.starting_coverage_area ?? 0);
+            const max = Number(v.maximum_coverage_area ?? 0);
+            if (extra <= 0 || max <= 0)
+                continue;
+            if (distanceKm >= start && distanceKm <= max) {
+                return { amount: +extra.toFixed(2), label: `Vehicle: ${v.type ?? `#${v.mysql_id}`}` };
+            }
+        }
+        return { amount: 0, label: '' };
     }
 };
 exports.UserDeliveryChargesService = UserDeliveryChargesService;

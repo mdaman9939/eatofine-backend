@@ -1606,6 +1606,31 @@ export declare class AdminService {
         id: number;
         status: string;
     }>;
+    createDmIncentive(body: {
+        dm_id?: number;
+        period?: string;
+        deliveries?: number;
+        claim_amount?: number;
+    }): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
+    updateDmIncentive(id: number, body: {
+        period?: string;
+        deliveries?: number;
+        claim_amount?: number;
+    }): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
+    deleteDmIncentive(id: number): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
+    deleteDmReview(id: number): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
     listSubscriptionOrders(): Promise<{
         total: number;
         items: {
@@ -2065,6 +2090,7 @@ declare module './admin.service' {
             type?: string;
         }): Promise<unknown>;
         updateDisbursementStatus(id: number, status: string): Promise<unknown>;
+        generateDmDisbursements(): Promise<unknown>;
         listWithdrawRequests(opts: ListOpts & {
             type?: string;
             approved?: boolean;

@@ -613,6 +613,12 @@ export class AdminController {
     return this.admin.listDmIncentives(status);
   }
 
+  @Post('dm-incentives')
+  @HttpCode(200)
+  createDmIncentive(@Body() body: { dm_id?: number; period?: string; deliveries?: number; claim_amount?: number }) {
+    return this.admin.createDmIncentive(body);
+  }
+
   @Patch('dm-incentives/:id/approve')
   approveDmIncentive(@Param('id', ParseIntPipe) id: number) {
     return this.admin.updateDmIncentiveStatus(id, 'approved');
@@ -621,6 +627,16 @@ export class AdminController {
   @Patch('dm-incentives/:id/reject')
   rejectDmIncentive(@Param('id', ParseIntPipe) id: number, @Body() body: { reason?: string }) {
     return this.admin.updateDmIncentiveStatus(id, 'rejected', body.reason);
+  }
+
+  @Patch('dm-incentives/:id')
+  updateDmIncentive(@Param('id', ParseIntPipe) id: number, @Body() body: { period?: string; deliveries?: number; claim_amount?: number }) {
+    return this.admin.updateDmIncentive(id, body);
+  }
+
+  @Delete('dm-incentives/:id')
+  deleteDmIncentive(@Param('id', ParseIntPipe) id: number) {
+    return this.admin.deleteDmIncentive(id);
   }
 
   // ── Subscription orders (filter from existing orders) ────────────────
@@ -1078,6 +1094,11 @@ export class AdminController {
   disbursements(@Query('limit') limit?: string, @Query('offset') offset?: string, @Query('type') type?: string) {
     return this.admin.listDisbursements({ limit: toInt(limit, 50), offset: toInt(offset, 0), type: type || undefined });
   }
+  @Post('disbursements/generate')
+  @HttpCode(200)
+  generateDmDisbursements() {
+    return this.admin.generateDmDisbursements();
+  }
   @Patch('disbursements/:id/status')
   updateDisbursementStatus(@Param('id', ParseIntPipe) id: number, @Body() body: { status: string }) {
     return this.admin.updateDisbursementStatus(id, body.status);
@@ -1196,6 +1217,11 @@ export class AdminController {
   @Get('dm-reviews')
   dmReviews(@Query('limit') limit?: string, @Query('offset') offset?: string) {
     return this.admin.listDMReviews({ limit: toInt(limit, 50), offset: toInt(offset, 0) });
+  }
+
+  @Delete('dm-reviews/:id')
+  deleteDmReview(@Param('id', ParseIntPipe) id: number) {
+    return this.admin.deleteDmReview(id);
   }
 
   @Get('faqs')

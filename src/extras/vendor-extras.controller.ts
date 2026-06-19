@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { AuthGuard, RequireAuth } from '../auth/auth.guard';
 import type { AuthedRequest } from '../auth/auth.guard';
+import { AuthService } from '../auth/auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { storageBaseUrl, storageFullUrl } from '../common/storage-url';
@@ -163,7 +164,26 @@ export class VendorExtrasController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mongo: MongoDataService,
+    private readonly auth: AuthService,
   ) {}
+
+  /** Resolve the acting vendor for a route that the guard left open (used by
+   *  the new-join business-plan confirm, which is called mid-registration
+   *  before the vendor has a session). Returns the actor when a valid vendor
+   *  bearer token is present, else null. Populates `req.actor` so the rest of
+   *  the handler reads exactly like a guarded route. */
+  private async resolveVendor(req: AuthedRequest): Promise<{ kind: 'vendor'; id: bigint } | null> {
+    if (req.actor?.kind === 'vendor') return req.actor as { kind: 'vendor'; id: bigint };
+    const header = req.header('authorization') ?? '';
+    const token = header.replace(/^Bearer\s+/i, '').trim();
+    if (!token) return null;
+    const actor = await this.auth.findActorByToken(token);
+    if (actor?.kind === 'vendor') {
+      req.actor = actor;
+      return actor as { kind: 'vendor'; id: bigint };
+    }
+    return null;
+  }
 
   /** Feature flag — when set, extras read/write Mongo first. */
   private useMongo(): boolean {
@@ -2945,14 +2965,30 @@ export class VendorExtrasController {
     };
   }
 
-  /** "Shift to New Business Plan" submit. The app POSTs here; without a handler
-   *  it 404'd and the button just spun. Updates the restaurant's plan model and
-   *  returns immediately (wallet payment → no gateway redirect). */
+  /** "Shift to New Business Plan" submit AND the new-join business-plan confirm.
+   *  Two callers hit this:
+   *   1. A logged-in vendor switching plans → scoped to their own restaurant.
+   *   2. The restaurant-app registration flow, mid-signup, BEFORE the vendor has
+   *      a session — it sends `restaurant_id` for the just-created (pending)
+   *      restaurant so the app can show the success screen.
+   *  So the route is left open (no `@RequireAuth`); we resolve the vendor from
+   *  the bearer token when present, else fall back to the new-join `restaurant_id`
+   *  but ONLY for a still-pending restaurant (an approved restaurant can never be
+   *  re-planned without a session). */
   @HttpCode(200)
   @Post('business_plan')
+  @RequireAuth()
   async setBusinessPlan(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
     if (!this.useMongo()) return { message: 'plan updated', redirect_url: null, success: true };
-    const restaurant = await this.vendorRestaurant(req).catch(() => null);
+    const actor = await this.resolveVendor(req);
+    let restaurant = actor ? await this.vendorRestaurant(req).catch(() => null) : null;
+    // New-join confirm: no session yet, scope to the pending restaurant by id.
+    if (!restaurant && body.restaurant_id !== undefined) {
+      const r = await this.mongo.findByMysqlId<MongoRestaurantDoc & { approval_status?: string }>(
+        'restaurants', Number(body.restaurant_id),
+      ).catch(() => null);
+      if (r && (r as { approval_status?: string }).approval_status === 'pending') restaurant = r;
+    }
     if (!restaurant) return { errors: [{ code: 'restaurant', message: 'restaurant not found' }] };
     const plan = String(body.business_plan ?? 'commission');
     const data: Record<string, unknown> = {

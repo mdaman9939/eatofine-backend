@@ -51,6 +51,9 @@ export declare class ConfigController {
         toggle_veg_non_veg: boolean;
         toggle_dm_registration: boolean;
         toggle_restaurant_registration: boolean;
+        restaurant_additional_join_us_page_data: {
+            data?: unknown[];
+        };
         schedule_order_slot_duration: number;
         subscription_status: number;
         subscription_frequencies: string;

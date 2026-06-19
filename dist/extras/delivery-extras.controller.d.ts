@@ -41,6 +41,7 @@ export declare class DeliveryExtrasController {
         pending_withdraw?: undefined;
         available_to_withdraw?: undefined;
         net_position?: undefined;
+        on_shift?: undefined;
     } | {
         id: number;
         f_name: {} | null;
@@ -68,6 +69,7 @@ export declare class DeliveryExtrasController {
         pending_withdraw: number;
         available_to_withdraw: number;
         net_position: number;
+        on_shift: boolean;
     } | {
         id: number;
         f_name: string | null;
@@ -95,6 +97,7 @@ export declare class DeliveryExtrasController {
         active?: undefined;
         available_to_withdraw?: undefined;
         net_position?: undefined;
+        on_shift?: undefined;
     }>;
     private saveImage;
     updateProfile(req: AuthedRequest, body?: Record<string, unknown>, files?: {
@@ -573,6 +576,7 @@ export declare class DeliveryExtrasController {
             image_full_url: string | null;
         };
     }[]>;
+    private isOnShift;
     acceptOrder(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
         errors: {
             code: string;
