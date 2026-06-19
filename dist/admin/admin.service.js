@@ -5210,7 +5210,7 @@ AdminService.prototype.updateDisbursementStatus = async function (id, status) {
         const from = String(d.status ?? 'pending');
         const dmId = Number(d.mysql_delivery_man_id ?? d.delivery_man_id ?? 0);
         const amt = Math.round((Number(d.total_amount ?? 0) || 0) * 100) / 100;
-        if (dmId > 0 && amt > 0 && from !== status) {
+        if (d.wallet_managed === true && dmId > 0 && amt > 0 && from !== status) {
             const reserved = (s) => s === 'pending' || s === 'processing';
             const wInc = {};
             let setPaidOut = null;
@@ -5291,6 +5291,8 @@ AdminService.prototype.generateDmDisbursements = async function () {
             status: 'pending',
             payment_method: 'cash',
             paid_out: false,
+            wallet_managed: true,
+            reserved_amount: available,
             created_at: now,
             updated_at: now,
         });

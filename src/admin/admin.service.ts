@@ -5860,19 +5860,20 @@ AdminService.prototype.updateDisbursementStatus = async function (this: AdminSer
   };
 
   if (this['useMongo']()) {
-    const d = await this['mongo'].findByMysqlId<{ mysql_id: number; status?: string; initiated_at?: Date | null; total_amount?: number; mysql_delivery_man_id?: number | null; delivery_man_id?: number | null }>('disbursements', Number(id));
+    const d = await this['mongo'].findByMysqlId<{ mysql_id: number; status?: string; initiated_at?: Date | null; total_amount?: number; wallet_managed?: boolean; mysql_delivery_man_id?: number | null; delivery_man_id?: number | null }>('disbursements', Number(id));
     if (!d) throw new NotFoundException({ errors: [{ code: 'disbursement', message: 'not found' }] });
     const from = String(d.status ?? 'pending');
     const dmId = Number(d.mysql_delivery_man_id ?? d.delivery_man_id ?? 0);
     const amt = Math.round((Number(d.total_amount ?? 0) || 0) * 100) / 100;
 
-    // DELIVERYMAN disbursements actually move money through the rider wallet,
-    // mirroring the withdrawal lifecycle so the same balance can never be paid
-    // twice across disbursements + withdraw-requests:
+    // Only rows created by "Generate payouts" (wallet_managed) move real money
+    // through the rider wallet — mirroring the withdrawal lifecycle so the same
+    // balance can never be paid twice across disbursements + withdraw-requests:
     //   reserved (pending/processing): pending_withdraw holds the amount
     //   disbursed:  reservation → real debit (balance−, total_withdrawn+)
     //   canceled:   reservation released (or, from disbursed, money returned)
-    if (dmId > 0 && amt > 0 && from !== status) {
+    // Legacy/seed rows lack the flag → status-only bookkeeping (no funds gate).
+    if (d.wallet_managed === true && dmId > 0 && amt > 0 && from !== status) {
       const reserved = (s: string) => s === 'pending' || s === 'processing';
       const wInc: Record<string, number> = {};
       let setPaidOut: boolean | null = null;
@@ -5942,6 +5943,11 @@ AdminService.prototype.generateDmDisbursements = async function (this: AdminServ
       status: 'pending',
       payment_method: 'cash',
       paid_out: false,
+      // Marks this row as one the wallet engine owns: its lifecycle moves real
+      // money (reserve → debit). Legacy/seed rows lack this flag and stay
+      // status-only, so marking them paid never hits the funds gate.
+      wallet_managed: true,
+      reserved_amount: available,
       created_at: now,
       updated_at: now,
     });
