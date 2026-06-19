@@ -750,6 +750,9 @@ let EnhancementsService = class EnhancementsService {
                 order_date: dt,
                 restaurant: {
                     name: restaurant?.name ?? '—',
+                    business_name: (restaurant?.business_name && String(restaurant.business_name).trim() !== '')
+                        ? String(restaurant.business_name)
+                        : (restaurant?.name ?? '—'),
                     address: restaurant?.address ?? '—',
                     gstin: ph(restaurant?.gstin),
                     fssai: ph(restaurant?.fssai),

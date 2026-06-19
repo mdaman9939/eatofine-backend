@@ -145,6 +145,7 @@ export declare class EnhancementsController {
         order_date: Date;
         restaurant: {
             name: string;
+            business_name: string;
             address: string;
             gstin: string | null;
             fssai: string | null;

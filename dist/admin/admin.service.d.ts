@@ -510,6 +510,10 @@ export declare class AdminService {
         identity_number?: string;
         state?: string;
         license_document?: string;
+        business_name?: string;
+        gstin?: string;
+        fssai?: string;
+        cin?: string;
     }): Promise<{
         ok: boolean;
         id: number;

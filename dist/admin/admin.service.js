@@ -806,6 +806,14 @@ let AdminService = class AdminService {
         const data = {};
         if (body.name !== undefined)
             data.name = body.name;
+        if (body.business_name !== undefined)
+            data.business_name = body.business_name;
+        if (body.gstin !== undefined)
+            data.gstin = body.gstin;
+        if (body.fssai !== undefined)
+            data.fssai = body.fssai;
+        if (body.cin !== undefined)
+            data.cin = body.cin;
         if (body.email !== undefined)
             data.email = body.email;
         if (body.phone !== undefined)

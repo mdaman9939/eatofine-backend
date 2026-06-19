@@ -112,6 +112,7 @@ interface MongoRestaurantDoc {
   address?: string | null;
   mysql_vendor_id?: number | null;
   comission?: number | null;
+  business_name?: string | null;
   gstin?: string | null;
   fssai?: string | null;
   cin?: string | null;
@@ -897,6 +898,11 @@ export class EnhancementsService {
         order_date: dt,
         restaurant: {
           name: restaurant?.name ?? '—',
+          // Legal/registered "business name" = the parent company the outlet is
+          // registered under. Falls back to the outlet name when not set.
+          business_name: (restaurant?.business_name && String(restaurant.business_name).trim() !== '')
+            ? String(restaurant.business_name)
+            : (restaurant?.name ?? '—'),
           address: restaurant?.address ?? '—',
           gstin: ph(restaurant?.gstin),
           fssai: ph(restaurant?.fssai),

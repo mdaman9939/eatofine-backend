@@ -927,10 +927,16 @@ export class AdminService {
       logo?: string; cover_photo?: string;
       veg?: boolean; non_veg?: boolean; delivery?: boolean; take_away?: boolean;
       restaurant_model?: string; identity_number?: string; state?: string; license_document?: string;
+      // Legal / tax-invoice header details (shown on the customer GST invoice).
+      business_name?: string; gstin?: string; fssai?: string; cin?: string;
     },
   ) {
     const data: Record<string, unknown> = {};
     if (body.name !== undefined) data.name = body.name;
+    if (body.business_name !== undefined) data.business_name = body.business_name;
+    if (body.gstin !== undefined) data.gstin = body.gstin;
+    if (body.fssai !== undefined) data.fssai = body.fssai;
+    if (body.cin !== undefined) data.cin = body.cin;
     if (body.email !== undefined) data.email = body.email;
     if (body.phone !== undefined) data.phone = body.phone;
     if (body.address !== undefined) data.address = body.address;
