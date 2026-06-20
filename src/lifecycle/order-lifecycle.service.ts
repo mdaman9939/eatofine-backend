@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { issueCreditNote } from '../completion/credit-note.util';
 import { FcmService } from '../notifications/fcm.service';
 import {
   CANCEL_MESSAGE_CUSTOMER,
@@ -273,6 +274,21 @@ export class OrderLifecycleService {
       });
       const tok = await this.tokenForUser(uid);
       await this.push(tok, 'Refund processed', `₹${amount.toFixed(2)} refunded to your wallet`, Number(order.mysql_id), 'refund');
+      // Raise the credit note (accounting document) for this cancellation refund.
+      // issueCreditNote carries the order's OBR/ETFU invoice numbers as the
+      // Reference Invoice no and is idempotent on refund_id, so the same refund
+      // never double-issues. Best-effort: a credit-note failure must NOT flip the
+      // (already-completed) wallet refund to FAILED — hence its own try/catch.
+      try {
+        await issueCreditNote(this.mongo, {
+          orderId: Number(order.mysql_id),
+          refundId: rid,
+          amount,
+          reason: 'order_cancelled',
+        });
+      } catch (cnErr) {
+        this.logger.warn(`credit note failed for order ${order.mysql_id}: ${cnErr instanceof Error ? cnErr.message : String(cnErr)}`);
+      }
       return REFUND_STATUS.PROCESSED;
     } catch (e) {
       this.logger.warn(`refund failed for order ${order.mysql_id}: ${e instanceof Error ? e.message : String(e)}`);

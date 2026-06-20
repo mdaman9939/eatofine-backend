@@ -33,9 +33,14 @@ export interface InvoiceRow {
 export interface CreditNoteRow {
     id: number;
     credit_note_number: string;
+    credit_note_number_obr: string | null;
+    credit_note_number_etu: string | null;
     order_id: number;
     customer_id: number;
     restaurant_id: number | null;
+    reference_invoice_no_obr: string | null;
+    reference_invoice_no_etu: string | null;
+    reference_invoice_date: Date | null;
     reason: string | null;
     refund_amount: number;
     tax_reversed: number;

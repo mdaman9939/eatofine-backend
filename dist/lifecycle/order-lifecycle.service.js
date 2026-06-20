@@ -12,6 +12,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.OrderLifecycleService = void 0;
 const common_1 = require("@nestjs/common");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
+const credit_note_util_1 = require("../completion/credit-note.util");
 const fcm_service_1 = require("../notifications/fcm.service");
 const order_lifecycle_constants_1 = require("./order-lifecycle.constants");
 const r2 = (n) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
@@ -211,6 +212,17 @@ let OrderLifecycleService = class OrderLifecycleService {
             });
             const tok = await this.tokenForUser(uid);
             await this.push(tok, 'Refund processed', `₹${amount.toFixed(2)} refunded to your wallet`, Number(order.mysql_id), 'refund');
+            try {
+                await (0, credit_note_util_1.issueCreditNote)(this.mongo, {
+                    orderId: Number(order.mysql_id),
+                    refundId: rid,
+                    amount,
+                    reason: 'order_cancelled',
+                });
+            }
+            catch (cnErr) {
+                this.logger.warn(`credit note failed for order ${order.mysql_id}: ${cnErr instanceof Error ? cnErr.message : String(cnErr)}`);
+            }
             return order_lifecycle_constants_1.REFUND_STATUS.PROCESSED;
         }
         catch (e) {

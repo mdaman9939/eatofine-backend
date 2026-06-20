@@ -29,7 +29,12 @@ export interface InvoiceRow {
 
 export interface CreditNoteRow {
   id: number; credit_note_number: string;
+  credit_note_number_obr: string | null; credit_note_number_etu: string | null;
   order_id: number; customer_id: number; restaurant_id: number | null;
+  // Original tax-invoice reference (CNOBR → OBR…, CNETU → ETFU…) so the list can
+  // show which invoice each credit note reverses, matching the printed document.
+  reference_invoice_no_obr: string | null; reference_invoice_no_etu: string | null;
+  reference_invoice_date: Date | null;
   reason: string | null;
   refund_amount: number; tax_reversed: number; delivery_reversed: number; total_credit: number;
   status: string; notes: string | null;
@@ -712,9 +717,14 @@ export class CompletionService {
         out.push({
           id: Number(d.mysql_id),
           credit_note_number: d.credit_note_number,
+          credit_note_number_obr: d.credit_note_number_obr ?? d.credit_note_number ?? null,
+          credit_note_number_etu: d.credit_note_number_etu ?? null,
           order_id: Number(d.order_id),
           customer_id: Number(d.customer_id),
           restaurant_id: d.restaurant_id != null ? Number(d.restaurant_id) : null,
+          reference_invoice_no_obr: d.reference_invoice_no_obr ?? null,
+          reference_invoice_no_etu: d.reference_invoice_no_etu ?? null,
+          reference_invoice_date: d.reference_invoice_date ?? null,
           reason: d.reason ?? null,
           refund_amount: Number(d.refund_amount ?? 0),
           tax_reversed: Number(d.tax_reversed ?? 0),
