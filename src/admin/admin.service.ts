@@ -7,6 +7,7 @@ import { toNum } from '../common/decimal';
 import { OrderLifecycleService } from '../lifecycle/order-lifecycle.service';
 import { CANCEL_REASONS, type CancelReason } from '../lifecycle/order-lifecycle.constants';
 import { storageFullUrl } from '../common/storage-url';
+import { issueCreditNote } from '../completion/credit-note.util';
 
 /** Shared shape for the admin food create + update endpoints. */
 export interface FoodWriteBody {
@@ -2649,7 +2650,13 @@ export class AdminService {
       veg: body.veg ?? true,
       non_veg: body.non_veg ?? true,
       status: true,
-      active: false,
+      // "Open now / accepting orders" — the customer app only LISTS restaurants
+      // where active=true, so a new outlet must default to OPEN or it stays
+      // invisible to customers (admin still sees it; admin list ignores active).
+      // Respect an explicit value from the form; otherwise open it.
+      active: body.active === undefined
+        ? true
+        : (body.active === true || body.active === 1 || body.active === '1' || body.active === 'true'),
       approval_status: 'approved',
       logo: body.logo ?? null,
       cover_photo: body.cover_photo ?? null,
@@ -3110,9 +3117,14 @@ export class AdminService {
     }
     const r = await this.mongo.findByMysqlId<{ mysql_id: number }>('restaurants', id);
     if (!r) throw new NotFoundException({ errors: [{ code: 'restaurant', message: 'Restaurant not found' }] });
+    // Approving makes the restaurant fully live: `status` (admin-enabled) AND
+    // `active` (open for orders) must BOTH be true, else it stays hidden from POS
+    // (filters status) and the customer app (browse needs status+active). Leaving
+    // active untouched here was how an approved restaurant could still be invisible.
     await this.mongo.updateOne('restaurants', { mysql_id: id }, {
       approval_status: decision,
       status: decision === 'approved',
+      active: decision === 'approved',
       rejection_reason: decision === 'rejected' ? (reason ?? null) : null,
       approved_at: decision === 'approved' ? new Date() : null,
       updated_at: new Date(),
@@ -5796,6 +5808,21 @@ AdminService.prototype.listDisbursements = async function (this: AdminService, o
         if (rr.mysql_vendor_id != null && rr.name) restByVendor.set(Number(rr.mysql_vendor_id), rr.name);
       }
     }
+    // Rider "payable" = balance − cash-in-hand (exactly what the Mark-paid funds
+    // gate checks). Shown per row so the admin sees what a payout can cover
+    // BEFORE clicking — a row whose amount exceeds this is unbacked/legacy.
+    const dmIdsForWallet = Array.from(new Set(rows.map((r) => readFk(r, 'delivery_man_id')).filter((x): x is number => x !== null)));
+    const payableByDm = new Map<number, number>();
+    if (dmIdsForWallet.length) {
+      const wallets = await this['mongo'].findMany<{ delivery_man_id?: number; mysql_delivery_man_id?: number; balance?: number; collected_cash?: number }>(
+        'delivery_man_wallets',
+        { $or: [{ delivery_man_id: { $in: dmIdsForWallet } }, { mysql_delivery_man_id: { $in: dmIdsForWallet } }] },
+      );
+      for (const w of wallets) {
+        const did = Number(w.mysql_delivery_man_id ?? w.delivery_man_id ?? 0);
+        if (did > 0) payableByDm.set(did, Math.round(Math.max(0, (Number(w.balance ?? 0)) - (Number(w.collected_cash ?? 0))) * 100) / 100);
+      }
+    }
     return paginate(
       rows.map((r) => {
         const vendorId = readFk(r, 'vendor_id');
@@ -5827,6 +5854,8 @@ AdminService.prototype.listDisbursements = async function (this: AdminService, o
           payment_method: (r.payment_method as string) ?? 'cash',
           initiated_at: initiatedAt,
           paid_at: paidAt,
+          // What the rider's wallet can actually back right now (DM rows only).
+          rider_available: isDm ? (payableByDm.get(dmId) ?? 0) : null,
         };
       }),
       total,
@@ -7330,37 +7359,15 @@ AdminService.prototype.updateRefundStatus = async function (this: AdminService, 
       const orderId = Number(r.order_id ?? r.mysql_order_id ?? 0);
       const refundAmount = Number(r.refund_amount ?? 0);
       if (orderId > 0 && refundAmount > 0) {
-        const existing = await this['mongo'].findOne<{ mysql_id: number }>('credit_notes', { refund_id: Number(id) });
-        if (!existing) {
-          const order = await this['mongo'].findByMysqlId<{
-            mysql_id: number; mysql_user_id?: number; mysql_restaurant_id?: number;
-            total_tax_amount?: number; delivery_charge?: number;
-          }>('orders', orderId);
-          const taxReversed = Number(order?.total_tax_amount ?? 0);
-          const delivReversed = Number(order?.delivery_charge ?? 0);
-          const total = refundAmount + taxReversed + delivReversed;
-          const today = new Date();
-          const cnNumber = `CN-${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}-${orderId}R${id}`;
-          const cnId = await this['mongo'].nextMysqlId('credit_notes');
-          await this['mongo'].insertOne('credit_notes', {
-            mysql_id: cnId,
-            credit_note_number: cnNumber,
-            refund_id: Number(id),
-            order_id: orderId,
-            customer_id: Number(order?.mysql_user_id ?? r.user_id ?? 0),
-            restaurant_id: order?.mysql_restaurant_id != null ? Number(order.mysql_restaurant_id) : null,
-            reason: (r.customer_reason as string) ?? 'Refund',
-            refund_amount: refundAmount,
-            tax_reversed: taxReversed,
-            delivery_reversed: delivReversed,
-            total_credit: total,
-            status: 'issued',
-            notes: 'Auto-issued on refund ' + status,
-            issued_by: null,
-            created_at: today,
-            updated_at: today,
-          });
-        }
+        // Unified issuer: idempotent per refund, assigns CNOBR/CNETU numbers and
+        // links the order's OBR/ETFU reference invoice + ARN.
+        await issueCreditNote(this['mongo'], {
+          orderId,
+          refundId: Number(id),
+          amount: refundAmount,
+          reason: (r.customer_reason as string) ?? 'Refund',
+          notes: `Auto-issued on refund ${status}`,
+        });
       }
     }
     return { ok: true, id, status };

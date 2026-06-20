@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { BusinessSettingsService } from '../business-settings/business-settings.service';
+import { issueCreditNote, type CreditNoteDoc } from './credit-note.util';
 
 // SOW Admin Completion — unified service for the 5 remaining admin features:
 //   1. Vendor invoices (monthly auto-generate)
@@ -100,23 +101,8 @@ type MongoVendorInvoice = {
   updated_at?: Date | null;
 };
 
-type MongoCreditNote = {
-  mysql_id: number;
-  credit_note_number: string;
-  order_id: number;
-  customer_id: number;
-  restaurant_id: number | null;
-  reason?: string | null;
-  refund_amount: number;
-  tax_reversed: number;
-  delivery_reversed: number;
-  total_credit: number;
-  status: string;
-  notes?: string | null;
-  issued_by?: number | null;
-  created_at?: Date | null;
-  updated_at?: Date | null;
-};
+// The credit-note record shape (CreditNoteDoc) lives in ./credit-note.util — the
+// single source of truth shared by the refund engine + refund-approval issuer.
 
 type MongoPlatformSetting = {
   mysql_id: number;
@@ -496,23 +482,28 @@ export class CompletionService {
       const dayEnd = new Date(`${endStr}T00:00:00.000Z`);
       dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
 
-      // Aggregate delivered orders grouped by restaurant.
+      // Aggregate the authoritative settlement records (the same breakdown that
+      // actually credited the restaurant wallet) for settlements completed in the
+      // period, grouped by restaurant. Commission is taken on the food base, not
+      // the full order_amount.
       const rollups = await this.mongo.aggregate<{
         _id: { restaurant_id: number };
         orders: number;
-        gross: number;
-      }>('orders', [
+        food: number;
+        commission: number;
+      }>('settlements', [
         {
           $match: {
-            order_status: 'delivered',
-            delivered: { $gte: dayStart, $lt: dayEnd },
+            settlement_completed: true,
+            completed_at: { $gte: dayStart, $lt: dayEnd },
           },
         },
         {
           $group: {
             _id: { restaurant_id: '$mysql_restaurant_id' },
             orders: { $sum: 1 },
-            gross: { $sum: { $ifNull: ['$order_amount', 0] } },
+            food: { $sum: { $ifNull: ['$food_amount', 0] } },
+            commission: { $sum: { $ifNull: ['$admin_commission', 0] } },
           },
         },
       ]);
@@ -535,8 +526,9 @@ export class CompletionService {
         if (!vid) continue;
 
         const orders = Number(row.orders ?? 0);
-        const gross = Number(row.gross ?? 0);
-        if (gross <= 0) continue;
+        const food = Number(row.food ?? 0);
+        const commissionAmount = Number(row.commission ?? 0);
+        if (food <= 0) continue;
 
         // Skip if invoice already exists
         const existing = await this.mongo.findOne<MongoVendorInvoice>('vendor_invoices', {
@@ -547,9 +539,10 @@ export class CompletionService {
         });
         if (existing) continue;
 
-        const commissionPct = Number(restaurant.comission ?? 0);
         const planType = (restaurant.restaurant_model ?? 'commission').toLowerCase();
-        const commissionBase = (gross * commissionPct) / 100;
+        // Commission is the amount settlement actually charged (food base net of
+        // restaurant-funded discount), not order_amount × rate.
+        const commissionBase = commissionAmount;
         const ppoBase = planType === 'ppo' ? orders * rates.ppo : 0;
         const subFee = 0;
         const taxable = commissionBase + ppoBase + subFee;
@@ -557,7 +550,7 @@ export class CompletionService {
         const sgst = taxable * (rates.sgst / 100);
         const total = taxable + cgst + sgst;
         const tds = total * (rates.tds / 100);
-        const netPayable = gross - total - tds;
+        const netPayable = food - total - tds;
 
         seq += 1;
         const invNumber = `RES${fyCode}-${String(seq).padStart(4, '0')}`;
@@ -572,7 +565,7 @@ export class CompletionService {
           plan_type: planType,
           period_start: startStr,
           period_end: endStr,
-          gross_sales: gross,
+          gross_sales: food,
           order_count: orders,
           commission_base: commissionBase,
           ppo_base: ppoBase,
@@ -710,7 +703,7 @@ export class CompletionService {
     if (this.useMongo()) {
       const filter: Record<string, unknown> = {};
       if (filters.status) filter.status = filters.status;
-      const docs = await this.mongo.findMany<MongoCreditNote>('credit_notes', filter, {
+      const docs = await this.mongo.findMany<CreditNoteDoc>('credit_notes', filter, {
         sort: { created_at: -1, mysql_id: -1 },
         limit,
       });
@@ -779,38 +772,20 @@ export class CompletionService {
     }
 
     if (this.useMongo()) {
-      const order = await this.mongo.findByMysqlId<{
-        mysql_id: number;
-        mysql_user_id?: number;
-        mysql_restaurant_id?: number;
-      }>('orders', body.order_id);
-      if (!order) throw new NotFoundException({ errors: [{ code: 'order', message: 'order not found' }] });
-
-      const taxReversed = body.tax_reversed ?? 0;
-      const delivReversed = body.delivery_reversed ?? 0;
-      const total = Number(body.refund_amount) + Number(taxReversed) + Number(delivReversed);
-      const today = new Date();
-      const cnNumber = `CN-${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}-${body.order_id}`;
-
-      const mysqlId = await this.mongo.nextMysqlId('credit_notes');
-      await this.mongo.insertOne<MongoCreditNote>('credit_notes', {
-        mysql_id: mysqlId,
-        credit_note_number: cnNumber,
-        order_id: Number(body.order_id),
-        customer_id: Number(order.mysql_user_id ?? 0),
-        restaurant_id: order.mysql_restaurant_id != null ? Number(order.mysql_restaurant_id) : null,
-        reason: body.reason ?? null,
-        refund_amount: Number(body.refund_amount),
-        tax_reversed: Number(taxReversed),
-        delivery_reversed: Number(delivReversed),
-        total_credit: total,
-        status: 'issued',
-        notes: body.notes ?? null,
-        issued_by: body.issued_by ?? null,
-        created_at: today,
-        updated_at: today,
+      const { record, alreadyExisted } = await issueCreditNote(this.mongo, {
+        orderId: Number(body.order_id),
+        amount: Number(body.refund_amount),
+        reason: body.reason,
+        notes: body.notes,
+        issuedBy: body.issued_by ?? null,
       });
-      return { ok: true, credit_note_number: cnNumber, total_credit: total };
+      if (!record) throw new NotFoundException({ errors: [{ code: 'order', message: 'order not found' }] });
+      return {
+        ok: true,
+        credit_note_number: record.credit_note_number,
+        total_credit: record.total_credit,
+        already_existed: alreadyExisted,
+      };
     }
 
     const orderRows = await this.prisma.$queryRawUnsafe<Array<{
@@ -839,6 +814,178 @@ export class CompletionService {
       body.notes ?? null, body.issued_by ?? null,
     );
     return { ok: true, credit_note_number: cnNumber, total_credit: total };
+  }
+
+  /** Build the 2-page printable credit note (reversal mirror of getInvoice):
+   *  Page 1 = restaurant CNOBR, Page 2 = Eatofine service CNETU. A full refund
+   *  reverses the whole bill; a partial (item + GST) refund reverses only the
+   *  restaurant food page and zeroes the Eatofine service page. */
+  async getCreditNote(id: number) {
+    if (!this.useMongo()) {
+      throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    }
+    const cn = await this.mongo.findByMysqlId<CreditNoteDoc>('credit_notes', id);
+    if (!cn) throw new NotFoundException({ errors: [{ code: 'credit_note', message: 'not found' }] });
+
+    const order = await this.mongo.findByMysqlId<{
+      mysql_id: number;
+      mysql_user_id?: number | null;
+      mysql_restaurant_id?: number | null;
+      order_amount?: number;
+      total_tax_amount?: number;
+      delivery_charge?: number;
+      additional_charge?: number;
+      extra_packaging_amount?: number;
+      coupon_discount_amount?: number;
+      restaurant_discount_amount?: number;
+      delivery_address?: unknown;
+      contact_person_name?: string | null;
+      contact_person_number?: string | null;
+      delivered?: Date | null;
+      created_at_legacy?: Date | null;
+      created_at?: Date | null;
+    }>('orders', Number(cn.order_id));
+    if (!order) throw new NotFoundException({ errors: [{ code: 'order', message: 'order not found' }] });
+
+    const [items, restaurant, user] = await Promise.all([
+      this.mongo.findMany<{
+        mysql_id: number; food_id?: number; price?: number; quantity?: number;
+        tax_amount?: number; food_details?: string;
+      }>('order_details', { order_id: Number(cn.order_id) }, { sort: { mysql_id: 1 } }),
+      order.mysql_restaurant_id != null
+        ? this.mongo.findByMysqlId<{
+            name?: string; business_name?: string | null; address?: string;
+            gstin?: string | null; fssai?: string | null; cin?: string | null;
+          }>('restaurants', Number(order.mysql_restaurant_id))
+        : Promise.resolve(null),
+      order.mysql_user_id != null
+        ? this.mongo.findByMysqlId<{
+            f_name?: string | null; l_name?: string | null; email?: string | null; phone?: string | null;
+          }>('users', Number(order.mysql_user_id))
+        : Promise.resolve(null),
+    ]);
+
+    const [svcCgstRate, svcSgstRate, foodGstRate] = await Promise.all([
+      this.bs.getNumber('service_invoice_cgst_rate', 9),
+      this.bs.getNumber('service_invoice_sgst_rate', 9),
+      this.bs.getNumber('food_gst_rate', 5),
+    ]);
+
+    const r2 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
+    const ph = (v?: string | null) => (v && String(v).trim() !== '' ? String(v) : null);
+    const flatAddr = (v: unknown): string => {
+      if (!v) return '—';
+      if (typeof v === 'string') {
+        const t = v.trim();
+        if (t.startsWith('{') || t.startsWith('[')) {
+          try {
+            const o = JSON.parse(t) as Record<string, unknown>;
+            return [o.address, o.street, o.city, o.zip].filter(Boolean).join(', ') || t;
+          } catch { return t; }
+        }
+        return t || '—';
+      }
+      if (typeof v === 'object') {
+        const o = v as Record<string, unknown>;
+        return [o.address, o.street, o.city, o.zip].filter(Boolean).join(', ') || '—';
+      }
+      return String(v);
+    };
+
+    const orderAmount = Number(order.order_amount ?? 0);
+    const refundAmount = Number(cn.refund_amount ?? 0);
+    const isFull = Math.abs(refundAmount - orderAmount) < 0.01;
+
+    // Page 1 — restaurant credit note (reversal of the restaurant food invoice).
+    const foodSubtotal = items.reduce((s, it) => s + Number(it.price ?? 0) * Number(it.quantity ?? 0), 0);
+    const discountTotal = Number(order.coupon_discount_amount ?? 0) + Number(order.restaurant_discount_amount ?? 0);
+    const netValue = Math.max(0, foodSubtotal - discountTotal);
+    // Per-line GST when present; else derive food GST from net food × food GST
+    // rate (mirrors getInvoice so the credit note reverses the same figure).
+    const perLineTax = items.reduce((s, it) => s + Number(it.tax_amount ?? 0), 0);
+    const foodTax = perLineTax > 0 ? perLineTax : r2(netValue * (foodGstRate / 100));
+    const packaging = Number(order.extra_packaging_amount ?? 0);
+    const foodHalfTax = r2(foodTax / 2);
+    const gstRateHalf = netValue > 0 ? r2(((foodTax / netValue) * 100) / 2) : r2(foodGstRate / 2);
+    const restItems = items.map((it) => {
+      let parsed: { name?: string } = {};
+      try { parsed = JSON.parse(it.food_details ?? '{}'); } catch { /* ignore */ }
+      return {
+        name: parsed.name ?? `Item #${it.food_id ?? '?'}`,
+        qty: Number(it.quantity ?? 0),
+        unit_rate: r2(Number(it.price ?? 0)),
+        amount: r2(Number(it.price ?? 0) * Number(it.quantity ?? 0)),
+      };
+    });
+    const restPackaging = isFull ? r2(packaging) : 0;
+
+    // Page 2 — Eatofine service credit note (reversed Delivery/Order-Mgmt rows).
+    // Service fees are GST-inclusive (extract CGST/SGST from the amount paid) so
+    // the credit-note pages foot to order_amount — mirrors getInvoice.
+    const svcRow = (description: string, gross: number) => {
+      const rate = (svcCgstRate + svcSgstRate) / 100;
+      const base = rate > 0 ? gross / (1 + rate) : gross;
+      const cgst = r2(base * (svcCgstRate / 100));
+      const sgst = r2(base * (svcSgstRate / 100));
+      return { description, amount: r2(base), cgst, sgst, net: r2(gross) };
+    };
+    const eatofineRows = [
+      svcRow('Delivery Charges', isFull ? Number(order.delivery_charge ?? 0) : 0),
+      svcRow('Order Management Fees', isFull ? Number(order.additional_charge ?? 0) : 0),
+    ];
+    const eatofineTotal = r2(eatofineRows.reduce((s, x) => s + x.net, 0));
+
+    const dt = (order.delivered ?? order.created_at_legacy ?? order.created_at) ?? null;
+    const customerName = (user ? `${user.f_name ?? ''} ${user.l_name ?? ''}`.trim() : '') || order.contact_person_name || 'Customer';
+
+    return {
+      credit_note_no_obr: cn.credit_note_number_obr ?? cn.credit_note_number,
+      credit_note_no_etu: cn.credit_note_number_etu ?? cn.credit_note_number,
+      credit_note_date: cn.created_at ?? null,
+      reference_invoice_no_obr: cn.reference_invoice_no_obr ?? null,
+      reference_invoice_no_etu: cn.reference_invoice_no_etu ?? null,
+      reference_invoice_date: cn.reference_invoice_date ?? null,
+      arn: cn.arn ?? null,
+      reason: cn.reason ?? null,
+      refund_kind: isFull ? 'full' : 'partial',
+      refund_amount: r2(refundAmount),
+      order_id: Number(cn.order_id),
+      order_date: dt,
+      restaurant: {
+        name: restaurant?.name ?? '—',
+        business_name: ph(restaurant?.business_name),
+        address: restaurant?.address ?? '—',
+        gstin: ph(restaurant?.gstin),
+        fssai: ph(restaurant?.fssai),
+        cin: ph(restaurant?.cin),
+      },
+      customer: {
+        name: customerName,
+        email: user?.email ?? null,
+        phone: user?.phone ?? order.contact_person_number ?? null,
+        address: flatAddr(order.delivery_address),
+        place_of_delivery: null as string | null,
+      },
+      restaurant_credit: {
+        hsn: '996331',
+        service_type: 'Restaurant Service',
+        items: restItems,
+        sub_total: r2(foodSubtotal),
+        discount: r2(discountTotal),
+        net_value: r2(netValue),
+        gst_rate_half: gstRateHalf,
+        cgst: foodHalfTax,
+        igst: foodHalfTax,
+        packaging_charge: restPackaging,
+        total: r2(netValue + foodTax + restPackaging),
+      },
+      eatofine_credit: {
+        hsn: '999799',
+        supply_description: 'Other Services N.E.C',
+        rows: eatofineRows,
+        total: eatofineTotal,
+      },
+    };
   }
 
   async getCreditNoteStats() {

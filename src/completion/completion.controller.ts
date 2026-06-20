@@ -56,6 +56,10 @@ export class CompletionController {
   @Get('credit-notes/stats')
   cnStats() { return this.svc.getCreditNoteStats(); }
 
+  // Declared after /stats so the static path wins over this dynamic one.
+  @Get('credit-notes/:id')
+  creditNoteDetail(@Param('id', ParseIntPipe) id: number) { return this.svc.getCreditNote(id); }
+
   @Post('credit-notes')
   @HttpCode(200)
   createCreditNote(@Req() req: AuthedRequest, @Body() body: Parameters<CompletionService['createCreditNote']>[0]) {

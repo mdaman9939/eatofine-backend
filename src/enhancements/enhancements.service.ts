@@ -861,9 +861,17 @@ export class EnhancementsService {
       // ── Page 1: restaurant ("On Behalf of Restaurant") food invoice ──────
       const r2inv = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
       const foodSubtotal = items.reduce((s, it) => s + Number(it.price) * Number(it.quantity), 0);
-      const foodTax = items.reduce((s, it) => s + Number(it.tax_amount ?? 0), 0);
       const discountTotal = Number(order.coupon_discount_amount ?? 0) + Number(order.restaurant_discount_amount ?? 0);
       const netValue = Math.max(0, foodSubtotal - discountTotal);
+      // Use per-line GST when the line items carry it; otherwise derive the food
+      // GST from the net food value × the configured food GST rate (legacy / POS
+      // orders store GST at the order level only, not per line — so the page-1
+      // CGST/IGST would otherwise show ₹0).
+      const perLineTax = items.reduce((s, it) => s + Number(it.tax_amount ?? 0), 0);
+      const foodTax = perLineTax > 0 ? perLineTax : r2inv(netValue * (foodGstRate / 100));
+      // Extra packaging is a RESTAURANT charge (restaurant.extra_packaging_amount),
+      // billed at face value — no GST was collected on it at order time.
+      const packaging = Number(order.extra_packaging_amount ?? 0);
       const foodHalfTax = r2inv(foodTax / 2);
       const gstRateHalf = netValue > 0 ? r2inv(((foodTax / netValue) * 100) / 2) : r2inv(foodGstRate / 2);
       const restItems = items.map((it) => {
@@ -878,15 +886,21 @@ export class EnhancementsService {
       });
 
       // ── Page 2: Eatofine service invoice — 18% GST (9% CGST + 9% SGST) ────
-      const svcRow = (description: string, amount: number) => {
-        const cgst = r2inv(amount * (svcCgstRate / 100));
-        const sgst = r2inv(amount * (svcSgstRate / 100));
-        return { description, amount: r2inv(amount), cgst, sgst, net: r2inv(amount + cgst + sgst) };
+      // The delivery/service fees folded into order_amount are GST-INCLUSIVE, so
+      // extract CGST/SGST out of the amount the customer actually paid — the net
+      // then equals that amount and the two invoice pages foot to order_amount.
+      const svcRow = (description: string, gross: number) => {
+        const rate = (svcCgstRate + svcSgstRate) / 100;
+        const base = rate > 0 ? gross / (1 + rate) : gross;
+        const cgst = r2inv(base * (svcCgstRate / 100));
+        const sgst = r2inv(base * (svcSgstRate / 100));
+        return { description, amount: r2inv(base), cgst, sgst, net: r2inv(gross) };
       };
+      // Packaging is intentionally NOT an Eatofine service row — it is the
+      // restaurant's charge and appears on the restaurant invoice (page 1).
       const eatofineRows = [
         svcRow('Delivery Charges', Number(order.delivery_charge ?? 0)),
         svcRow('Order Management Fees', Number(order.additional_charge ?? 0)),
-        svcRow('Other Fees (Ex - convenience/surge/packaging)', Number(order.extra_packaging_amount ?? 0)),
       ];
       const eatofineTotal = r2inv(eatofineRows.reduce((s, x) => s + x.net, 0));
       const ph = (v?: string | null) => (v && String(v).trim() !== '' ? String(v) : null);
@@ -924,7 +938,8 @@ export class EnhancementsService {
           gst_rate_half: gstRateHalf,
           cgst: foodHalfTax,
           igst: foodHalfTax,
-          total: r2inv(netValue + foodTax),
+          packaging_charge: r2inv(packaging),
+          total: r2inv(netValue + foodTax + packaging),
         },
         eatofine_invoice: {
           hsn: '999799',
@@ -1046,36 +1061,39 @@ export class EnhancementsService {
     const fyStart = fyStartRaw && !Number.isNaN(fyStartRaw.getTime()) ? fyStartRaw : null;
 
     if (this.useMongo()) {
-      const match: Record<string, unknown> = { order_status: 'delivered', payment_status: 'paid' };
+      // Drive the report off the authoritative settlement records — the same
+      // breakdown that actually credited the restaurant wallet — so commission
+      // and the net payout reconcile with the money that moved, instead of being
+      // re-derived from the full order_amount (which would tax delivery, GST and
+      // platform fees the restaurant never receives).
+      const match: Record<string, unknown> = { settlement_completed: true };
       if (opts.vendor_id) {
         const r = await this.mongo.findOne<MongoRestaurantDoc>('restaurants', { mysql_vendor_id: Number(opts.vendor_id) });
         if (r) match.mysql_restaurant_id = Number(r.mysql_id);
       }
       if (fyStart) {
-        // Effective order date = delivered → created_at_legacy → created_at (all
-        // stored as BSON Dates). Compare against the FY-start with $expr so we can
-        // coalesce before the >= check.
+        // Financial-year window on when the settlement completed (falls back to
+        // created_at if completed_at is absent).
         match.$expr = {
-          $gte: [
-            { $ifNull: ['$delivered', { $ifNull: ['$created_at_legacy', '$created_at'] }] },
-            fyStart,
-          ],
+          $gte: [{ $ifNull: ['$completed_at', '$created_at'] }, fyStart],
         };
       }
       const groups = await this.mongo.aggregate<{
         _id: number;
-        total: number;
+        commission: number;
+        earning: number;
         count: number;
-      }>('orders', [
+      }>('settlements', [
         { $match: match },
         {
           $group: {
             _id: '$mysql_restaurant_id',
-            total: { $sum: '$order_amount' },
+            commission: { $sum: { $ifNull: ['$admin_commission', 0] } },
+            earning: { $sum: { $ifNull: ['$restaurant_earning', 0] } },
             count: { $sum: 1 },
           },
         },
-        { $sort: { total: -1 } },
+        { $sort: { earning: -1 } },
       ]);
       const rIds = groups.map((g) => Number(g._id)).filter((n) => !isNaN(n));
       const restaurants = rIds.length
@@ -1087,10 +1105,12 @@ export class EnhancementsService {
         financial_year_start: fyStart,
         rows: groups.map((g) => {
           const r = rMap.get(String(Number(g._id)));
-          const grossPayout = Number(g.total ?? 0);
-          const commission = r?.comission !== null && r?.comission !== undefined ? Number(r.comission) : 0;
-          const adminCut = grossPayout * (commission / 100);
-          const netVendorPayout = grossPayout - adminCut;
+          const commissionPct = r?.comission !== null && r?.comission !== undefined ? Number(r.comission) : 0;
+          // net = what the restaurant actually received; admin_cut = the commission
+          // the platform actually took; gross = the two combined (pre-commission).
+          const adminCut = +Number(g.commission ?? 0).toFixed(2);
+          const netVendorPayout = +Number(g.earning ?? 0).toFixed(2);
+          const grossPayout = +(netVendorPayout + adminCut).toFixed(2);
           const tdsApplies = netVendorPayout >= threshold;
           const tdsAmount = tdsApplies ? +(netVendorPayout * (rate / 100)).toFixed(2) : 0;
           const finalDisbursement = +(netVendorPayout - tdsAmount).toFixed(2);
@@ -1100,9 +1120,9 @@ export class EnhancementsService {
             vendor_id: r?.mysql_vendor_id != null ? Number(r.mysql_vendor_id) : null,
             orders: Number(g.count ?? 0),
             gross_payout: grossPayout,
-            admin_commission_pct: commission,
-            admin_cut: +adminCut.toFixed(2),
-            net_vendor_payout: +netVendorPayout.toFixed(2),
+            admin_commission_pct: commissionPct,
+            admin_cut: adminCut,
+            net_vendor_payout: netVendorPayout,
             tds_applies: tdsApplies,
             tds_amount: tdsAmount,
             final_disbursement: finalDisbursement,

@@ -249,6 +249,7 @@ export declare class EnhancementsService {
             gst_rate_half: number;
             cgst: number;
             igst: number;
+            packaging_charge: number;
             total: number;
         };
         eatofine_invoice: {

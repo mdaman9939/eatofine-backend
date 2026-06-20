@@ -14,6 +14,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.RefundController = void 0;
 const common_1 = require("@nestjs/common");
+const auth_guard_1 = require("../auth/auth.guard");
 const refund_service_1 = require("./refund.service");
 let RefundController = class RefundController {
     svc;
@@ -120,6 +121,7 @@ __decorate([
 ], RefundController.prototype, "history", null);
 exports.RefundController = RefundController = __decorate([
     (0, common_1.Controller)('admin/refund-engine'),
+    (0, auth_guard_1.RequireAuth)('admin'),
     __metadata("design:paramtypes", [refund_service_1.RefundService])
 ], RefundController);
 function toInt(v, def) {

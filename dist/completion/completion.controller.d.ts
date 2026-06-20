@@ -121,10 +121,75 @@ export declare class CompletionController {
         total_count: number;
         total_value: number;
     }>;
+    creditNoteDetail(id: number): Promise<{
+        credit_note_no_obr: string;
+        credit_note_no_etu: string;
+        credit_note_date: Date | null;
+        reference_invoice_no_obr: string | null;
+        reference_invoice_no_etu: string | null;
+        reference_invoice_date: Date | null;
+        arn: string | null;
+        reason: string | null;
+        refund_kind: string;
+        refund_amount: number;
+        order_id: number;
+        order_date: Date | null;
+        restaurant: {
+            name: string;
+            business_name: string | null;
+            address: string;
+            gstin: string | null;
+            fssai: string | null;
+            cin: string | null;
+        };
+        customer: {
+            name: string;
+            email: string | null;
+            phone: string | null;
+            address: string;
+            place_of_delivery: string | null;
+        };
+        restaurant_credit: {
+            hsn: string;
+            service_type: string;
+            items: {
+                name: string;
+                qty: number;
+                unit_rate: number;
+                amount: number;
+            }[];
+            sub_total: number;
+            discount: number;
+            net_value: number;
+            gst_rate_half: number;
+            cgst: number;
+            igst: number;
+            packaging_charge: number;
+            total: number;
+        };
+        eatofine_credit: {
+            hsn: string;
+            supply_description: string;
+            rows: {
+                description: string;
+                amount: number;
+                cgst: number;
+                sgst: number;
+                net: number;
+            }[];
+            total: number;
+        };
+    }>;
     createCreditNote(req: AuthedRequest, body: Parameters<CompletionService['createCreditNote']>[0]): Promise<{
         ok: boolean;
         credit_note_number: string;
         total_credit: number;
+        already_existed: boolean;
+    } | {
+        ok: boolean;
+        credit_note_number: string;
+        total_credit: number;
+        already_existed?: undefined;
     }>;
     listSettings(category?: string): Promise<{
         id: number;

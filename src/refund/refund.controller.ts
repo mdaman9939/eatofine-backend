@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
+import { RequireAuth } from '../auth/auth.guard';
 import { RefundService } from './refund.service';
 import type { ScenarioKey } from './refund-policy';
 
@@ -14,6 +15,7 @@ import type { ScenarioKey } from './refund-policy';
  *   GET  /ledger                               — cross-order wallet ledger (penalty + credit audit)
  */
 @Controller('admin/refund-engine')
+@RequireAuth('admin')
 export class RefundController {
   constructor(private readonly svc: RefundService) {}
 

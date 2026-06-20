@@ -41,6 +41,7 @@ let CompletionController = class CompletionController {
         return this.svc.listCreditNotes({ status, limit: limit ? parseInt(limit, 10) : undefined });
     }
     cnStats() { return this.svc.getCreditNoteStats(); }
+    creditNoteDetail(id) { return this.svc.getCreditNote(id); }
     createCreditNote(req, body) {
         return this.svc.createCreditNote({ ...body, issued_by: Number(req.actor?.id ?? 0) });
     }
@@ -140,6 +141,13 @@ __decorate([
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", void 0)
 ], CompletionController.prototype, "cnStats", null);
+__decorate([
+    (0, common_1.Get)('credit-notes/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], CompletionController.prototype, "creditNoteDetail", null);
 __decorate([
     (0, common_1.Post)('credit-notes'),
     (0, common_1.HttpCode)(200),

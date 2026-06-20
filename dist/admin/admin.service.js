@@ -52,6 +52,7 @@ const decimal_1 = require("../common/decimal");
 const order_lifecycle_service_1 = require("../lifecycle/order-lifecycle.service");
 const order_lifecycle_constants_1 = require("../lifecycle/order-lifecycle.constants");
 const storage_url_1 = require("../common/storage-url");
+const credit_note_util_1 = require("../completion/credit-note.util");
 function vegToBool(v, fallback = true) {
     if (v === undefined || v === null)
         return fallback;
@@ -2412,7 +2413,9 @@ let AdminService = class AdminService {
             veg: body.veg ?? true,
             non_veg: body.non_veg ?? true,
             status: true,
-            active: false,
+            active: body.active === undefined
+                ? true
+                : (body.active === true || body.active === 1 || body.active === '1' || body.active === 'true'),
             approval_status: 'approved',
             logo: body.logo ?? null,
             cover_photo: body.cover_photo ?? null,
@@ -2833,6 +2836,7 @@ let AdminService = class AdminService {
         await this.mongo.updateOne('restaurants', { mysql_id: id }, {
             approval_status: decision,
             status: decision === 'approved',
+            active: decision === 'approved',
             rejection_reason: decision === 'rejected' ? (reason ?? null) : null,
             approved_at: decision === 'approved' ? new Date() : null,
             updated_at: new Date(),
@@ -5142,6 +5146,16 @@ AdminService.prototype.listDisbursements = async function (opts) {
                     restByVendor.set(Number(rr.mysql_vendor_id), rr.name);
             }
         }
+        const dmIdsForWallet = Array.from(new Set(rows.map((r) => readFk(r, 'delivery_man_id')).filter((x) => x !== null)));
+        const payableByDm = new Map();
+        if (dmIdsForWallet.length) {
+            const wallets = await this['mongo'].findMany('delivery_man_wallets', { $or: [{ delivery_man_id: { $in: dmIdsForWallet } }, { mysql_delivery_man_id: { $in: dmIdsForWallet } }] });
+            for (const w of wallets) {
+                const did = Number(w.mysql_delivery_man_id ?? w.delivery_man_id ?? 0);
+                if (did > 0)
+                    payableByDm.set(did, Math.round(Math.max(0, (Number(w.balance ?? 0)) - (Number(w.collected_cash ?? 0))) * 100) / 100);
+            }
+        }
         return paginate(rows.map((r) => {
             const vendorId = readFk(r, 'vendor_id');
             const dmId = readFk(r, 'delivery_man_id');
@@ -5167,6 +5181,7 @@ AdminService.prototype.listDisbursements = async function (opts) {
                 payment_method: r.payment_method ?? 'cash',
                 initiated_at: initiatedAt,
                 paid_at: paidAt,
+                rider_available: isDm ? (payableByDm.get(dmId) ?? 0) : null,
             };
         }), total, limit, offset);
     }
@@ -6596,34 +6611,13 @@ AdminService.prototype.updateRefundStatus = async function (id, status, admin_no
             const orderId = Number(r.order_id ?? r.mysql_order_id ?? 0);
             const refundAmount = Number(r.refund_amount ?? 0);
             if (orderId > 0 && refundAmount > 0) {
-                const existing = await this['mongo'].findOne('credit_notes', { refund_id: Number(id) });
-                if (!existing) {
-                    const order = await this['mongo'].findByMysqlId('orders', orderId);
-                    const taxReversed = Number(order?.total_tax_amount ?? 0);
-                    const delivReversed = Number(order?.delivery_charge ?? 0);
-                    const total = refundAmount + taxReversed + delivReversed;
-                    const today = new Date();
-                    const cnNumber = `CN-${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}-${orderId}R${id}`;
-                    const cnId = await this['mongo'].nextMysqlId('credit_notes');
-                    await this['mongo'].insertOne('credit_notes', {
-                        mysql_id: cnId,
-                        credit_note_number: cnNumber,
-                        refund_id: Number(id),
-                        order_id: orderId,
-                        customer_id: Number(order?.mysql_user_id ?? r.user_id ?? 0),
-                        restaurant_id: order?.mysql_restaurant_id != null ? Number(order.mysql_restaurant_id) : null,
-                        reason: r.customer_reason ?? 'Refund',
-                        refund_amount: refundAmount,
-                        tax_reversed: taxReversed,
-                        delivery_reversed: delivReversed,
-                        total_credit: total,
-                        status: 'issued',
-                        notes: 'Auto-issued on refund ' + status,
-                        issued_by: null,
-                        created_at: today,
-                        updated_at: today,
-                    });
-                }
+                await (0, credit_note_util_1.issueCreditNote)(this['mongo'], {
+                    orderId,
+                    refundId: Number(id),
+                    amount: refundAmount,
+                    reason: r.customer_reason ?? 'Refund',
+                    notes: `Auto-issued on refund ${status}`,
+                });
             }
         }
         return { ok: true, id, status };

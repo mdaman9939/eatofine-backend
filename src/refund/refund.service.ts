@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { issueCreditNote } from '../completion/credit-note.util';
 import {
   applicableScenarios,
   getScenario,
@@ -23,15 +24,10 @@ interface OrderDoc {
   restaurant_discount_amount?: number;
   total_tax_amount?: number;
   delivery_charge?: number;
-  delivered?: Date | null;
-  canceled_by?: string | null;
-}
-
-interface OrderTxnDoc {
-  order_id?: number;
   additional_charge?: number;
   extra_packaging_amount?: number;
-  admin_commission?: number;
+  delivered?: Date | null;
+  canceled_by?: string | null;
 }
 
 /** A stored refund_decisions row in the pending-review workflow. */
@@ -175,19 +171,18 @@ export class RefundService {
       await this.creditCustomerWallet(userId, effects.refund_amount, `Refund for order #${orderId} — ${scenario.label}`, orderId);
     }
 
-    // 3. Credit note (if scenario requires)
+    // 3. Credit note (if scenario requires) — unified issuer assigns CNOBR/CNETU
+    //    numbers, links the order's OBR/ETFU reference invoice + ARN, and writes
+    //    the full record shape (so the list/detail pages render correctly).
     if (effects.generate_credit_note && effects.refund_amount > 0) {
-      const cnId = await this.mongo.nextMysqlId('credit_notes');
-      await this.mongo.insertOne('credit_notes', {
-        mysql_id: cnId,
-        order_id: orderId,
+      const { record } = await issueCreditNote(this.mongo, {
+        orderId,
+        refundId: artefacts.refund_id ?? null,
         amount: effects.refund_amount,
         reason: scenario.label,
         notes: remarks,
-        status: 'issued',
-        created_at: new Date(),
       });
-      artefacts.credit_note_id = cnId;
+      if (record) artefacts.credit_note_id = record.mysql_id;
     }
 
     const orderDoc = await this.mongo.findByMysqlId<OrderDoc>('orders', orderId);
@@ -413,15 +408,33 @@ export class RefundService {
     const deliveryCharge = Number(o.delivery_charge ?? 0);
     const restDiscount = Number(o.restaurant_discount_amount ?? 0);
     const grandTotal = Number(o.order_amount ?? 0);
-    const itemTotal = Math.max(0, grandTotal - tax - deliveryCharge + restDiscount - Number(o.coupon_discount_amount ?? 0));
 
-    // Platform/packaging/commission live on order_transactions in the original
-    // StackFood schema. Pull them if the row exists; otherwise approximate
-    // (commission = 20% of item, packaging = 0, additional_charge = 0).
-    const txn = await this.mongo.findOne<OrderTxnDoc>('order_transactions', { order_id: o.mysql_id });
-    const additional = Number(txn?.additional_charge ?? 0);
-    const packaging = Number(txn?.extra_packaging_amount ?? 0);
-    const commission = Number(txn?.admin_commission ?? Math.round(itemTotal * 0.20 * 100) / 100);
+    // Platform fee + extra packaging are stored directly on the order document
+    // (the original StackFood `order_transactions` table is never populated on
+    // this Mongo backend), so read them from the order — exactly as the
+    // settlement engine does.
+    const additional = Number(o.additional_charge ?? 0);
+    const packaging = Number(o.extra_packaging_amount ?? 0);
+
+    // Item (food) value = sum of the line items, the same authoritative base the
+    // settlement engine uses (settlement.service computeBreakdown). Fall back to
+    // backing it out of order_amount only when the line items are unavailable.
+    const details = await this.mongo.findMany<{ price?: number; quantity?: number }>(
+      'order_details', { order_id: o.mysql_id },
+    );
+    const foodFromDetails = round2(details.reduce((s, d) => s + Number(d.price ?? 0) * Number(d.quantity ?? 0), 0));
+    const itemTotal = foodFromDetails > 0
+      ? foodFromDetails
+      : Math.max(0, grandTotal - tax - deliveryCharge - additional - packaging + restDiscount - Number(o.coupon_discount_amount ?? 0));
+
+    // Commission = the restaurant's configured rate applied to the food net of
+    // any restaurant-funded discount (mirrors settlement.computeBreakdown), not
+    // a hardcoded 20%.
+    const restaurant = await this.mongo.findByMysqlId<{ comission?: number }>(
+      'restaurants', Number(o.mysql_restaurant_id ?? 0),
+    );
+    const commissionPct = Math.max(0, Number(restaurant?.comission ?? 0));
+    const commission = round2(Math.max(0, itemTotal - restDiscount) * (commissionPct / 100));
 
     return {
       item_total: round2(itemTotal),
@@ -429,7 +442,7 @@ export class RefundService {
       delivery_charge: round2(deliveryCharge),
       packaging_amount: round2(packaging),
       additional_charge: round2(additional),
-      admin_commission: round2(commission),
+      admin_commission: commission,
       grand_total: round2(grandTotal),
     };
   }
