@@ -6,6 +6,7 @@ import {
   Param,
   ParseIntPipe,
   Post,
+  Put,
   Query,
   Req,
   UploadedFile,
@@ -278,6 +279,21 @@ export class CustomerExtrasController {
   async wishClear(@Req() req: AuthedRequest) {
     await this.mongo.deleteMany('wishlists', { user_id: Number(req.actor!.id) });
     return { message: 'cleared' };
+  }
+
+  // App (StackFood/Laravel port) sends wishlist removes as POST with a
+  // {"_method":"delete"} body; food_id/restaurant_id stay in the query string.
+  // Accept POST too so the favourites screen never 404s.
+  @HttpCode(200)
+  @Post('wish-list/remove')
+  wishRemovePost(@Req() req: AuthedRequest, @Query('food_id') foodId?: string, @Query('restaurant_id') restaurantId?: string) {
+    return this.wishRemove(req, foodId, restaurantId);
+  }
+
+  @HttpCode(200)
+  @Post('wish-list/clear-all')
+  wishClearPost(@Req() req: AuthedRequest) {
+    return this.wishClear(req);
   }
 
   // ── Notifications (in-app inbox) ──────────────────────────────────
@@ -1143,6 +1159,27 @@ export class CustomerExtrasController {
     return rows.map((r) => ({ ...r, id: Number(r.id), price: Number(r.price), tax: Number(r.tax), discount: Number(r.discount), restaurant_id: Number(r.restaurant_id), category_id: r.category_id ? Number(r.category_id) : null }));
   }
 
+  // The app POSTs food-list with a body { food_id: "[1,2,3]" } (JSON-encoded id
+  // array) for cart re-validation; the GET above reads ?ids=1,2,3. Bridge the
+  // body shape to the same handler so the cart never silently loses items.
+  @HttpCode(200)
+  @Post('food-list')
+  foodListPost(@Body() body: Record<string, unknown> = {}) {
+    const raw = body.food_id ?? body.ids ?? body.food_ids;
+    let ids: number[] = [];
+    if (Array.isArray(raw)) {
+      ids = raw.map((n) => parseInt(String(n), 10)).filter((n) => Number.isFinite(n));
+    } else if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) ids = parsed.map((n) => parseInt(String(n), 10)).filter((n) => Number.isFinite(n));
+      } catch {
+        ids = raw.split(',').map((s) => parseInt(s.trim(), 10)).filter((n) => Number.isFinite(n));
+      }
+    }
+    return this.foodList(ids.join(','));
+  }
+
   @HttpCode(200)
   @Post('cart/add-multiple')
   cartAddMultiple() {
@@ -1150,6 +1187,13 @@ export class CustomerExtrasController {
   }
 
   // ── Address extras ────────────────────────────────────────────────
+  // App sends address delete as POST {"_method":"delete"} with ?address_id=.
+  @HttpCode(200)
+  @Post('address/delete')
+  deleteAddressPost(@Req() req: AuthedRequest, @Query('address_id', ParseIntPipe) addressId: number) {
+    return this.deleteAddress(req, addressId);
+  }
+
   @HttpCode(200)
   @Delete('address/delete')
   async deleteAddress(
@@ -1171,6 +1215,17 @@ export class CustomerExtrasController {
       where: { id: BigInt(addressId), user_id: req.actor!.id },
     });
     return { message: 'Address deleted' };
+  }
+
+  // App's "edit address" screen sends PUT; original StackFood used POST. Accept both.
+  @HttpCode(200)
+  @Put('address/update/:id')
+  updateAddressPut(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() req: AuthedRequest,
+    @Body() body: { address?: string; contact_person_name?: string; contact_person_number?: string; address_type?: string; latitude?: string; longitude?: string },
+  ) {
+    return this.updateAddress(id, req, body);
   }
 
   @HttpCode(200)
@@ -1210,6 +1265,13 @@ export class CustomerExtrasController {
   }
 
   // ── Account removal (no-op for demo) ──────────────────────────────
+  // App sends this as POST {"_method":"delete"}; accept both verbs.
+  @HttpCode(200)
+  @Post('remove-account')
+  removeAccountPost() {
+    return this.removeAccount();
+  }
+
   @HttpCode(200)
   @Delete('remove-account')
   removeAccount() {

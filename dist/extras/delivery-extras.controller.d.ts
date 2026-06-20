@@ -119,6 +119,9 @@ export declare class DeliveryExtrasController {
     fcmToken(): {
         message: string;
     };
+    removePost(): {
+        message: string;
+    };
     remove(): {
         message: string;
     };

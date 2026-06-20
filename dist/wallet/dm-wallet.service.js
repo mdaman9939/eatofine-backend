@@ -230,19 +230,6 @@ let DmWalletService = class DmWalletService {
             cash_to_deposit: collected_cash,
         };
     }
-    async recordCashDeposit(dmId, amount) {
-        const amt = r2(amount);
-        if (!dmId || amt <= 0)
-            return { ok: false, deposited: 0, collected_cash: 0 };
-        const w = await this.getWallet(dmId);
-        const current = r2(Number(w?.collected_cash ?? 0));
-        const dec = Math.min(current, amt);
-        if (dec > 0) {
-            await this.mongo.increment('delivery_man_wallets', { mysql_delivery_man_id: Number(dmId) }, { collected_cash: -dec }, { mysql_delivery_man_id: Number(dmId), delivery_man_id: Number(dmId), created_at: new Date() });
-            await this.logTxn(dmId, 0, 0, 'cash_deposit', `deposit#dm:${dmId}`, { deposited: dec });
-        }
-        return { ok: true, deposited: dec, collected_cash: r2(current - dec) };
-    }
     async listTransactions(dmId, limit = 50) {
         const [txns, ledger] = await Promise.all([
             this.mongo.findMany('dm_wallet_transactions', { mysql_delivery_man_id: Number(dmId) }, { sort: { mysql_id: -1 }, limit }),

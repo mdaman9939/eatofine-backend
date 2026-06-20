@@ -162,7 +162,12 @@ let VendorExtrasController = class VendorExtrasController {
             let computedEarning = 0, computedCash = 0;
             if (restaurantIds.length > 0) {
                 const now = Date.now();
-                const dayMs = 86_400_000;
+                const IST_OFFSET = 5.5 * 60 * 60 * 1000;
+                const istNow = new Date(now + IST_OFFSET);
+                const iy = istNow.getUTCFullYear(), im = istNow.getUTCMonth(), idt = istNow.getUTCDate();
+                const startOfTodayMs = Date.UTC(iy, im, idt) - IST_OFFSET;
+                const startOfWeekMs = Date.UTC(iy, im, idt - ((istNow.getUTCDay() + 6) % 7)) - IST_OFFSET;
+                const startOfMonthMs = Date.UTC(iy, im, 1) - IST_OFFSET;
                 const orders = await this.mongo.findMany('orders', { mysql_restaurant_id: { $in: restaurantIds } });
                 totalOrders = orders.length;
                 for (const o of orders) {
@@ -182,18 +187,17 @@ let VendorExtrasController = class VendorExtrasController {
                     }
                     if (!Number.isFinite(ts) || ts === 0)
                         continue;
-                    const age = now - ts;
-                    if (age <= dayMs) {
+                    if (ts >= startOfTodayMs) {
                         todaysCount++;
                         if (delivered)
                             todaysEarn += amount;
                     }
-                    if (age <= 7 * dayMs) {
+                    if (ts >= startOfWeekMs) {
                         weekCount++;
                         if (delivered)
                             weekEarn += amount;
                     }
-                    if (age <= 30 * dayMs) {
+                    if (ts >= startOfMonthMs) {
                         monthCount++;
                         if (delivered)
                             monthEarn += amount;
@@ -437,6 +441,9 @@ let VendorExtrasController = class VendorExtrasController {
         }
         return { message: 'announcement updated' };
     }
+    bankInfoPut(req, body = {}) {
+        return this.bankInfo(req, body);
+    }
     async bankInfo(req, body = {}) {
         if (this.useMongo()) {
             const data = {};
@@ -635,6 +642,7 @@ let VendorExtrasController = class VendorExtrasController {
         }
         return { message: 'added' };
     }
+    removePost() { return this.remove(); }
     remove() { return { message: 'Not available in demo' }; }
     shapeOrder(rIn, detailsCount, user) {
         const r = rIn;
@@ -1056,6 +1064,9 @@ let VendorExtrasController = class VendorExtrasController {
             ?? null;
         return { name: pick('name'), description: pick('description'), translations };
     }
+    productDeletePost(body = {}, idQ) {
+        return this.productDelete(body, idQ);
+    }
     async productDelete(body = {}, idQ) {
         const id = body.id !== undefined && body.id !== '' ? Number(body.id) : (idQ ? Number(idQ) : null);
         if (this.useMongo() && id) {
@@ -1413,11 +1424,17 @@ let VendorExtrasController = class VendorExtrasController {
         await this.mongo.updateOne('delivery_men', { mysql_id: id }, data);
         return { message: 'updated' };
     }
+    dmDeletePost(body = {}, idQ) {
+        return this.dmDelete({ ...body, id: body.id ?? body.delivery_man_id }, idQ);
+    }
     async dmDelete(body = {}, idQ) {
         const id = body.id !== undefined && body.id !== '' ? Number(body.id) : (idQ ? Number(idQ) : null);
         if (this.useMongo() && id)
             await this.mongo.deleteOne('delivery_men', { mysql_id: id });
         return { message: 'deleted' };
+    }
+    dmStatusGet(idQ, dmIdQ, statusQ) {
+        return this.dmStatus({ id: idQ ?? dmIdQ, status: statusQ });
     }
     async dmStatus(body = {}) {
         const id = body.id !== undefined && body.id !== '' ? Number(body.id) : null;
@@ -1425,6 +1442,9 @@ let VendorExtrasController = class VendorExtrasController {
             await this.mongo.updateOne('delivery_men', { mysql_id: id }, { status: !!Number(body.status ?? 0), updated_at: new Date() });
         }
         return { message: 'status updated' };
+    }
+    dmAssignGet(dmId, orderId) {
+        return this.dmAssign({ delivery_man_id: dmId, order_id: orderId });
     }
     async dmAssign(body = {}) {
         if (!this.useMongo())
@@ -1788,7 +1808,13 @@ let VendorExtrasController = class VendorExtrasController {
     }
     async earningReport(req) {
         const orders = await this.vendorOrdersForReports(req);
-        const now = Date.now(), dayMs = 86_400_000;
+        const now = Date.now();
+        const IST_OFFSET = 5.5 * 60 * 60 * 1000;
+        const istNow = new Date(now + IST_OFFSET);
+        const iy = istNow.getUTCFullYear(), im = istNow.getUTCMonth(), idt = istNow.getUTCDate();
+        const startOfTodayMs = Date.UTC(iy, im, idt) - IST_OFFSET;
+        const startOfWeekMs = Date.UTC(iy, im, idt - ((istNow.getUTCDay() + 6) % 7)) - IST_OFFSET;
+        const startOfMonthMs = Date.UTC(iy, im, 1) - IST_OFFSET;
         let total = 0, today = 0, week = 0, month = 0;
         for (const o of orders) {
             if (o.order_status !== 'delivered')
@@ -1798,12 +1824,11 @@ let VendorExtrasController = class VendorExtrasController {
             const ts = o.created_at ? new Date(o.created_at).getTime() : 0;
             if (!Number.isFinite(ts) || ts === 0)
                 continue;
-            const age = now - ts;
-            if (age <= dayMs)
+            if (ts >= startOfTodayMs)
                 today += earn;
-            if (age <= 7 * dayMs)
+            if (ts >= startOfWeekMs)
                 week += earn;
-            if (age <= 30 * dayMs)
+            if (ts >= startOfMonthMs)
                 month += earn;
         }
         return { total, today, this_week: week, this_month: month };
@@ -2040,6 +2065,7 @@ let VendorExtrasController = class VendorExtrasController {
             order_transactions: page,
         };
     }
+    generateStatementGet() { return this.generateStatement(); }
     generateStatement() { return { message: 'not available in demo' }; }
     searchedFood() { return { products: [] }; }
     async vendorNotifications(req) {
@@ -2506,6 +2532,7 @@ let VendorExtrasController = class VendorExtrasController {
     }
     subscriptionTransaction() { return { message: 'recorded' }; }
     subscriptionPayment() { return { redirect_url: null }; }
+    subscriptionPaymentPost() { return this.subscriptionPayment(); }
     cancelSubscription() { return { message: 'canceled' }; }
     async schedule(req) {
         if (this.useMongo()) {
@@ -2591,6 +2618,15 @@ __decorate([
 ], VendorExtrasController.prototype, "announce", null);
 __decorate([
     (0, common_1.HttpCode)(200),
+    (0, common_1.Put)('update-bank-info'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], VendorExtrasController.prototype, "bankInfoPut", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
     (0, common_1.Post)('update-bank-info'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
@@ -2635,6 +2671,13 @@ __decorate([
     __metadata("design:paramtypes", [Object, Object]),
     __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "addDineInTable", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Post)('remove-account'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], VendorExtrasController.prototype, "removePost", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Delete)('remove-account'),
@@ -2777,6 +2820,15 @@ __decorate([
     __metadata("design:paramtypes", [Object, Object]),
     __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "productUpdate", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Post)('product/delete'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Query)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], VendorExtrasController.prototype, "productDeletePost", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Delete)('product/delete'),
@@ -2945,6 +2997,15 @@ __decorate([
 ], VendorExtrasController.prototype, "dmUpdate", null);
 __decorate([
     (0, common_1.HttpCode)(200),
+    (0, common_1.Post)('delivery-man/delete'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Query)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], VendorExtrasController.prototype, "dmDeletePost", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
     (0, common_1.Delete)('delivery-man/delete'),
     __param(0, (0, common_1.Body)()),
     __param(1, (0, common_1.Query)('id')),
@@ -2954,12 +3015,31 @@ __decorate([
 ], VendorExtrasController.prototype, "dmDelete", null);
 __decorate([
     (0, common_1.HttpCode)(200),
+    (0, common_1.Get)('delivery-man/status'),
+    __param(0, (0, common_1.Query)('id')),
+    __param(1, (0, common_1.Query)('delivery_man_id')),
+    __param(2, (0, common_1.Query)('status')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, String]),
+    __metadata("design:returntype", void 0)
+], VendorExtrasController.prototype, "dmStatusGet", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
     (0, common_1.Post)('delivery-man/status'),
     __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "dmStatus", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Get)('delivery-man/assign-deliveryman'),
+    __param(0, (0, common_1.Query)('delivery_man_id')),
+    __param(1, (0, common_1.Query)('order_id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String]),
+    __metadata("design:returntype", void 0)
+], VendorExtrasController.prototype, "dmAssignGet", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('delivery-man/assign-deliveryman'),
@@ -3188,6 +3268,13 @@ __decorate([
 ], VendorExtrasController.prototype, "transactionReport", null);
 __decorate([
     (0, common_1.HttpCode)(200),
+    (0, common_1.Get)('generate-transaction-statement'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], VendorExtrasController.prototype, "generateStatementGet", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
     (0, common_1.Post)('generate-transaction-statement'),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
@@ -3393,6 +3480,13 @@ __decorate([
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", void 0)
 ], VendorExtrasController.prototype, "subscriptionPayment", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Post)('subscription/payment/api'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], VendorExtrasController.prototype, "subscriptionPaymentPost", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('cancel-subscription'),

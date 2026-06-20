@@ -53,6 +53,7 @@ const order_lifecycle_service_1 = require("../lifecycle/order-lifecycle.service"
 const order_lifecycle_constants_1 = require("../lifecycle/order-lifecycle.constants");
 const storage_url_1 = require("../common/storage-url");
 const credit_note_util_1 = require("../completion/credit-note.util");
+const customer_wallet_util_1 = require("../wallet/customer-wallet.util");
 function vegToBool(v, fallback = true) {
     if (v === undefined || v === null)
         return fallback;
@@ -3706,16 +3707,17 @@ let AdminService = class AdminService {
             const delivery = num(o.delivery_charge);
             const coupon = num(o.coupon_discount_amount);
             const restDiscount = num(o.restaurant_discount_amount);
-            const extraPackaging = num(o.additional_charge);
-            let itemAmount = r2(orderAmount + coupon + restDiscount - tax - delivery - extraPackaging);
+            const additionalCharge = num(o.additional_charge);
+            const extraPackaging = num(o.extra_packaging_amount);
+            let itemAmount = r2(orderAmount + coupon + restDiscount - tax - delivery - additionalCharge - extraPackaging);
             if (itemAmount <= 0)
                 itemAmount = r2(Math.max(0, orderAmount - tax - delivery)) || orderAmount;
             const rest = restMap.get(Number(o.mysql_restaurant_id ?? 0));
             const commissionRate = num(rest?.comission) || 10;
             const adminCommission = r2((itemAmount * commissionRate) / 100);
             const discountedAmount = r2(itemAmount - coupon - restDiscount);
-            const adminNetIncome = r2(adminCommission + tax);
-            const restaurantNetIncome = r2(itemAmount - adminCommission - restDiscount);
+            const adminNetIncome = r2(adminCommission + additionalCharge);
+            const restaurantNetIncome = r2(itemAmount - adminCommission - restDiscount + extraPackaging);
             const user = userMap.get(Number(o.mysql_user_id ?? 0));
             const cod = String(o.payment_method) === 'cash_on_delivery';
             return {
@@ -3733,7 +3735,7 @@ let AdminService = class AdminService {
                 admin_discount: 0,
                 restaurant_discount: restDiscount,
                 admin_commission: adminCommission,
-                service_charge: 0,
+                service_charge: additionalCharge,
                 extra_packaging_amount: extraPackaging,
                 commission_on_delivery_charge: 0,
                 admin_net_income: adminNetIncome,
@@ -6603,14 +6605,21 @@ AdminService.prototype.updateRefundStatus = async function (id, status, admin_no
         const r = await this['mongo'].findByMysqlId('refunds', Number(id));
         if (!r)
             throw new common_1.NotFoundException({ errors: [{ code: 'refund', message: 'not found' }] });
-        const data = { refund_status: status, updated_at: new Date() };
-        if (admin_note !== undefined)
-            data.admin_note = admin_note;
-        await this['mongo'].updateOne('refunds', { mysql_id: Number(id) }, data);
-        if (status === 'approved' || status === 'completed') {
-            const orderId = Number(r.order_id ?? r.mysql_order_id ?? 0);
-            const refundAmount = Number(r.refund_amount ?? 0);
-            if (orderId > 0 && refundAmount > 0) {
+        const orderId = Number(r.order_id ?? r.mysql_order_id ?? 0);
+        const refundAmount = Number(r.refund_amount ?? 0);
+        const userId = Number(r.user_id ?? r.mysql_user_id ?? 0) || null;
+        const wantsGrant = status === 'approved' || status === 'completed';
+        let wallet = null;
+        if (wantsGrant && userId && refundAmount > 0) {
+            wallet = await (0, customer_wallet_util_1.creditCustomerWallet)(this['mongo'], {
+                userId,
+                amount: refundAmount,
+                orderId,
+                refundId: Number(id),
+                reason: r.customer_reason ?? `Refund for order #${orderId}`,
+                type: 'refund',
+            });
+            try {
                 await (0, credit_note_util_1.issueCreditNote)(this['mongo'], {
                     orderId,
                     refundId: Number(id),
@@ -6619,8 +6628,28 @@ AdminService.prototype.updateRefundStatus = async function (id, status, admin_no
                     notes: `Auto-issued on refund ${status}`,
                 });
             }
+            catch {
+            }
         }
-        return { ok: true, id, status };
+        const financiallyDone = !!wallet && (wallet.credited || wallet.alreadyCredited);
+        const finalStatus = wantsGrant ? (financiallyDone ? 'completed' : 'approved') : status;
+        const data = { refund_status: finalStatus, updated_at: new Date() };
+        if (admin_note !== undefined)
+            data.admin_note = admin_note;
+        if (wallet?.credited) {
+            data.refunded_at = new Date();
+            data.refund_method = 'wallet';
+            data.wallet_transaction_id = wallet.transactionId;
+        }
+        await this['mongo'].updateOne('refunds', { mysql_id: Number(id) }, data);
+        return {
+            ok: true,
+            id,
+            status: finalStatus,
+            wallet_credited: !!wallet?.credited,
+            already_credited: !!wallet?.alreadyCredited,
+            new_balance: wallet?.newBalance ?? null,
+        };
     }
     const r = await this['prisma'].refunds.findUnique({ where: { id: BigInt(id) }, select: { id: true } });
     if (!r)

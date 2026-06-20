@@ -239,5 +239,55 @@ export declare class CustomerController {
             veg: number;
         } | null;
     }[]>;
+    cartRemoveItemPost(req: AuthedRequest, cartIdStr?: string, guestIdStr?: string): Promise<{
+        id: number;
+        user_id: number;
+        item_id: number;
+        is_guest: boolean;
+        item_type: string;
+        price: number;
+        quantity: number;
+        variations: unknown[];
+        variation_options: unknown[];
+        add_on_ids: unknown[];
+        add_on_qtys: unknown[];
+        created_at: string | null;
+        updated_at: string | null;
+        item: {
+            id: number;
+            name: string | null;
+            description: string | null;
+            image: string | null;
+            image_full_url: string | null;
+            restaurant_id: number;
+            price: number;
+            veg: number;
+        } | null;
+    }[]>;
+    cartClearPost(req: AuthedRequest, guestIdStr?: string): Promise<{
+        id: number;
+        user_id: number;
+        item_id: number;
+        is_guest: boolean;
+        item_type: string;
+        price: number;
+        quantity: number;
+        variations: unknown[];
+        variation_options: unknown[];
+        add_on_ids: unknown[];
+        add_on_qtys: unknown[];
+        created_at: string | null;
+        updated_at: string | null;
+        item: {
+            id: number;
+            name: string | null;
+            description: string | null;
+            image: string | null;
+            image_full_url: string | null;
+            restaurant_id: number;
+            price: number;
+            veg: number;
+        } | null;
+    }[]>;
     private resolveCartIdentity;
 }

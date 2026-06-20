@@ -207,6 +207,9 @@ export declare class VendorExtrasController {
     announce(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
         message: string;
     }>;
+    bankInfoPut(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
+        message: string;
+    }>;
     bankInfo(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
         message: string;
     }>;
@@ -230,6 +233,9 @@ export declare class VendorExtrasController {
         message: string;
         tables?: undefined;
     }>;
+    removePost(): {
+        message: string;
+    };
     remove(): {
         message: string;
     };
@@ -783,6 +789,9 @@ export declare class VendorExtrasController {
         errors?: undefined;
     }>;
     private parseProductTranslations;
+    productDeletePost(body?: Record<string, unknown>, idQ?: string): Promise<{
+        message: string;
+    }>;
     productDelete(body?: Record<string, unknown>, idQ?: string): Promise<{
         message: string;
     }>;
@@ -997,10 +1006,19 @@ export declare class VendorExtrasController {
         }[];
         message?: undefined;
     }>;
+    dmDeletePost(body?: Record<string, unknown>, idQ?: string): Promise<{
+        message: string;
+    }>;
     dmDelete(body?: Record<string, unknown>, idQ?: string): Promise<{
         message: string;
     }>;
+    dmStatusGet(idQ?: string, dmIdQ?: string, statusQ?: string): Promise<{
+        message: string;
+    }>;
     dmStatus(body?: Record<string, unknown>): Promise<{
+        message: string;
+    }>;
+    dmAssignGet(dmId?: string, orderId?: string): Promise<{
         message: string;
     }>;
     dmAssign(body?: Record<string, unknown>): Promise<{
@@ -1275,6 +1293,9 @@ export declare class VendorExtrasController {
         completed_transactions: number;
         order_transactions: unknown[];
     }>;
+    generateStatementGet(): {
+        message: string;
+    };
     generateStatement(): {
         message: string;
     };
@@ -1585,6 +1606,9 @@ export declare class VendorExtrasController {
         message: string;
     };
     subscriptionPayment(): {
+        redirect_url: null;
+    };
+    subscriptionPaymentPost(): {
         redirect_url: null;
     };
     cancelSubscription(): {

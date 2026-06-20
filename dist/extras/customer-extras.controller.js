@@ -209,6 +209,12 @@ let CustomerExtrasController = class CustomerExtrasController {
         await this.mongo.deleteMany('wishlists', { user_id: Number(req.actor.id) });
         return { message: 'cleared' };
     }
+    wishRemovePost(req, foodId, restaurantId) {
+        return this.wishRemove(req, foodId, restaurantId);
+    }
+    wishClearPost(req) {
+        return this.wishClear(req);
+    }
     async notifications() {
         if (this.useMongo()) {
             const rows = await this.mongo.findMany('notifications', { status: true }, { sort: { mysql_id: -1 }, limit: 50 });
@@ -858,8 +864,29 @@ let CustomerExtrasController = class CustomerExtrasController {
         const rows = await this.prisma.food.findMany({ where: { id: { in: ids.map((n) => BigInt(n)) } } });
         return rows.map((r) => ({ ...r, id: Number(r.id), price: Number(r.price), tax: Number(r.tax), discount: Number(r.discount), restaurant_id: Number(r.restaurant_id), category_id: r.category_id ? Number(r.category_id) : null }));
     }
+    foodListPost(body = {}) {
+        const raw = body.food_id ?? body.ids ?? body.food_ids;
+        let ids = [];
+        if (Array.isArray(raw)) {
+            ids = raw.map((n) => parseInt(String(n), 10)).filter((n) => Number.isFinite(n));
+        }
+        else if (typeof raw === 'string') {
+            try {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed))
+                    ids = parsed.map((n) => parseInt(String(n), 10)).filter((n) => Number.isFinite(n));
+            }
+            catch {
+                ids = raw.split(',').map((s) => parseInt(s.trim(), 10)).filter((n) => Number.isFinite(n));
+            }
+        }
+        return this.foodList(ids.join(','));
+    }
     cartAddMultiple() {
         return { message: 'added' };
+    }
+    deleteAddressPost(req, addressId) {
+        return this.deleteAddress(req, addressId);
     }
     async deleteAddress(req, addressId) {
         if (this.useMongo()) {
@@ -876,6 +903,9 @@ let CustomerExtrasController = class CustomerExtrasController {
             where: { id: BigInt(addressId), user_id: req.actor.id },
         });
         return { message: 'Address deleted' };
+    }
+    updateAddressPut(id, req, body) {
+        return this.updateAddress(id, req, body);
     }
     async updateAddress(id, req, body) {
         const data = {};
@@ -901,6 +931,9 @@ let CustomerExtrasController = class CustomerExtrasController {
     }
     setDefaultAddress() {
         return { message: 'default set' };
+    }
+    removeAccountPost() {
+        return this.removeAccount();
     }
     removeAccount() {
         return { message: 'Not available in demo' };
@@ -941,6 +974,24 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], CustomerExtrasController.prototype, "wishClear", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Post)('wish-list/remove'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('food_id')),
+    __param(2, (0, common_1.Query)('restaurant_id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, String]),
+    __metadata("design:returntype", void 0)
+], CustomerExtrasController.prototype, "wishRemovePost", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Post)('wish-list/clear-all'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], CustomerExtrasController.prototype, "wishClearPost", null);
 __decorate([
     (0, common_1.Get)('notifications'),
     __metadata("design:type", Function),
@@ -1206,11 +1257,28 @@ __decorate([
 ], CustomerExtrasController.prototype, "foodList", null);
 __decorate([
     (0, common_1.HttpCode)(200),
+    (0, common_1.Post)('food-list'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], CustomerExtrasController.prototype, "foodListPost", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
     (0, common_1.Post)('cart/add-multiple'),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", void 0)
 ], CustomerExtrasController.prototype, "cartAddMultiple", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Post)('address/delete'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('address_id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Number]),
+    __metadata("design:returntype", void 0)
+], CustomerExtrasController.prototype, "deleteAddressPost", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Delete)('address/delete'),
@@ -1220,6 +1288,16 @@ __decorate([
     __metadata("design:paramtypes", [Object, Number]),
     __metadata("design:returntype", Promise)
 ], CustomerExtrasController.prototype, "deleteAddress", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Put)('address/update/:id'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Req)()),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object, Object]),
+    __metadata("design:returntype", void 0)
+], CustomerExtrasController.prototype, "updateAddressPut", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('address/update/:id'),
@@ -1237,6 +1315,13 @@ __decorate([
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", void 0)
 ], CustomerExtrasController.prototype, "setDefaultAddress", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Post)('remove-account'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], CustomerExtrasController.prototype, "removeAccountPost", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Delete)('remove-account'),

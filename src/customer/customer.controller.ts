@@ -97,6 +97,27 @@ export class CustomerController {
     return this.customer.clearCart(id);
   }
 
+  // Apps ported from StackFood/Laravel send cart deletes as POST with a
+  // {"_method":"delete"} body (identifiers stay in the query string). Accept
+  // POST too so "remove item" / "clear cart" never 404 on those builds.
+  @Post('cart/remove-item')
+  @HttpCode(200)
+  @RequireAuth()
+  async cartRemoveItemPost(
+    @Req() req: AuthedRequest,
+    @Query('cart_id') cartIdStr?: string,
+    @Query('guest_id') guestIdStr?: string,
+  ) {
+    return this.cartRemoveItem(req, cartIdStr, guestIdStr);
+  }
+
+  @Post('cart/remove')
+  @HttpCode(200)
+  @RequireAuth()
+  async cartClearPost(@Req() req: AuthedRequest, @Query('guest_id') guestIdStr?: string) {
+    return this.cartClear(req, guestIdStr);
+  }
+
   // ── Helpers ──────────────────────────────────────────────────────
 
   private async resolveCartIdentity(req: AuthedRequest, guestIdStr?: string): Promise<CartIdentity> {

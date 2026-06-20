@@ -288,6 +288,14 @@ export class AuthExtrasController {
       minimum_order: 0,
       tax: 0,
       comission: commission,
+      // Seed the standard rating / counters every other restaurant carries, so a
+      // freshly-registered restaurant is shaped identically to seeded ones and
+      // can't trip up clients that read these fields.
+      avg_rating: 0,
+      rating_count: 0,
+      order_count: 0,
+      foods_count: 0,
+      minimum_shipping_charge: 0,
       restaurant_model: plan,
       subscription_id: packageId,
       additional_data: additionalData,

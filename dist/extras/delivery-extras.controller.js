@@ -336,6 +336,7 @@ let DeliveryExtrasController = class DeliveryExtrasController {
         return { message: 'updated' };
     }
     fcmToken() { return { message: 'token-updated' }; }
+    removePost() { return this.remove(); }
     remove() { return { message: 'Not available in demo' }; }
     async allOrders(req, offsetQ, limitQ, status) {
         const actorId = Number(req.actor.id);
@@ -809,6 +810,13 @@ __decorate([
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", void 0)
 ], DeliveryExtrasController.prototype, "fcmToken", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Post)('remove-account'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], DeliveryExtrasController.prototype, "removePost", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Delete)('remove-account'),

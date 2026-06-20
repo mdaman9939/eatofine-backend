@@ -76,6 +76,12 @@ export declare class CustomerExtrasController {
     wishClear(req: AuthedRequest): Promise<{
         message: string;
     }>;
+    wishRemovePost(req: AuthedRequest, foodId?: string, restaurantId?: string): Promise<{
+        message: string;
+    }>;
+    wishClearPost(req: AuthedRequest): Promise<{
+        message: string;
+    }>;
     notifications(): Promise<{
         id: number;
         title: string | null;
@@ -598,10 +604,74 @@ export declare class CustomerExtrasController {
         is_halal: boolean;
         sell_count: number;
     }[]>;
+    foodListPost(body?: Record<string, unknown>): Promise<{
+        id: number;
+        price: number;
+        tax: number;
+        discount: number;
+        restaurant_id: number;
+        category_id: number | null;
+        mysql_id: number;
+        name?: string | null;
+        description?: string | null;
+        image?: string | null;
+        mysql_restaurant_id?: number | null;
+        mysql_category_id?: number | null;
+        status?: boolean | null;
+        avg_rating?: number | null;
+        legacy?: Record<string, unknown>;
+    }[] | {
+        id: number;
+        price: number;
+        tax: number;
+        discount: number;
+        restaurant_id: number;
+        category_id: number | null;
+        add_ons: string | null;
+        attributes: string | null;
+        variations: string | null;
+        created_at: Date | null;
+        updated_at: Date | null;
+        name: string | null;
+        status: boolean;
+        image: string | null;
+        order_count: number;
+        rating: string | null;
+        veg: boolean;
+        slug: string | null;
+        description: string | null;
+        discount_type: string;
+        recommended: boolean;
+        avg_rating: number;
+        item_stock: number;
+        stock_type: string;
+        category_ids: string | null;
+        choice_options: string | null;
+        tax_type: string;
+        available_time_starts: Date | null;
+        available_time_ends: Date | null;
+        rating_count: number;
+        maximum_cart_quantity: number | null;
+        is_halal: boolean;
+        sell_count: number;
+    }[]>;
     cartAddMultiple(): {
         message: string;
     };
+    deleteAddressPost(req: AuthedRequest, addressId: number): Promise<{
+        message: string;
+    }>;
     deleteAddress(req: AuthedRequest, addressId: number): Promise<{
+        message: string;
+    }>;
+    updateAddressPut(id: number, req: AuthedRequest, body: {
+        address?: string;
+        contact_person_name?: string;
+        contact_person_number?: string;
+        address_type?: string;
+        latitude?: string;
+        longitude?: string;
+    }): Promise<{
         message: string;
     }>;
     updateAddress(id: number, req: AuthedRequest, body: {
@@ -615,6 +685,9 @@ export declare class CustomerExtrasController {
         message: string;
     }>;
     setDefaultAddress(): {
+        message: string;
+    };
+    removeAccountPost(): {
         message: string;
     };
     removeAccount(): {

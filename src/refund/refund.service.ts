@@ -76,7 +76,7 @@ export interface AppliedDecision {
  *   - Multiple parties (user / restaurant / DM) have wallets that need
  *     simultaneous adjustment per scenario. Doing this in admin.service ad-hoc
  *     made it easy to miss a side-effect.
- *   - The PDF spec encodes 14 scenarios. Spreading those across each
+ *   - The PDF spec encodes 13 scenarios. Spreading those across each
  *     controller would mean re-deriving them. They live in refund-policy.ts
  *     so the matrix is in one greppable place.
  */

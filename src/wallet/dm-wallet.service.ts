@@ -312,25 +312,10 @@ export class DmWalletService {
     };
   }
 
-  /** Record that the rider handed COD cash back to the platform — reduces
-   *  `collected_cash` (never below zero). Returns the amount actually cleared. */
-  async recordCashDeposit(dmId: number, amount: number): Promise<{ ok: boolean; deposited: number; collected_cash: number }> {
-    const amt = r2(amount);
-    if (!dmId || amt <= 0) return { ok: false, deposited: 0, collected_cash: 0 };
-    const w = await this.getWallet(dmId);
-    const current = r2(Number(w?.collected_cash ?? 0));
-    const dec = Math.min(current, amt);
-    if (dec > 0) {
-      await this.mongo.increment(
-        'delivery_man_wallets',
-        { mysql_delivery_man_id: Number(dmId) },
-        { collected_cash: -dec },
-        { mysql_delivery_man_id: Number(dmId), delivery_man_id: Number(dmId), created_at: new Date() },
-      );
-      await this.logTxn(dmId, 0, 0, 'cash_deposit', `deposit#dm:${dmId}`, { deposited: dec });
-    }
-    return { ok: true, deposited: dec, collected_cash: r2(current - dec) };
-  }
+  // COD cash-deposit recording is owned by AdminService.recordDmCashDeposit (the
+  // admin "cash deposit" endpoint) — the single canonical path. A previously
+  // unused DmWalletService.recordCashDeposit duplicate was removed so the two
+  // implementations can't drift apart.
 
   /** Unified wallet history for a rider: DmWalletService credits (delivery/tip/
    *  bonus/COD/deposit) UNION the refund engine's penalty/compensation entries

@@ -340,6 +340,11 @@ export class DeliveryExtrasController {
   @Post('update-fcm-token')
   fcmToken() { return { message: 'token-updated' }; }
 
+  // App sends account removal as POST {"_method":"delete"}; accept both verbs.
+  @HttpCode(200)
+  @Post('remove-account')
+  removePost() { return this.remove(); }
+
   @HttpCode(200)
   @Delete('remove-account')
   remove() { return { message: 'Not available in demo' }; }

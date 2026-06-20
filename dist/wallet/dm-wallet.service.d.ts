@@ -25,11 +25,6 @@ export declare class DmWalletService {
         net_position: number;
         cash_to_deposit: number;
     }>;
-    recordCashDeposit(dmId: number, amount: number): Promise<{
-        ok: boolean;
-        deposited: number;
-        collected_cash: number;
-    }>;
     listTransactions(dmId: number, limit?: number): Promise<Array<{
         type: string;
         credit: number;

@@ -296,7 +296,15 @@ export class VendorExtrasController {
       let computedEarning = 0, computedCash = 0;
       if (restaurantIds.length > 0) {
         const now = Date.now();
-        const dayMs = 86_400_000;
+        // Today / This Week / This Month are CALENDAR buckets in IST — each resets
+        // at 00:00 IST (12 AM), NOT a rolling 24h / 7d / 30d window. India has no
+        // DST so +5:30 is constant. Week starts Monday; month starts on the 1st.
+        const IST_OFFSET = 5.5 * 60 * 60 * 1000;
+        const istNow = new Date(now + IST_OFFSET);
+        const iy = istNow.getUTCFullYear(), im = istNow.getUTCMonth(), idt = istNow.getUTCDate();
+        const startOfTodayMs = Date.UTC(iy, im, idt) - IST_OFFSET;
+        const startOfWeekMs = Date.UTC(iy, im, idt - ((istNow.getUTCDay() + 6) % 7)) - IST_OFFSET;
+        const startOfMonthMs = Date.UTC(iy, im, 1) - IST_OFFSET;
         const orders = await this.mongo.findMany<Record<string, unknown>>(
           'orders', { mysql_restaurant_id: { $in: restaurantIds } });
         totalOrders = orders.length;
@@ -314,10 +322,10 @@ export class VendorExtrasController {
             if (String(o.payment_method) === 'cash_on_delivery') computedCash += amount;
           }
           if (!Number.isFinite(ts) || ts === 0) continue;
-          const age = now - ts;
-          if (age <= dayMs) { todaysCount++; if (delivered) todaysEarn += amount; }
-          if (age <= 7 * dayMs) { weekCount++; if (delivered) weekEarn += amount; }
-          if (age <= 30 * dayMs) { monthCount++; if (delivered) monthEarn += amount; }
+          // Today / This Week (since Mon) / This Month (since the 1st) — all IST.
+          if (ts >= startOfTodayMs) { todaysCount++; if (delivered) todaysEarn += amount; }
+          if (ts >= startOfWeekMs) { weekCount++; if (delivered) weekEarn += amount; }
+          if (ts >= startOfMonthMs) { monthCount++; if (delivered) monthEarn += amount; }
         }
       }
 
@@ -622,6 +630,13 @@ export class VendorExtrasController {
   /** Save the vendor's payout bank details on the vendor record. StackFood
    *  keeps these on the vendor/restaurant (no separate table), so this is what
    *  the restaurant app's "Bank Info" screen persists. */
+  // Restaurant app's "Bank Info" screen sends PUT; original StackFood used POST. Accept both.
+  @HttpCode(200)
+  @Put('update-bank-info')
+  bankInfoPut(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
+    return this.bankInfo(req, body);
+  }
+
   @HttpCode(200)
   @Post('update-bank-info')
   async bankInfo(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
@@ -859,6 +874,11 @@ export class VendorExtrasController {
     }
     return { message: 'added' };
   }
+
+  // App sends account removal as POST {"_method":"delete"}; accept both verbs.
+  @HttpCode(200)
+  @Post('remove-account')
+  removePost() { return this.remove(); }
 
   @HttpCode(200)
   @Delete('remove-account')
@@ -1382,6 +1402,13 @@ export class VendorExtrasController {
     return { name: pick('name'), description: pick('description'), translations };
   }
 
+  // App sends product delete as POST {"_method":"delete"} with ?id=. Accept both.
+  @HttpCode(200)
+  @Post('product/delete')
+  productDeletePost(@Body() body: Record<string, unknown> = {}, @Query('id') idQ?: string) {
+    return this.productDelete(body, idQ);
+  }
+
   @HttpCode(200)
   @Delete('product/delete')
   async productDelete(@Body() body: Record<string, unknown> = {}, @Query('id') idQ?: string) {
@@ -1813,12 +1840,28 @@ export class VendorExtrasController {
     return { message: 'updated' };
   }
 
+  // App sends DM delete as POST { _method:'delete', delivery_man_id }. Accept POST
+  // and map delivery_man_id → the id the handler expects.
+  @HttpCode(200)
+  @Post('delivery-man/delete')
+  dmDeletePost(@Body() body: Record<string, unknown> = {}, @Query('id') idQ?: string) {
+    return this.dmDelete({ ...body, id: body.id ?? body.delivery_man_id }, idQ);
+  }
+
   @HttpCode(200)
   @Delete('delivery-man/delete')
   async dmDelete(@Body() body: Record<string, unknown> = {}, @Query('id') idQ?: string) {
     const id = body.id !== undefined && body.id !== '' ? Number(body.id) : (idQ ? Number(idQ) : null);
     if (this.useMongo() && id) await this.mongo.deleteOne('delivery_men', { mysql_id: id });
     return { message: 'deleted' };
+  }
+
+  // App toggles DM status via GET ?delivery_man_id=&status=. Accept GET and
+  // bridge the query params into the body the handler reads.
+  @HttpCode(200)
+  @Get('delivery-man/status')
+  dmStatusGet(@Query('id') idQ?: string, @Query('delivery_man_id') dmIdQ?: string, @Query('status') statusQ?: string) {
+    return this.dmStatus({ id: idQ ?? dmIdQ, status: statusQ });
   }
 
   @HttpCode(200)
@@ -1832,6 +1875,14 @@ export class VendorExtrasController {
   }
 
   /** Assign one of the restaurant's delivery men to an order. */
+  // App assigns a DM to an order via GET ?delivery_man_id=&order_id=. Accept GET
+  // and bridge the query params into the body the handler reads.
+  @HttpCode(200)
+  @Get('delivery-man/assign-deliveryman')
+  dmAssignGet(@Query('delivery_man_id') dmId?: string, @Query('order_id') orderId?: string) {
+    return this.dmAssign({ delivery_man_id: dmId, order_id: orderId });
+  }
+
   @HttpCode(200)
   @Post('delivery-man/assign-deliveryman')
   async dmAssign(@Body() body: Record<string, unknown> = {}) {
@@ -2260,7 +2311,16 @@ export class VendorExtrasController {
   @Get('earning-report')
   async earningReport(@Req() req: AuthedRequest) {
     const orders = await this.vendorOrdersForReports(req);
-    const now = Date.now(), dayMs = 86_400_000;
+    const now = Date.now();
+    // Today / This Week / This Month are CALENDAR buckets in IST (reset at 00:00
+    // IST / 12 AM), NOT rolling 24h / 7d / 30d. India has no DST. Week starts Mon,
+    // month starts on the 1st.
+    const IST_OFFSET = 5.5 * 60 * 60 * 1000;
+    const istNow = new Date(now + IST_OFFSET);
+    const iy = istNow.getUTCFullYear(), im = istNow.getUTCMonth(), idt = istNow.getUTCDate();
+    const startOfTodayMs = Date.UTC(iy, im, idt) - IST_OFFSET;
+    const startOfWeekMs = Date.UTC(iy, im, idt - ((istNow.getUTCDay() + 6) % 7)) - IST_OFFSET;
+    const startOfMonthMs = Date.UTC(iy, im, 1) - IST_OFFSET;
     let total = 0, today = 0, week = 0, month = 0;
     for (const o of orders) {
       if (o.order_status !== 'delivered') continue;
@@ -2268,10 +2328,9 @@ export class VendorExtrasController {
       total += earn;
       const ts = o.created_at ? new Date(o.created_at as string).getTime() : 0;
       if (!Number.isFinite(ts) || ts === 0) continue;
-      const age = now - ts;
-      if (age <= dayMs) today += earn;
-      if (age <= 7 * dayMs) week += earn;
-      if (age <= 30 * dayMs) month += earn;
+      if (ts >= startOfTodayMs) today += earn;
+      if (ts >= startOfWeekMs) week += earn;
+      if (ts >= startOfMonthMs) month += earn;
     }
     return { total, today, this_week: week, this_month: month };
   }
@@ -2537,6 +2596,11 @@ export class VendorExtrasController {
       order_transactions: page,
     };
   }
+  // Reports screen requests the statement via GET ?order_id=. Accept GET too.
+  @HttpCode(200)
+  @Get('generate-transaction-statement')
+  generateStatementGet() { return this.generateStatement(); }
+
   @HttpCode(200)
   @Post('generate-transaction-statement')
   generateStatement() { return { message: 'not available in demo' }; }
@@ -3101,6 +3165,10 @@ export class VendorExtrasController {
   subscriptionTransaction() { return { message: 'recorded' }; }
   @Get('subscription/payment/api')
   subscriptionPayment() { return { redirect_url: null }; }
+  // Business-plan payment flow posts here; accept POST as well as GET.
+  @HttpCode(200)
+  @Post('subscription/payment/api')
+  subscriptionPaymentPost() { return this.subscriptionPayment(); }
   @HttpCode(200)
   @Post('cancel-subscription')
   cancelSubscription() { return { message: 'canceled' }; }

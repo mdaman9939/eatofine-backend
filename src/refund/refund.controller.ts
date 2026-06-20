@@ -7,7 +7,7 @@ import type { ScenarioKey } from './refund-policy';
  * Admin-side refund/cancellation engine.
  *
  * Routes (mounted at `/admin/refund-engine`):
- *   GET  /catalogue                            — all 14 scenarios + metadata
+ *   GET  /catalogue                            — all 13 scenarios + metadata
  *   GET  /:orderId/applicable                  — only the scenarios valid for this order
  *   GET  /:orderId/preview?scenario=KEY        — preview money/wallet effects (no DB writes)
  *   POST /:orderId/apply                       — execute the decision (writes refund, ledger, audit)

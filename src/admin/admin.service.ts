@@ -8,6 +8,7 @@ import { OrderLifecycleService } from '../lifecycle/order-lifecycle.service';
 import { CANCEL_REASONS, type CancelReason } from '../lifecycle/order-lifecycle.constants';
 import { storageFullUrl } from '../common/storage-url';
 import { issueCreditNote } from '../completion/credit-note.util';
+import { creditCustomerWallet, type CustomerWalletCreditResult } from '../wallet/customer-wallet.util';
 
 /** Shared shape for the admin food create + update endpoints. */
 export interface FoodWriteBody {
@@ -4143,16 +4144,21 @@ export class AdminService {
       const delivery = num(o.delivery_charge);
       const coupon = num(o.coupon_discount_amount);
       const restDiscount = num(o.restaurant_discount_amount);
-      const extraPackaging = num(o.additional_charge);
-      // Reverse the item subtotal: order_amount = items − discounts + tax + delivery + extra.
-      let itemAmount = r2(orderAmount + coupon + restDiscount - tax - delivery - extraPackaging);
+      const additionalCharge = num(o.additional_charge);     // platform / order-management fee (admin revenue)
+      const extraPackaging = num(o.extra_packaging_amount);   // restaurant's packaging charge
+      // Reverse the item subtotal:
+      //   order_amount = items − discounts + tax + delivery + additional_charge + extra_packaging
+      let itemAmount = r2(orderAmount + coupon + restDiscount - tax - delivery - additionalCharge - extraPackaging);
       if (itemAmount <= 0) itemAmount = r2(Math.max(0, orderAmount - tax - delivery)) || orderAmount;
       const rest = restMap.get(Number(o.mysql_restaurant_id ?? 0));
       const commissionRate = num(rest?.comission) || 10;
       const adminCommission = r2((itemAmount * commissionRate) / 100);
       const discountedAmount = r2(itemAmount - coupon - restDiscount);
-      const adminNetIncome = r2(adminCommission + tax);
-      const restaurantNetIncome = r2(itemAmount - adminCommission - restDiscount);
+      // Admin earns commission + the platform/additional charge; the customer GST
+      // is a pass-through to the tax ledger, NOT admin income. Packaging is the
+      // restaurant's charge, so it adds to the restaurant's net.
+      const adminNetIncome = r2(adminCommission + additionalCharge);
+      const restaurantNetIncome = r2(itemAmount - adminCommission - restDiscount + extraPackaging);
       const user = userMap.get(Number(o.mysql_user_id ?? 0));
       const cod = String(o.payment_method) === 'cash_on_delivery';
       return {
@@ -4170,7 +4176,7 @@ export class AdminService {
         admin_discount: 0,
         restaurant_discount: restDiscount,
         admin_commission: adminCommission,
-        service_charge: 0,
+        service_charge: additionalCharge,
         extra_packaging_amount: extraPackaging,
         commission_on_delivery_charge: 0,
         admin_net_income: adminNetIncome,
@@ -7347,20 +7353,29 @@ AdminService.prototype.updateRefundStatus = async function (this: AdminService, 
   if (this['useMongo']()) {
     const r = await this['mongo'].findByMysqlId<Record<string, unknown>>('refunds', Number(id));
     if (!r) throw new NotFoundException({ errors: [{ code: 'refund', message: 'not found' }] });
-    const data: Record<string, unknown> = { refund_status: status, updated_at: new Date() };
-    if (admin_note !== undefined) data.admin_note = admin_note;
-    await this['mongo'].updateOne('refunds', { mysql_id: Number(id) }, data);
 
-    // ── Auto-generate the credit note ────────────────────────────────────
-    // Every approved/completed refund issues a credit note automatically
-    // (reversing the original GST + delivery), so admins never do it by hand.
-    // Idempotent: one credit note per refund.
-    if (status === 'approved' || status === 'completed') {
-      const orderId = Number(r.order_id ?? r.mysql_order_id ?? 0);
-      const refundAmount = Number(r.refund_amount ?? 0);
-      if (orderId > 0 && refundAmount > 0) {
-        // Unified issuer: idempotent per refund, assigns CNOBR/CNETU numbers and
-        // links the order's OBR/ETFU reference invoice + ARN.
+    const orderId = Number(r.order_id ?? r.mysql_order_id ?? 0);
+    const refundAmount = Number(r.refund_amount ?? 0);
+    const userId = Number(r.user_id ?? r.mysql_user_id ?? 0) || null;
+    // Approving OR completing a refund grants it; rejecting denies it.
+    const wantsGrant = status === 'approved' || status === 'completed';
+
+    // ── Real money movement FIRST, accounting document second ────────────
+    // Approving a refund actually credits the customer wallet (idempotent per
+    // refund) so the money reaches the customer and shows in their app. The
+    // credit note is raised only as an accounting DOCUMENT and is best-effort —
+    // it can never move money nor gate financial completion.
+    let wallet: CustomerWalletCreditResult | null = null;
+    if (wantsGrant && userId && refundAmount > 0) {
+      wallet = await creditCustomerWallet(this['mongo'], {
+        userId,
+        amount: refundAmount,
+        orderId,
+        refundId: Number(id),
+        reason: (r.customer_reason as string) ?? `Refund for order #${orderId}`,
+        type: 'refund',
+      });
+      try {
         await issueCreditNote(this['mongo'], {
           orderId,
           refundId: Number(id),
@@ -7368,9 +7383,35 @@ AdminService.prototype.updateRefundStatus = async function (this: AdminService, 
           reason: (r.customer_reason as string) ?? 'Refund',
           notes: `Auto-issued on refund ${status}`,
         });
+      } catch {
+        // Accounting document only — never blocks or reverses the wallet credit.
       }
     }
-    return { ok: true, id, status };
+
+    // ── Persist status ───────────────────────────────────────────────────
+    // 'completed' ONLY once the wallet credit actually succeeded (or had already
+    // been applied). A grant that couldn't move money stays 'approved'; a credit
+    // note on its own never marks the refund financially complete.
+    const financiallyDone = !!wallet && (wallet.credited || wallet.alreadyCredited);
+    const finalStatus = wantsGrant ? (financiallyDone ? 'completed' : 'approved') : status;
+
+    const data: Record<string, unknown> = { refund_status: finalStatus, updated_at: new Date() };
+    if (admin_note !== undefined) data.admin_note = admin_note;
+    if (wallet?.credited) {
+      data.refunded_at = new Date();
+      data.refund_method = 'wallet';
+      data.wallet_transaction_id = wallet.transactionId;
+    }
+    await this['mongo'].updateOne('refunds', { mysql_id: Number(id) }, data);
+
+    return {
+      ok: true,
+      id,
+      status: finalStatus,
+      wallet_credited: !!wallet?.credited,
+      already_credited: !!wallet?.alreadyCredited,
+      new_balance: wallet?.newBalance ?? null,
+    };
   }
   const r = await this['prisma'].refunds.findUnique({ where: { id: BigInt(id) }, select: { id: true } });
   if (!r) throw new NotFoundException({ errors: [{ code: 'refund', message: 'not found' }] });

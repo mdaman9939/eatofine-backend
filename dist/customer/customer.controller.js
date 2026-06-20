@@ -53,6 +53,12 @@ let CustomerController = class CustomerController {
         const id = await this.resolveCartIdentity(req, guestIdStr);
         return this.customer.clearCart(id);
     }
+    async cartRemoveItemPost(req, cartIdStr, guestIdStr) {
+        return this.cartRemoveItem(req, cartIdStr, guestIdStr);
+    }
+    async cartClearPost(req, guestIdStr) {
+        return this.cartClear(req, guestIdStr);
+    }
     async resolveCartIdentity(req, guestIdStr) {
         const header = req.header('authorization') ?? '';
         const token = header.replace(/^Bearer\s+/i, '').trim();
@@ -148,6 +154,27 @@ __decorate([
     __metadata("design:paramtypes", [Object, String]),
     __metadata("design:returntype", Promise)
 ], CustomerController.prototype, "cartClear", null);
+__decorate([
+    (0, common_1.Post)('cart/remove-item'),
+    (0, common_1.HttpCode)(200),
+    (0, auth_guard_1.RequireAuth)(),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('cart_id')),
+    __param(2, (0, common_1.Query)('guest_id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, String]),
+    __metadata("design:returntype", Promise)
+], CustomerController.prototype, "cartRemoveItemPost", null);
+__decorate([
+    (0, common_1.Post)('cart/remove'),
+    (0, common_1.HttpCode)(200),
+    (0, auth_guard_1.RequireAuth)(),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('guest_id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
+], CustomerController.prototype, "cartClearPost", null);
 exports.CustomerController = CustomerController = __decorate([
     (0, common_1.Controller)('customer'),
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),

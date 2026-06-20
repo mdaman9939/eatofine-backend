@@ -1,4 +1,9 @@
 node_modules
 
+# Secrets — never commit. Real values live in the Render dashboard env vars.
+# Only .env.example (a placeholder template) is tracked.
+.env
+.env.*
+!.env.example
 
 /generated/prisma

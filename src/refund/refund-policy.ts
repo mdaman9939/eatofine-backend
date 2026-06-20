@@ -1,7 +1,7 @@
 /**
  * Refund + Cancellation Decision Matrix.
  *
- * Encodes the 14 scenarios from the spec PDF (`Refund and Cancellation Cases.pdf`).
+ * Encodes the 13 scenarios from the spec PDF (`Refund and Cancellation Cases.pdf`).
  * Each scenario is a pure function of (order snapshot, scenario key) → effects.
  * No DB access here — this file stays a deterministic policy engine that the
  * RefundService can preview to admins before they confirm.
@@ -112,7 +112,7 @@ function netted(net: number, baseNote: string): { direction: WalletDirection; am
 }
 
 /**
- * The 14-row decision matrix. Each row maps a real-world cancellation
+ * The 13-row decision matrix. Each row maps a real-world cancellation
  * scenario to its money + wallet + invoice consequences.
  */
 export const SCENARIOS: Record<ScenarioKey, ScenarioDefinition> = {
