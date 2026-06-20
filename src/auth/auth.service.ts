@@ -253,13 +253,32 @@ export class AuthService {
     return { token, restaurant_id: restaurant?.id ?? null, role: 'owner' };
   }
 
+  /** Look up a delivery man by phone, tolerating stored-format differences.
+   *  The apps always send "+91XXXXXXXXXX" (dial code + number, no spaces), but
+   *  some admin-entered rows were saved as "XXXXXXXXXX" (no country code) or
+   *  "+91 XXXXXXXXXX" (with a space). Try an exact match first, then fall back
+   *  to matching the last 10 digits so a pure format mismatch can't 401 a valid
+   *  login. */
+  private async findDeliveryManByPhone(phone: string): Promise<{
+    mysql_id: number; phone: string | null; password: string | null;
+    application_status?: string | null; status?: boolean | number;
+    zone_id?: number | null; mysql_zone_id?: number | null;
+  } | null> {
+    type DmAuthDoc = {
+      mysql_id: number; phone: string | null; password: string | null;
+      application_status?: string | null; status?: boolean | number;
+      zone_id?: number | null; mysql_zone_id?: number | null;
+    };
+    const exact = await this.mongo.findOne<DmAuthDoc>('delivery_men', { phone });
+    if (exact) return exact;
+    const last10 = (phone ?? '').replace(/\D/g, '').slice(-10);
+    if (last10.length !== 10) return null;
+    return this.mongo.findOne<DmAuthDoc>('delivery_men', { phone: { $regex: `${last10}$` } });
+  }
+
   async deliveryManLogin(phone: string, password: string) {
     if (this.useMongo()) {
-      const dm = await this.mongo.findOne<{
-        mysql_id: number; phone: string | null; password: string | null;
-        application_status?: string | null; status?: boolean | number;
-        zone_id?: number | null; mysql_zone_id?: number | null;
-      }>('delivery_men', { phone });
+      const dm = await this.findDeliveryManByPhone(phone);
       if (!dm || !(await this.verifyPassword(password, dm.password))) {
         throw new UnauthorizedException({
           errors: [{ code: 'auth-001', message: 'User credentials does not match.' }],
