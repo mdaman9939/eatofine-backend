@@ -239,6 +239,27 @@ export class VendorExtrasController {
     return [];
   }
 
+  /** Normalize stored/incoming tags into the `[{id, tag}]` objects the restaurant
+   *  app's edit screen parses (`Tag.fromJson` reads `.tag`). The app SUBMITS tags
+   *  as a comma-separated string, so without this they round-trip as plain strings
+   *  and the chips never pre-fill on edit. Handles comma strings, JSON arrays of
+   *  strings, and arrays of {tag}/{name} objects alike. */
+  private normalizeTags(input: unknown): Array<{ id: number | null; tag: string }> {
+    const out: Array<{ id: number | null; tag: string }> = [];
+    for (const t of this.parseJsonish(input)) {
+      if (t == null) continue;
+      if (typeof t === 'string') {
+        const s = t.trim();
+        if (s) out.push({ id: null, tag: s });
+      } else if (typeof t === 'object') {
+        const o = t as Record<string, unknown>;
+        const tag = String(o.tag ?? o.name ?? '').trim();
+        if (tag) out.push({ id: o.id != null ? Number(o.id) : null, tag });
+      }
+    }
+    return out;
+  }
+
   /** Parse the Nutrition / Allergic-Ingredients values the app sends. They come
    *  as a comma-separated string ("a,b,c") or a JSON array; the app reads them
    *  back as the `nutritions_name` / `allergies_name` string array. */
@@ -1161,6 +1182,8 @@ export class VendorExtrasController {
             item_stock: Number(food.item_stock ?? 0),
             sell_count: Number(food.sell_count ?? 0),
             status: food.status ?? true,
+            // Tags as objects so list-driven edit flows pre-fill chips too.
+            tags: this.normalizeTags(food.tags),
           };
         }),
         total_size: total,
@@ -1197,6 +1220,10 @@ export class VendorExtrasController {
         // non-null reads (product.nutrition! / .allergies!) never crash and the
         // chips / add-ons show their saved values.
         add_ons: addOns,
+        // Tags as [{id, tag}] objects so the edit screen's chips pre-fill — the
+        // app submits them as a comma string, so the raw stored value is plain
+        // strings the app's Tag.fromJson can't parse.
+        tags: this.normalizeTags(food.tags),
         nutritions_name: Array.isArray(food.nutritions_name) ? food.nutritions_name : [],
         allergies_name: Array.isArray(food.allergies_name) ? food.allergies_name : [],
         price: toNum(food.price) ?? 0,
@@ -1376,7 +1403,7 @@ export class VendorExtrasController {
       maximum_cart_quantity: b.maximum_cart_quantity !== undefined && b.maximum_cart_quantity !== ''
         ? Number(b.maximum_cart_quantity) : null,
       is_halal: !!Number(b.is_halal ?? 0),
-      tags: this.parseJsonish(b.tags),
+      tags: this.normalizeTags(b.tags),
       tag_ids: this.parseJsonish(b.tag_ids),
       // Nutrition + Allergic Ingredients chips (app sends comma strings, reads
       // back as nutritions_name / allergies_name arrays).
@@ -1462,7 +1489,7 @@ export class VendorExtrasController {
     }
     if (b.choice_options !== undefined) data.choice_options = this.parseJsonish(b.choice_options);
     if (b.addon_ids !== undefined) data.addon_ids = this.parseJsonish(b.addon_ids);
-    if (b.tags !== undefined) data.tags = this.parseJsonish(b.tags);
+    if (b.tags !== undefined) data.tags = this.normalizeTags(b.tags);
     if (b.tag_ids !== undefined) data.tag_ids = this.parseJsonish(b.tag_ids);
     if (b.nutritions !== undefined) data.nutritions_name = this.parseNameList(b.nutritions);
     if (b.allergies !== undefined) data.allergies_name = this.parseNameList(b.allergies);

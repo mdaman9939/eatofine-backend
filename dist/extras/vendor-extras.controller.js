@@ -132,6 +132,25 @@ let VendorExtrasController = class VendorExtrasController {
         }
         return [];
     }
+    normalizeTags(input) {
+        const out = [];
+        for (const t of this.parseJsonish(input)) {
+            if (t == null)
+                continue;
+            if (typeof t === 'string') {
+                const s = t.trim();
+                if (s)
+                    out.push({ id: null, tag: s });
+            }
+            else if (typeof t === 'object') {
+                const o = t;
+                const tag = String(o.tag ?? o.name ?? '').trim();
+                if (tag)
+                    out.push({ id: o.id != null ? Number(o.id) : null, tag });
+            }
+        }
+        return out;
+    }
     parseNameList(input) {
         if (Array.isArray(input))
             return input.map((x) => String(x)).filter((s) => s.trim() !== '');
@@ -858,6 +877,7 @@ let VendorExtrasController = class VendorExtrasController {
                         item_stock: Number(food.item_stock ?? 0),
                         sell_count: Number(food.sell_count ?? 0),
                         status: food.status ?? true,
+                        tags: this.normalizeTags(food.tags),
                     };
                 }),
                 total_size: total,
@@ -889,6 +909,7 @@ let VendorExtrasController = class VendorExtrasController {
                 ...food,
                 id: Number(food.mysql_id),
                 add_ons: addOns,
+                tags: this.normalizeTags(food.tags),
                 nutritions_name: Array.isArray(food.nutritions_name) ? food.nutritions_name : [],
                 allergies_name: Array.isArray(food.allergies_name) ? food.allergies_name : [],
                 price: toNum(food.price) ?? 0,
@@ -1019,7 +1040,7 @@ let VendorExtrasController = class VendorExtrasController {
             maximum_cart_quantity: b.maximum_cart_quantity !== undefined && b.maximum_cart_quantity !== ''
                 ? Number(b.maximum_cart_quantity) : null,
             is_halal: !!Number(b.is_halal ?? 0),
-            tags: this.parseJsonish(b.tags),
+            tags: this.normalizeTags(b.tags),
             tag_ids: this.parseJsonish(b.tag_ids),
             nutritions_name: this.parseNameList(b.nutritions),
             allergies_name: this.parseNameList(b.allergies),
@@ -1096,7 +1117,7 @@ let VendorExtrasController = class VendorExtrasController {
         if (b.addon_ids !== undefined)
             data.addon_ids = this.parseJsonish(b.addon_ids);
         if (b.tags !== undefined)
-            data.tags = this.parseJsonish(b.tags);
+            data.tags = this.normalizeTags(b.tags);
         if (b.tag_ids !== undefined)
             data.tag_ids = this.parseJsonish(b.tag_ids);
         if (b.nutritions !== undefined)

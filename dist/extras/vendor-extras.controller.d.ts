@@ -14,6 +14,7 @@ export declare class VendorExtrasController {
     private static readonly ONGOING_STATUSES;
     private hashPassword;
     private parseJsonish;
+    private normalizeTags;
     private parseNameList;
     private resolveAddOns;
     private buildCategoryIds;
@@ -609,6 +610,10 @@ export declare class VendorExtrasController {
             item_stock: number;
             sell_count: number;
             status: {};
+            tags: {
+                id: number | null;
+                tag: string;
+            }[];
             mysql_id: number;
             name?: string | null;
             description?: string | null;
@@ -666,6 +671,10 @@ export declare class VendorExtrasController {
             name: string | null;
             price: number;
             status: number;
+        }[];
+        tags: {
+            id: number | null;
+            tag: string;
         }[];
         nutritions_name: any[];
         allergies_name: any[];
