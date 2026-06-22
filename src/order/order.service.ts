@@ -86,6 +86,19 @@ export class OrderService {
     private readonly zones: ZoneService,
   ) {}
 
+  /** Whether the extra charges (food tax + platform/convenience/packaging fees)
+   *  should apply to Take Away / Dine In orders. Driven by the
+   *  `charges_on_takeaway_dinein` business setting (Order Settings). Default OFF
+   *  — Home Delivery always carries the charges; non-delivery only when enabled. */
+  private async chargesApplyOnNonDelivery(): Promise<boolean> {
+    const doc = await this.mongo.findOne<{ value?: string; key_value?: string }>(
+      'business_settings',
+      { key: 'charges_on_takeaway_dinein' },
+    );
+    const raw = doc?.value ?? doc?.key_value;
+    return raw === '1' || raw === 'true';
+  }
+
   /** Push a real-time "new order" FCM notification to the restaurant's vendor
    *  device. Looks up the vendor's stored fcm_token via the restaurant. Fully
    *  best-effort — never throws, no-ops when FCM creds / token are absent. */
@@ -314,7 +327,17 @@ export class OrderService {
       // Platform/packaging/convenience fees — the SAME flat value the customer
       // app shows from config, so the displayed total matches what we charge.
       const addChargeRows = await this.mongo.findMany<AdditionalChargeRow>('additional_user_charges', {});
-      const additionalCharge = computeFlatAdditionalCharge(addChargeRows).amount;
+      let additionalCharge = computeFlatAdditionalCharge(addChargeRows).amount;
+      // Extra charges (food tax + platform/convenience/packaging fees) apply to
+      // Home Delivery always; for Take Away / Dine In only when the admin has
+      // enabled `charges_on_takeaway_dinein` (Order Settings). Default OFF, so a
+      // walk-in pickup / dine-in is charged the food subtotal only. This must
+      // mirror the customer app's checkout gating and the admin POS.
+      const isNonDelivery = body.order_type === 'take_away' || body.order_type === 'dine_in';
+      if (isNonDelivery && !(await this.chargesApplyOnNonDelivery())) {
+        additionalCharge = 0;
+        totalTax = 0;
+      }
       const finalAmount = Math.round((orderAmount - couponDiscount + totalTax + deliveryCharge + additionalCharge) * 100) / 100;
       const otp = String(Math.floor(1000 + Math.random() * 9000));
       const now = new Date();

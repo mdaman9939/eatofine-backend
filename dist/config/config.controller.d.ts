@@ -87,6 +87,7 @@ export declare class ConfigController {
         additional_charge_status: number;
         additional_charge_name: string;
         additional_charge: number;
+        charges_on_takeaway_dinein: number;
         take_away: boolean;
         dine_in: boolean;
         dine_in_order_option: number;

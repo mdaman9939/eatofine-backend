@@ -2637,12 +2637,21 @@ let AdminService = class AdminService {
             return Number.isFinite(n) && n >= 0 ? n : 5;
         })();
         const sentTax = body.tax_percent !== undefined ? Number(body.tax_percent) : adminFoodGstRate;
-        const taxPercent = sentTax > 0 ? adminFoodGstRate : 0;
+        let taxPercent = sentTax > 0 ? adminFoodGstRate : 0;
         const taxable = Math.max(0, subtotal - discount);
-        const taxAmount = taxable * (taxPercent / 100);
         const deliveryCharge = Number(body.delivery_charge ?? 0);
-        const additionalCharge = Math.max(0, Number(body.additional_charge ?? 0));
-        const extraPackaging = Math.max(0, Number(body.extra_packaging_amount ?? 0));
+        let additionalCharge = Math.max(0, Number(body.additional_charge ?? 0));
+        let extraPackaging = Math.max(0, Number(body.extra_packaging_amount ?? 0));
+        if (orderType === 'take_away' || orderType === 'dine_in') {
+            const cDoc = await this.mongo.findOne('business_settings', { key: 'charges_on_takeaway_dinein' });
+            const cRaw = cDoc?.value ?? cDoc?.key_value;
+            if (!(cRaw === '1' || cRaw === 'true')) {
+                taxPercent = 0;
+                additionalCharge = 0;
+                extraPackaging = 0;
+            }
+        }
+        const taxAmount = taxable * (taxPercent / 100);
         const orderAmount = taxable + taxAmount + deliveryCharge + additionalCharge + extraPackaging;
         const now = new Date();
         const orderId = await this.mongo.nextMysqlId('orders');

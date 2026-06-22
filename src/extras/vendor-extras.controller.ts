@@ -387,7 +387,16 @@ export class VendorExtrasController {
             validity: Number(pkg.validity ?? 30),
             package: packagePayload,
           };
-          subscriptionOtherData = { total_bill: toNum(pkg.price), max_product_uploads: 0, pending_bill: 0 };
+          // Remaining product-upload quota for the plan. The app blocks "Add food"
+          // ONLY when this is exactly 0, so hardcoding 0 here blocked EVERY
+          // subscription restaurant from adding food. `max_product` of 0 /
+          // 'unlimited' means no cap → expose a large number; otherwise it's the
+          // package limit minus what the restaurant already has.
+          const maxProductLimit = Number(pkg.max_product ?? 0);
+          const remainingUploads = (!Number.isFinite(maxProductLimit) || maxProductLimit <= 0)
+            ? 999999
+            : Math.max(0, maxProductLimit - productCount);
+          subscriptionOtherData = { total_bill: toNum(pkg.price), max_product_uploads: remainingUploads, pending_bill: 0 };
         }
       }
 

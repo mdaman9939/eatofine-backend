@@ -10,6 +10,7 @@ export declare class OrderService {
     private readonly userCharges;
     private readonly zones;
     constructor(prisma: PrismaService, mongo: MongoDataService, fcm: FcmService, userCharges: UserDeliveryChargesService, zones: ZoneService);
+    private chargesApplyOnNonDelivery;
     private pushNewOrderToRestaurant;
     private useMongo;
     placeOrder(userId: bigint, body: {

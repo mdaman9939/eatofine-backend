@@ -39,6 +39,11 @@ let OrderService = class OrderService {
         this.userCharges = userCharges;
         this.zones = zones;
     }
+    async chargesApplyOnNonDelivery() {
+        const doc = await this.mongo.findOne('business_settings', { key: 'charges_on_takeaway_dinein' });
+        const raw = doc?.value ?? doc?.key_value;
+        return raw === '1' || raw === 'true';
+    }
     async pushNewOrderToRestaurant(restaurantId, orderId) {
         try {
             const restaurant = await this.mongo.findOne('restaurants', { mysql_id: Number(restaurantId) });
@@ -197,7 +202,12 @@ let OrderService = class OrderService {
             }
             totalTax = Math.round((totalTax + deliveryGst) * 100) / 100;
             const addChargeRows = await this.mongo.findMany('additional_user_charges', {});
-            const additionalCharge = (0, additional_charge_1.computeFlatAdditionalCharge)(addChargeRows).amount;
+            let additionalCharge = (0, additional_charge_1.computeFlatAdditionalCharge)(addChargeRows).amount;
+            const isNonDelivery = body.order_type === 'take_away' || body.order_type === 'dine_in';
+            if (isNonDelivery && !(await this.chargesApplyOnNonDelivery())) {
+                additionalCharge = 0;
+                totalTax = 0;
+            }
             const finalAmount = Math.round((orderAmount - couponDiscount + totalTax + deliveryCharge + additionalCharge) * 100) / 100;
             const otp = String(Math.floor(1000 + Math.random() * 9000));
             const now = new Date();

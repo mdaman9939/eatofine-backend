@@ -254,7 +254,11 @@ let VendorExtrasController = class VendorExtrasController {
                         validity: Number(pkg.validity ?? 30),
                         package: packagePayload,
                     };
-                    subscriptionOtherData = { total_bill: toNum(pkg.price), max_product_uploads: 0, pending_bill: 0 };
+                    const maxProductLimit = Number(pkg.max_product ?? 0);
+                    const remainingUploads = (!Number.isFinite(maxProductLimit) || maxProductLimit <= 0)
+                        ? 999999
+                        : Math.max(0, maxProductLimit - productCount);
+                    subscriptionOtherData = { total_bill: toNum(pkg.price), max_product_uploads: remainingUploads, pending_bill: 0 };
                 }
             }
             return {

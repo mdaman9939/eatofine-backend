@@ -124,6 +124,7 @@ let ConfigController = class ConfigController {
             additional_charge_status: addCharge.amount > 0 ? 1 : 0,
             additional_charge_name: addCharge.name,
             additional_charge: addCharge.amount,
+            charges_on_takeaway_dinein: (await this.bs.getBool('charges_on_takeaway_dinein')) ? 1 : 0,
             take_away: await this.bs.getBool('take_away'),
             dine_in: await this.bs.getBoolDefault('dine_in', true),
             dine_in_order_option: (await this.bs.getBoolDefault('dine_in', true)) ? 1 : 0,
