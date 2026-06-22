@@ -534,10 +534,17 @@ export declare class CustomerExtrasController {
         credited_to_rider: number;
         errors?: undefined;
     }>;
-    getOrderTax(): {
+    getOrderTax(body: {
+        cart?: Array<{
+            price?: number;
+            quantity?: number;
+        }>;
+        order_type?: string;
+    }): Promise<{
         total_tax_amount: number;
         tax_amount: number;
-    };
+        tax_included: number;
+    }>;
     sendNotification(): {
         ok: boolean;
     };

@@ -116,6 +116,12 @@ let OrderService = class OrderService {
                     }
                 }
             }
+            const foodGstDoc = await this.mongo.findOne('business_settings', { key: 'food_gst_rate' });
+            const adminFoodGstRate = (() => {
+                const raw = foodGstDoc?.value ?? foodGstDoc?.key_value;
+                const n = raw != null ? parseFloat(String(raw)) : NaN;
+                return Number.isFinite(n) && n >= 0 ? n : 5;
+            })();
             let orderAmount = 0;
             let totalTax = 0;
             for (const c of body.cart) {
@@ -125,10 +131,8 @@ let OrderService = class OrderService {
                 const qty = c.quantity ?? 1;
                 const price = c.price ?? Number(f.price ?? 0);
                 const lineTotal = price * qty;
-                const taxRate = Number(f.tax ?? 0) / 100;
-                const lineTax = f.tax_type === 'percent' ? lineTotal * taxRate : Number(f.tax ?? 0) * qty;
                 orderAmount += lineTotal;
-                totalTax += lineTax;
+                totalTax += lineTotal * (adminFoodGstRate / 100);
             }
             let couponDiscount = 0;
             let couponCode = null;
@@ -219,8 +223,7 @@ let OrderService = class OrderService {
                     continue;
                 const qty = c.quantity ?? 1;
                 const price = c.price ?? Number(f.price ?? 0);
-                const taxRate = Number(f.tax ?? 0) / 100;
-                const lineTax = f.tax_type === 'percent' ? price * qty * taxRate : Number(f.tax ?? 0) * qty;
+                const lineTax = price * qty * (adminFoodGstRate / 100);
                 const foodDetails = { id: Number(f.mysql_id), name: f.name, price: Number(f.price ?? 0), veg: f.veg ? 1 : 0 };
                 items.push({
                     food_id: Number(f.mysql_id),

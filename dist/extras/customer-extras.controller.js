@@ -826,8 +826,30 @@ let CustomerExtrasController = class CustomerExtrasController {
         }
         return { message: 'Tip added' };
     }
-    getOrderTax() {
-        return { total_tax_amount: 0, tax_amount: 0 };
+    async getOrderTax(body) {
+        const cart = Array.isArray(body?.cart) ? body.cart : [];
+        const foodSubtotal = cart.reduce((s, c) => s + Number(c?.price ?? 0) * Number(c?.quantity ?? 1), 0);
+        let rate = 5;
+        if (this.useMongo()) {
+            const readNum = async (key, fallback) => {
+                const doc = await this.mongo.findOne('business_settings', { key });
+                const raw = doc?.value ?? doc?.key_value;
+                const n = raw != null ? parseFloat(String(raw)) : NaN;
+                return Number.isFinite(n) ? n : fallback;
+            };
+            rate = await readNum('food_gst_rate', 5);
+            if (rate < 0)
+                rate = 5;
+            const isNonDelivery = body?.order_type === 'take_away' || body?.order_type === 'dine_in';
+            if (isNonDelivery) {
+                const doc = await this.mongo.findOne('business_settings', { key: 'charges_on_takeaway_dinein' });
+                const v = doc?.value ?? doc?.key_value;
+                if (!(v === '1' || v === 'true'))
+                    rate = 0;
+            }
+        }
+        const taxAmount = Math.round(foodSubtotal * (rate / 100) * 100) / 100;
+        return { total_tax_amount: taxAmount, tax_amount: taxAmount, tax_included: 0 };
     }
     sendNotification() {
         return { ok: true };
@@ -1209,10 +1231,12 @@ __decorate([
 ], CustomerExtrasController.prototype, "addTip", null);
 __decorate([
     (0, common_1.HttpCode)(200),
+    (0, common_1.HttpCode)(200),
     (0, common_1.Post)('order/get-Tax'),
+    __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
 ], CustomerExtrasController.prototype, "getOrderTax", null);
 __decorate([
     (0, common_1.HttpCode)(200),

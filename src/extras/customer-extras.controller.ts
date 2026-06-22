@@ -1096,9 +1096,43 @@ export class CustomerExtrasController {
   }
 
   @HttpCode(200)
+  @HttpCode(200)
   @Post('order/get-Tax')
-  getOrderTax() {
-    return { total_tax_amount: 0, tax_amount: 0 };
+  async getOrderTax(@Body() body: {
+    cart?: Array<{ price?: number; quantity?: number }>;
+    order_type?: string;
+  }) {
+    // The customer app renders this as the checkout "tax" line and adds it to the
+    // total. Return the PLATFORM food GST (admin `food_gst_rate`, GST sec 9(5))
+    // computed the SAME way order.service.placeOrder charges it — so the checkout
+    // preview equals the amount actually charged. (Was a stub returning 0, which —
+    // together with the default 201 status — left the app showing no GST.)
+    const cart = Array.isArray(body?.cart) ? body.cart : [];
+    const foodSubtotal = cart.reduce((s, c) => s + Number(c?.price ?? 0) * Number(c?.quantity ?? 1), 0);
+
+    let rate = 5;
+    if (this.useMongo()) {
+      const readNum = async (key: string, fallback: number): Promise<number> => {
+        const doc = await this.mongo.findOne<{ value?: string; key_value?: string }>('business_settings', { key });
+        const raw = doc?.value ?? doc?.key_value;
+        const n = raw != null ? parseFloat(String(raw)) : NaN;
+        return Number.isFinite(n) ? n : fallback;
+      };
+      rate = await readNum('food_gst_rate', 5);
+      if (rate < 0) rate = 5;
+      // Take Away / Dine In are taxed only when the admin enabled charges there
+      // (mirrors order.service.placeOrder + the admin POS gating).
+      const isNonDelivery = body?.order_type === 'take_away' || body?.order_type === 'dine_in';
+      if (isNonDelivery) {
+        const doc = await this.mongo.findOne<{ value?: string; key_value?: string }>('business_settings', { key: 'charges_on_takeaway_dinein' });
+        const v = doc?.value ?? doc?.key_value;
+        if (!(v === '1' || v === 'true')) rate = 0;
+      }
+    }
+
+    const taxAmount = Math.round(foodSubtotal * (rate / 100) * 100) / 100;
+    // tax_included: 0 → exclusive (the app shows it as a separate line and adds it).
+    return { total_tax_amount: taxAmount, tax_amount: taxAmount, tax_included: 0 };
   }
 
   @HttpCode(200)

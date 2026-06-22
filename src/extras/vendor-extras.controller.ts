@@ -2816,6 +2816,24 @@ export class VendorExtrasController {
     return { message: 'left' };
   }
 
+  /** Normalize an advertisement date to ISO `yyyy-MM-dd`. The restaurant app
+   *  sends/parses dates as "MM/dd/yyyy" on submit but its display + edit pre-fill
+   *  parse ISO (DateTime.parse / yyyy-MM-dd), so storing/returning "MM/dd/yyyy"
+   *  broke the edit round-trip (validity didn't reflect). We canonicalize to ISO
+   *  on both write and read, so old rows (MM/dd/yyyy strings) and admin-created
+   *  rows (Date objects) all come back in the format the app expects. */
+  private toIsoDate(raw: unknown): string | null {
+    if (raw == null) return null;
+    if (raw instanceof Date) return raw.toISOString().slice(0, 10);
+    const s = String(raw).trim();
+    if (!s) return null;
+    const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); // MM/dd/yyyy
+    if (us) return `${us[3]}-${us[1].padStart(2, '0')}-${us[2].padStart(2, '0')}`;
+    const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/); // yyyy-MM-dd (with/without time)
+    if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+    return s;
+  }
+
   /** Map a Mongo advertisement doc to the exact shape AdvertisementModel.Adds
    *  / AdsDetailsModel expect in the restaurant app. Image URLs come from
    *  storageBaseUrl() which is request-host aware (see main.ts). */
@@ -2833,8 +2851,8 @@ export class VendorExtrasController {
       add_type: r.add_type ?? 'restaurant_promotion',
       title: r.title ?? null,
       description: r.description ?? null,
-      start_date: r.start_date ?? null,
-      end_date: r.end_date ?? null,
+      start_date: this.toIsoDate(r.start_date),
+      end_date: this.toIsoDate(r.end_date),
       pause_note: r.pause_note ?? null,
       cancellation_note: r.cancellation_note ?? null,
       cover_image: r.cover_image ?? null,
@@ -2880,8 +2898,8 @@ export class VendorExtrasController {
     let endDate: string | null = null;
     if (typeof body.dates === 'string' && body.dates.includes(' - ')) {
       const [s, e] = body.dates.split(' - ');
-      startDate = s.trim() || null;
-      endDate = e.trim() || null;
+      startDate = this.toIsoDate(s);
+      endDate = this.toIsoDate(e);
     }
     const cover = await this.saveUploaded(files?.cover_image?.[0], 'advertisement');
     const profile = await this.saveUploaded(files?.profile_image?.[0], 'advertisement');
@@ -3007,8 +3025,8 @@ export class VendorExtrasController {
     }
     if (typeof body.dates === 'string' && body.dates.includes(' - ')) {
       const [s, e] = body.dates.split(' - ');
-      data.start_date = s.trim() || null;
-      data.end_date = e.trim() || null;
+      data.start_date = this.toIsoDate(s);
+      data.end_date = this.toIsoDate(e);
     }
     if (body.advertisement_type !== undefined) data.add_type = String(body.advertisement_type);
     if (body.is_rating_active !== undefined) data.is_rating_active = Number(body.is_rating_active);

@@ -1393,6 +1393,7 @@ export declare class VendorExtrasController {
     campaignLeave(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
         message: string;
     }>;
+    private toIsoDate;
     private shapeAd;
     private parseAdTranslations;
     private createAdvertisement;
@@ -1413,8 +1414,8 @@ export declare class VendorExtrasController {
             add_type: {};
             title: {} | null;
             description: {} | null;
-            start_date: {} | null;
-            end_date: {} | null;
+            start_date: string | null;
+            end_date: string | null;
             pause_note: {} | null;
             cancellation_note: {} | null;
             cover_image: {} | null;
@@ -1444,8 +1445,8 @@ export declare class VendorExtrasController {
         add_type: {};
         title: {} | null;
         description: {} | null;
-        start_date: {} | null;
-        end_date: {} | null;
+        start_date: string | null;
+        end_date: string | null;
         pause_note: {} | null;
         cancellation_note: {} | null;
         cover_image: {} | null;

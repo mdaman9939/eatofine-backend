@@ -1557,12 +1557,25 @@ let VendorExtrasController = class VendorExtrasController {
     async vendorCouponUpdate(body = {}) {
         if (!this.useMongo())
             return { message: 'coupon updated' };
-        const id = body.id !== undefined && body.id !== '' ? Number(body.id) : null;
+        const rawId = body.id ?? body.coupon_id;
+        const id = rawId !== undefined && rawId !== '' ? Number(rawId) : null;
         if (!id)
             return { errors: [{ code: 'id', message: 'coupon id required' }] };
         const data = {};
-        if (body.title !== undefined)
-            data.title = String(body.title);
+        let title = body.title !== undefined ? String(body.title) : '';
+        if (!title && body.translations !== undefined) {
+            try {
+                const arr = typeof body.translations === 'string' ? JSON.parse(body.translations) : body.translations;
+                if (Array.isArray(arr)) {
+                    const en = arr.find((t) => t && t.key === 'title' && (t.locale === 'en' || !t.locale) && t.value);
+                    const any = arr.find((t) => t && t.key === 'title' && t.value);
+                    title = String((en?.value ?? any?.value) ?? '');
+                }
+            }
+            catch { }
+        }
+        if (title)
+            data.title = title;
         if (body.discount !== undefined && body.discount !== '')
             data.discount = Number(body.discount);
         if (body.discount_type !== undefined)
@@ -1585,7 +1598,8 @@ let VendorExtrasController = class VendorExtrasController {
         return { message: 'coupon updated' };
     }
     async vendorCouponStatus(body = {}) {
-        const id = body.id !== undefined && body.id !== '' ? Number(body.id) : null;
+        const rawId = body.id ?? body.coupon_id;
+        const id = rawId !== undefined && rawId !== '' ? Number(rawId) : null;
         if (this.useMongo() && id) {
             await this.mongo.updateOne('coupons', { mysql_id: id }, { status: !!Number(body.status ?? 0), updated_at: new Date() });
         }
@@ -1595,7 +1609,8 @@ let VendorExtrasController = class VendorExtrasController {
         return this.vendorCouponDelete(body, idQ);
     }
     async vendorCouponDelete(body = {}, idQ) {
-        const id = body.id !== undefined && body.id !== '' ? Number(body.id) : (idQ ? Number(idQ) : null);
+        const rawId = body.id ?? body.coupon_id;
+        const id = rawId !== undefined && rawId !== '' ? Number(rawId) : (idQ ? Number(idQ) : null);
         if (this.useMongo() && id)
             await this.mongo.deleteOne('coupons', { mysql_id: id });
         return { message: 'coupon deleted' };
@@ -2225,6 +2240,22 @@ let VendorExtrasController = class VendorExtrasController {
         }
         return { message: 'left' };
     }
+    toIsoDate(raw) {
+        if (raw == null)
+            return null;
+        if (raw instanceof Date)
+            return raw.toISOString().slice(0, 10);
+        const s = String(raw).trim();
+        if (!s)
+            return null;
+        const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+        if (us)
+            return `${us[3]}-${us[1].padStart(2, '0')}-${us[2].padStart(2, '0')}`;
+        const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (iso)
+            return `${iso[1]}-${iso[2]}-${iso[3]}`;
+        return s;
+    }
     shapeAd(row) {
         const r = row;
         const img = (f) => {
@@ -2241,8 +2272,8 @@ let VendorExtrasController = class VendorExtrasController {
             add_type: r.add_type ?? 'restaurant_promotion',
             title: r.title ?? null,
             description: r.description ?? null,
-            start_date: r.start_date ?? null,
-            end_date: r.end_date ?? null,
+            start_date: this.toIsoDate(r.start_date),
+            end_date: this.toIsoDate(r.end_date),
             pause_note: r.pause_note ?? null,
             cancellation_note: r.cancellation_note ?? null,
             cover_image: r.cover_image ?? null,
@@ -2293,8 +2324,8 @@ let VendorExtrasController = class VendorExtrasController {
         let endDate = null;
         if (typeof body.dates === 'string' && body.dates.includes(' - ')) {
             const [s, e] = body.dates.split(' - ');
-            startDate = s.trim() || null;
-            endDate = e.trim() || null;
+            startDate = this.toIsoDate(s);
+            endDate = this.toIsoDate(e);
         }
         const cover = await this.saveUploaded(files?.cover_image?.[0], 'advertisement');
         const profile = await this.saveUploaded(files?.profile_image?.[0], 'advertisement');
@@ -2380,8 +2411,8 @@ let VendorExtrasController = class VendorExtrasController {
         }
         if (typeof body.dates === 'string' && body.dates.includes(' - ')) {
             const [s, e] = body.dates.split(' - ');
-            data.start_date = s.trim() || null;
-            data.end_date = e.trim() || null;
+            data.start_date = this.toIsoDate(s);
+            data.end_date = this.toIsoDate(e);
         }
         if (body.advertisement_type !== undefined)
             data.add_type = String(body.advertisement_type);
