@@ -1403,6 +1403,56 @@ export declare class VendorExtrasController {
         vendor_status: string | null;
         is_joined: boolean;
     }[]>;
+    private doCampaignJoin;
+    private doCampaignLeave;
+    campaignJoinPut(req: AuthedRequest, body: {
+        campaign_id?: number | string;
+    }): Promise<{
+        message: string;
+        errors?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+    }>;
+    campaignJoinPost(req: AuthedRequest, body: {
+        campaign_id?: number | string;
+    }): Promise<{
+        message: string;
+        errors?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+    }>;
+    campaignLeavePut(req: AuthedRequest, body: {
+        campaign_id?: number | string;
+    }): Promise<{
+        message: string;
+        errors?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+    }>;
+    campaignLeavePost(req: AuthedRequest, body: {
+        campaign_id?: number | string;
+    }): Promise<{
+        message: string;
+        errors?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+    }>;
     campaignJoin(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
         message: string;
     }>;

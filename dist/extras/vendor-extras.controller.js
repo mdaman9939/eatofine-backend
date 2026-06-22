@@ -2289,6 +2289,46 @@ let VendorExtrasController = class VendorExtrasController {
             };
         });
     }
+    async doCampaignJoin(req, body) {
+        if (!this.useMongo())
+            return { message: 'joined' };
+        const restaurant = await this.vendorRestaurant(req);
+        if (!restaurant)
+            return { errors: [{ code: 'restaurant', message: 'restaurant not found' }] };
+        const restId = Number(restaurant.mysql_id);
+        const campaignId = Number(body?.campaign_id ?? 0);
+        if (!campaignId)
+            return { errors: [{ code: 'campaign_id', message: 'campaign_id required' }] };
+        const campaign = await this.mongo.findByMysqlId('campaigns', campaignId);
+        if (!campaign)
+            return { errors: [{ code: 'campaign', message: 'campaign not found' }] };
+        const existing = await this.mongo.findOne('restaurant_campaigns', { campaign_id: campaignId, restaurant_id: restId });
+        if (!existing) {
+            const id = await this.mongo.nextMysqlId('restaurant_campaigns');
+            await this.mongo.insertOne('restaurant_campaigns', {
+                mysql_id: id, campaign_id: campaignId, restaurant_id: restId,
+                vendor_status: 'confirmed', created_at: new Date(), updated_at: new Date(),
+            });
+        }
+        return { message: 'Joined the campaign successfully' };
+    }
+    async doCampaignLeave(req, body) {
+        if (!this.useMongo())
+            return { message: 'left' };
+        const restaurant = await this.vendorRestaurant(req);
+        if (!restaurant)
+            return { errors: [{ code: 'restaurant', message: 'restaurant not found' }] };
+        const restId = Number(restaurant.mysql_id);
+        const campaignId = Number(body?.campaign_id ?? 0);
+        if (!campaignId)
+            return { errors: [{ code: 'campaign_id', message: 'campaign_id required' }] };
+        await this.mongo.deleteOne('restaurant_campaigns', { campaign_id: campaignId, restaurant_id: restId });
+        return { message: 'Left the campaign successfully' };
+    }
+    campaignJoinPut(req, body) { return this.doCampaignJoin(req, body); }
+    campaignJoinPost(req, body) { return this.doCampaignJoin(req, body); }
+    campaignLeavePut(req, body) { return this.doCampaignLeave(req, body); }
+    campaignLeavePost(req, body) { return this.doCampaignLeave(req, body); }
     async campaignJoin(req, body = {}) {
         if (this.useMongo()) {
             const restaurant = await this.vendorRestaurant(req);
@@ -3449,6 +3489,42 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], VendorExtrasController.prototype, "basicCampaigns", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Put)('campaign-join'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], VendorExtrasController.prototype, "campaignJoinPut", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Post)('campaign-join'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], VendorExtrasController.prototype, "campaignJoinPost", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Put)('campaign-leave'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], VendorExtrasController.prototype, "campaignLeavePut", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Post)('campaign-leave'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], VendorExtrasController.prototype, "campaignLeavePost", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('campaign-join'),

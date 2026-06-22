@@ -2878,6 +2878,52 @@ export class VendorExtrasController {
     });
   }
 
+  // ── Campaign join / leave ─────────────────────────────────────────
+  // App: PUT /vendor/campaign-join and /campaign-leave with {campaign_id}.
+  // Membership lives in `restaurant_campaigns` (read by get-basic-campaigns),
+  // so joining flips is_joined → true. Both verbs registered (the app's client
+  // uses _method spoofing on some flows). Was missing entirely → 404.
+  private async doCampaignJoin(req: AuthedRequest, body: { campaign_id?: number | string }) {
+    if (!this.useMongo()) return { message: 'joined' };
+    const restaurant = await this.vendorRestaurant(req);
+    if (!restaurant) return { errors: [{ code: 'restaurant', message: 'restaurant not found' }] };
+    const restId = Number(restaurant.mysql_id);
+    const campaignId = Number(body?.campaign_id ?? 0);
+    if (!campaignId) return { errors: [{ code: 'campaign_id', message: 'campaign_id required' }] };
+    const campaign = await this.mongo.findByMysqlId<{ mysql_id: number }>('campaigns', campaignId);
+    if (!campaign) return { errors: [{ code: 'campaign', message: 'campaign not found' }] };
+    // Idempotent — never create a duplicate membership.
+    const existing = await this.mongo.findOne<{ mysql_id: number }>('restaurant_campaigns', { campaign_id: campaignId, restaurant_id: restId });
+    if (!existing) {
+      const id = await this.mongo.nextMysqlId('restaurant_campaigns');
+      await this.mongo.insertOne('restaurant_campaigns', {
+        mysql_id: id, campaign_id: campaignId, restaurant_id: restId,
+        vendor_status: 'confirmed', created_at: new Date(), updated_at: new Date(),
+      });
+    }
+    return { message: 'Joined the campaign successfully' };
+  }
+
+  private async doCampaignLeave(req: AuthedRequest, body: { campaign_id?: number | string }) {
+    if (!this.useMongo()) return { message: 'left' };
+    const restaurant = await this.vendorRestaurant(req);
+    if (!restaurant) return { errors: [{ code: 'restaurant', message: 'restaurant not found' }] };
+    const restId = Number(restaurant.mysql_id);
+    const campaignId = Number(body?.campaign_id ?? 0);
+    if (!campaignId) return { errors: [{ code: 'campaign_id', message: 'campaign_id required' }] };
+    await this.mongo.deleteOne('restaurant_campaigns', { campaign_id: campaignId, restaurant_id: restId });
+    return { message: 'Left the campaign successfully' };
+  }
+
+  @HttpCode(200) @Put('campaign-join')
+  campaignJoinPut(@Req() req: AuthedRequest, @Body() body: { campaign_id?: number | string }) { return this.doCampaignJoin(req, body); }
+  @HttpCode(200) @Post('campaign-join')
+  campaignJoinPost(@Req() req: AuthedRequest, @Body() body: { campaign_id?: number | string }) { return this.doCampaignJoin(req, body); }
+  @HttpCode(200) @Put('campaign-leave')
+  campaignLeavePut(@Req() req: AuthedRequest, @Body() body: { campaign_id?: number | string }) { return this.doCampaignLeave(req, body); }
+  @HttpCode(200) @Post('campaign-leave')
+  campaignLeavePost(@Req() req: AuthedRequest, @Body() body: { campaign_id?: number | string }) { return this.doCampaignLeave(req, body); }
+
   @HttpCode(200)
   @Post('campaign-join')
   @Put('campaign-join')
