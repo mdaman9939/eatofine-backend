@@ -132,6 +132,32 @@ let VendorExtrasController = class VendorExtrasController {
         }
         return [];
     }
+    parseNameList(input) {
+        if (Array.isArray(input))
+            return input.map((x) => String(x)).filter((s) => s.trim() !== '');
+        if (typeof input === 'string' && input.trim()) {
+            const s = input.trim();
+            if (s.startsWith('[')) {
+                try {
+                    const a = JSON.parse(s);
+                    if (Array.isArray(a))
+                        return a.map((x) => String(x)).filter((v) => v.trim() !== '');
+                }
+                catch { }
+            }
+            return s.split(',').map((x) => x.trim()).filter(Boolean);
+        }
+        return [];
+    }
+    async resolveAddOns(addonIdsRaw) {
+        const ids = this.parseJsonish(addonIdsRaw)
+            .map((x) => Number(x))
+            .filter((n) => Number.isFinite(n) && n > 0);
+        if (ids.length === 0)
+            return [];
+        const rows = await this.mongo.findMany('add_ons', { mysql_id: { $in: ids } });
+        return rows.map((r) => ({ id: Number(r.mysql_id), name: r.name ?? null, price: toNum(r.price), status: r.status ? 1 : 0 }));
+    }
     buildCategoryIds(catId, subId) {
         const out = [];
         const ok = (v) => v !== null && v !== undefined && String(v) !== '' && String(v) !== '0';
@@ -857,10 +883,14 @@ let VendorExtrasController = class VendorExtrasController {
             if (!f)
                 return null;
             const food = f;
+            const addOns = await this.resolveAddOns(food.addon_ids);
             return {
                 ...(food.legacy ?? {}),
                 ...food,
                 id: Number(food.mysql_id),
+                add_ons: addOns,
+                nutritions_name: Array.isArray(food.nutritions_name) ? food.nutritions_name : [],
+                allergies_name: Array.isArray(food.allergies_name) ? food.allergies_name : [],
                 price: toNum(food.price) ?? 0,
                 tax: toNum(food.tax) ?? 0,
                 discount: toNum(food.discount) ?? 0,
@@ -991,6 +1021,9 @@ let VendorExtrasController = class VendorExtrasController {
             is_halal: !!Number(b.is_halal ?? 0),
             tags: this.parseJsonish(b.tags),
             tag_ids: this.parseJsonish(b.tag_ids),
+            nutritions_name: this.parseNameList(b.nutritions),
+            allergies_name: this.parseNameList(b.allergies),
+            tax_ids: this.parseJsonish(b.tax_ids),
             sell_count: 0,
             avg_rating: 0,
             rating_count: 0,
@@ -1066,6 +1099,12 @@ let VendorExtrasController = class VendorExtrasController {
             data.tags = this.parseJsonish(b.tags);
         if (b.tag_ids !== undefined)
             data.tag_ids = this.parseJsonish(b.tag_ids);
+        if (b.nutritions !== undefined)
+            data.nutritions_name = this.parseNameList(b.nutritions);
+        if (b.allergies !== undefined)
+            data.allergies_name = this.parseNameList(b.allergies);
+        if (b.tax_ids !== undefined)
+            data.tax_ids = this.parseJsonish(b.tax_ids);
         const imageName = await this.saveUploaded(files?.image?.[0], 'product');
         const metaImage = await this.saveUploaded(files?.meta_image?.[0], 'product');
         if (imageName)

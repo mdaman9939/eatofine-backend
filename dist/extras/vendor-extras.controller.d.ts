@@ -14,6 +14,8 @@ export declare class VendorExtrasController {
     private static readonly ONGOING_STATUSES;
     private hashPassword;
     private parseJsonish;
+    private parseNameList;
+    private resolveAddOns;
     private buildCategoryIds;
     profile(req: AuthedRequest): Promise<{
         id?: undefined;
@@ -659,6 +661,14 @@ export declare class VendorExtrasController {
     }>;
     productDetails(idStr?: string): Promise<{
         id: number;
+        add_ons: {
+            id: number;
+            name: string | null;
+            price: number;
+            status: number;
+        }[];
+        nutritions_name: any[];
+        allergies_name: any[];
         price: number;
         tax: number;
         discount: number;

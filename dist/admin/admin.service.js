@@ -2632,6 +2632,14 @@ let AdminService = class AdminService {
         const restaurant = await this.mongo.findByMysqlId('restaurants', Number(body.restaurant_id));
         if (!restaurant)
             throw new common_1.NotFoundException({ errors: [{ code: 'restaurant', message: 'Restaurant not found' }] });
+        let customerPhone = (body.customer_phone ?? '').replace(/\D/g, '');
+        if (customerPhone.length === 12 && customerPhone.startsWith('91'))
+            customerPhone = customerPhone.slice(2);
+        if (customerPhone.length === 11 && customerPhone.startsWith('0'))
+            customerPhone = customerPhone.slice(1);
+        if (customerPhone && !/^[6-9]\d{9}$/.test(customerPhone)) {
+            throw new common_1.BadRequestException({ errors: [{ code: 'customer_phone', message: 'Enter a valid 10-digit Indian mobile number' }] });
+        }
         const addOnSum = (it) => (it.add_ons ?? []).reduce((s, a) => s + Math.max(0, Number(a.price ?? 0)), 0);
         const subtotal = items.reduce((s, i) => s + (Number(i.price ?? 0) + addOnSum(i)) * Number(i.quantity ?? 0), 0);
         const discount = Number(body.discount ?? 0);
@@ -2681,7 +2689,7 @@ let AdminService = class AdminService {
             order_note: body.order_note ?? null,
             delivery_address: body.address ?? null,
             contact_person_name: body.customer_name ?? 'Walk-in customer',
-            contact_person_number: body.customer_phone ?? null,
+            contact_person_number: customerPhone || null,
             pending: now,
             confirmed: now,
             created_at: now,

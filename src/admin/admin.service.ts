@@ -2892,6 +2892,15 @@ export class AdminService {
     const restaurant = await this.mongo.findByMysqlId<{ mysql_id: number; tax?: number }>('restaurants', Number(body.restaurant_id));
     if (!restaurant) throw new NotFoundException({ errors: [{ code: 'restaurant', message: 'Restaurant not found' }] });
 
+    // Optional customer phone — accept only a valid Indian 10-digit mobile.
+    // Strip a +91 / leading-0 prefix gracefully, then enforce a 6–9 start.
+    let customerPhone = (body.customer_phone ?? '').replace(/\D/g, '');
+    if (customerPhone.length === 12 && customerPhone.startsWith('91')) customerPhone = customerPhone.slice(2);
+    if (customerPhone.length === 11 && customerPhone.startsWith('0')) customerPhone = customerPhone.slice(1);
+    if (customerPhone && !/^[6-9]\d{9}$/.test(customerPhone)) {
+      throw new BadRequestException({ errors: [{ code: 'customer_phone', message: 'Enter a valid 10-digit Indian mobile number' }] });
+    }
+
     // Per-item add-on total (sum of selected add-on prices), applied per unit.
     const addOnSum = (it: { add_ons?: Array<{ price?: number }> }) =>
       (it.add_ons ?? []).reduce((s, a) => s + Math.max(0, Number(a.price ?? 0)), 0);
@@ -2951,7 +2960,7 @@ export class AdminService {
       order_note: body.order_note ?? null,
       delivery_address: body.address ?? null,
       contact_person_name: body.customer_name ?? 'Walk-in customer',
-      contact_person_number: body.customer_phone ?? null,
+      contact_person_number: customerPhone || null,
       pending: now,
       confirmed: now,
       created_at: now,

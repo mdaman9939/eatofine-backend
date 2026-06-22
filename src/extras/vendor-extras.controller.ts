@@ -239,6 +239,34 @@ export class VendorExtrasController {
     return [];
   }
 
+  /** Parse the Nutrition / Allergic-Ingredients values the app sends. They come
+   *  as a comma-separated string ("a,b,c") or a JSON array; the app reads them
+   *  back as the `nutritions_name` / `allergies_name` string array. */
+  private parseNameList(input: unknown): string[] {
+    if (Array.isArray(input)) return input.map((x) => String(x)).filter((s) => s.trim() !== '');
+    if (typeof input === 'string' && input.trim()) {
+      const s = input.trim();
+      if (s.startsWith('[')) {
+        try { const a: unknown = JSON.parse(s); if (Array.isArray(a)) return a.map((x) => String(x)).filter((v) => v.trim() !== ''); } catch { /* fall through */ }
+      }
+      return s.split(',').map((x) => x.trim()).filter(Boolean);
+    }
+    return [];
+  }
+
+  /** Resolve a food's stored add-on ids into the `add_ons` objects the edit
+   *  screen pre-selects from (it reads `add_ons[*].id`). */
+  private async resolveAddOns(addonIdsRaw: unknown): Promise<Array<{ id: number; name: string | null; price: number; status: number }>> {
+    const ids = this.parseJsonish(addonIdsRaw)
+      .map((x) => Number(x))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    if (ids.length === 0) return [];
+    const rows = await this.mongo.findMany<{ mysql_id: number; name?: string | null; price?: number | string; status?: boolean | number }>(
+      'add_ons', { mysql_id: { $in: ids } },
+    );
+    return rows.map((r) => ({ id: Number(r.mysql_id), name: r.name ?? null, price: toNum(r.price), status: r.status ? 1 : 0 }));
+  }
+
   /** Build the `category_ids` array the restaurant app's edit screen reads to
    *  pre-select the Category + Sub-Category dropdowns ([0]=category, [1]=sub).
    *  initCategoryData only uses `.id`, so names are optional. Without this the
@@ -1159,10 +1187,18 @@ export class VendorExtrasController {
       const f = await this.mongo.findByMysqlId<MongoFoodDoc>('foods', id);
       if (!f) return null;
       const food = f as MongoFoodDoc & Record<string, unknown>;
+      // Resolve add-on ids → objects (edit screen pre-selects from add_ons[*].id).
+      const addOns = await this.resolveAddOns(food.addon_ids);
       return {
         ...(food.legacy ?? {}),
         ...food,
         id: Number(food.mysql_id),
+        // Pre-fill: the edit screen reads these. Always return arrays so the app's
+        // non-null reads (product.nutrition! / .allergies!) never crash and the
+        // chips / add-ons show their saved values.
+        add_ons: addOns,
+        nutritions_name: Array.isArray(food.nutritions_name) ? food.nutritions_name : [],
+        allergies_name: Array.isArray(food.allergies_name) ? food.allergies_name : [],
         price: toNum(food.price) ?? 0,
         tax: toNum(food.tax) ?? 0,
         discount: toNum(food.discount) ?? 0,
@@ -1342,6 +1378,12 @@ export class VendorExtrasController {
       is_halal: !!Number(b.is_halal ?? 0),
       tags: this.parseJsonish(b.tags),
       tag_ids: this.parseJsonish(b.tag_ids),
+      // Nutrition + Allergic Ingredients chips (app sends comma strings, reads
+      // back as nutritions_name / allergies_name arrays).
+      nutritions_name: this.parseNameList(b.nutritions),
+      allergies_name: this.parseNameList(b.allergies),
+      // Product-wise tax ids (only sent when system tax type = product_wise).
+      tax_ids: this.parseJsonish(b.tax_ids),
       sell_count: 0,
       avg_rating: 0,
       rating_count: 0,
@@ -1422,6 +1464,9 @@ export class VendorExtrasController {
     if (b.addon_ids !== undefined) data.addon_ids = this.parseJsonish(b.addon_ids);
     if (b.tags !== undefined) data.tags = this.parseJsonish(b.tags);
     if (b.tag_ids !== undefined) data.tag_ids = this.parseJsonish(b.tag_ids);
+    if (b.nutritions !== undefined) data.nutritions_name = this.parseNameList(b.nutritions);
+    if (b.allergies !== undefined) data.allergies_name = this.parseNameList(b.allergies);
+    if (b.tax_ids !== undefined) data.tax_ids = this.parseJsonish(b.tax_ids);
     const imageName = await this.saveUploaded(files?.image?.[0], 'product');
     const metaImage = await this.saveUploaded(files?.meta_image?.[0], 'product');
     if (imageName) data.image = imageName;
