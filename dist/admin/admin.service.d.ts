@@ -983,6 +983,8 @@ export declare class AdminService {
         name?: string;
         status?: boolean;
         priority?: number;
+        position?: number;
+        parent_id?: number;
         translations?: Array<{
             locale?: string;
             key?: string;

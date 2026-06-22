@@ -1699,7 +1699,12 @@ let AdminService = class AdminService {
             if (body.status !== undefined)
                 data.status = body.status;
             if (body.priority !== undefined)
-                data.priority = body.priority;
+                data.priority = Number(body.priority);
+            if (body.position !== undefined)
+                data.position = Number(body.position);
+            if (body.parent_id !== undefined && body.parent_id !== null && String(body.parent_id) !== '') {
+                data.parent_id = Number(body.parent_id);
+            }
             if (body.translations !== undefined) {
                 const translations = Array.isArray(body.translations) ? body.translations : [];
                 data.translations = translations;

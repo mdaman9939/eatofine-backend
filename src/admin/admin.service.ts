@@ -1831,14 +1831,19 @@ export class AdminService {
     return { ok: true, id: Number(created.id) };
   }
 
-  async updateCategory(id: number, body: { name?: string; status?: boolean; priority?: number; translations?: Array<{ locale?: string; key?: string; value?: string }> }) {
+  async updateCategory(id: number, body: { name?: string; status?: boolean; priority?: number; position?: number; parent_id?: number; translations?: Array<{ locale?: string; key?: string; value?: string }> }) {
     if (this.useMongo()) {
       const c = await this.mongo.findByMysqlId<{ mysql_id: number }>('categories', id);
       if (!c) throw new NotFoundException({ errors: [{ code: 'category', message: 'Category not found' }] });
       const data: Record<string, unknown> = {};
       if (body.name !== undefined) data.name = body.name;
       if (body.status !== undefined) data.status = body.status;
-      if (body.priority !== undefined) data.priority = body.priority;
+      if (body.priority !== undefined) data.priority = Number(body.priority);
+      // Sub-category edit: allow moving it to a different Main Category + reorder.
+      if (body.position !== undefined) data.position = Number(body.position);
+      if (body.parent_id !== undefined && body.parent_id !== null && String(body.parent_id) !== '') {
+        data.parent_id = Number(body.parent_id);
+      }
       if (body.translations !== undefined) {
         const translations = Array.isArray(body.translations) ? body.translations : [];
         data.translations = translations;
