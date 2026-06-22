@@ -239,6 +239,18 @@ export class VendorExtrasController {
     return [];
   }
 
+  /** Build the `category_ids` array the restaurant app's edit screen reads to
+   *  pre-select the Category + Sub-Category dropdowns ([0]=category, [1]=sub).
+   *  initCategoryData only uses `.id`, so names are optional. Without this the
+   *  food edit form opened with empty category dropdowns every time. */
+  private buildCategoryIds(catId: unknown, subId: unknown): Array<{ id: string; position: number; category_name: string | null }> {
+    const out: Array<{ id: string; position: number; category_name: string | null }> = [];
+    const ok = (v: unknown) => v !== null && v !== undefined && String(v) !== '' && String(v) !== '0';
+    if (ok(catId)) out.push({ id: String(catId), position: 1, category_name: null });
+    if (ok(subId)) out.push({ id: String(subId), position: 2, category_name: null });
+    return out;
+  }
+
   // ── Profile ───────────────────────────────────────────────────────
   @Get('profile')
   async profile(@Req() req: AuthedRequest) {
@@ -1156,6 +1168,12 @@ export class VendorExtrasController {
         discount: toNum(food.discount) ?? 0,
         restaurant_id: food.mysql_restaurant_id !== null && food.mysql_restaurant_id !== undefined ? Number(food.mysql_restaurant_id) : 0,
         category_id: food.mysql_category_id !== null && food.mysql_category_id !== undefined ? Number(food.mysql_category_id) : null,
+        // The edit screen pre-selects Category + Sub-Category from `category_ids`
+        // ([0]=category, [1]=sub). Without it the dropdowns opened empty.
+        category_ids: this.buildCategoryIds(
+          food.mysql_category_id ?? food.category_id,
+          food.mysql_sub_category_id ?? food.sub_category_id,
+        ),
         rating_count: Number(food.rating_count ?? 0),
         avg_rating: Number(food.avg_rating ?? 0),
         rating: food.rating ?? [],
@@ -1293,6 +1311,10 @@ export class VendorExtrasController {
       restaurant_id: Number(restaurant.mysql_id),
       mysql_category_id: b.category_id !== undefined && b.category_id !== '' ? Number(b.category_id) : null,
       category_id: b.category_id !== undefined && b.category_id !== '' ? Number(b.category_id) : null,
+      // Sub-category (sent as `sub_category_id` when chosen) — stored so the edit
+      // screen can pre-select it via category_ids[1].
+      mysql_sub_category_id: b.sub_category_id !== undefined && b.sub_category_id !== '' ? Number(b.sub_category_id) : null,
+      sub_category_id: b.sub_category_id !== undefined && b.sub_category_id !== '' ? Number(b.sub_category_id) : null,
       name: trName ?? String(b.name ?? 'Untitled food'),
       description: trDesc ?? String(b.description ?? ''),
       translations,
@@ -1373,6 +1395,13 @@ export class VendorExtrasController {
     if (b.category_id !== undefined && b.category_id !== '') {
       data.category_id = Number(b.category_id);
       data.mysql_category_id = Number(b.category_id);
+    }
+    // Sub-category: persist when sent (null when the vendor clears it) so the
+    // edit screen pre-selects it next time via category_ids[1].
+    if (b.sub_category_id !== undefined) {
+      const sid = b.sub_category_id !== '' ? Number(b.sub_category_id) : null;
+      data.sub_category_id = sid;
+      data.mysql_sub_category_id = sid;
     }
     if (b.stock_type !== undefined) data.stock_type = String(b.stock_type);
     if (b.item_stock !== undefined && b.item_stock !== '') data.item_stock = Number(b.item_stock);

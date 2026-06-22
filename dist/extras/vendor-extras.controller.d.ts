@@ -14,6 +14,7 @@ export declare class VendorExtrasController {
     private static readonly ONGOING_STATUSES;
     private hashPassword;
     private parseJsonish;
+    private buildCategoryIds;
     profile(req: AuthedRequest): Promise<{
         id?: undefined;
         f_name?: undefined;
@@ -663,6 +664,11 @@ export declare class VendorExtrasController {
         discount: number;
         restaurant_id: number;
         category_id: number | null;
+        category_ids: {
+            id: string;
+            position: number;
+            category_name: string | null;
+        }[];
         rating_count: number;
         avg_rating: number;
         rating: {};

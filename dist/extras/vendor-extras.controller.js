@@ -132,6 +132,15 @@ let VendorExtrasController = class VendorExtrasController {
         }
         return [];
     }
+    buildCategoryIds(catId, subId) {
+        const out = [];
+        const ok = (v) => v !== null && v !== undefined && String(v) !== '' && String(v) !== '0';
+        if (ok(catId))
+            out.push({ id: String(catId), position: 1, category_name: null });
+        if (ok(subId))
+            out.push({ id: String(subId), position: 2, category_name: null });
+        return out;
+    }
     async profile(req) {
         if (this.useMongo()) {
             const v = await this.mongo.findByMysqlId('vendors', Number(req.actor.id));
@@ -857,6 +866,7 @@ let VendorExtrasController = class VendorExtrasController {
                 discount: toNum(food.discount) ?? 0,
                 restaurant_id: food.mysql_restaurant_id !== null && food.mysql_restaurant_id !== undefined ? Number(food.mysql_restaurant_id) : 0,
                 category_id: food.mysql_category_id !== null && food.mysql_category_id !== undefined ? Number(food.mysql_category_id) : null,
+                category_ids: this.buildCategoryIds(food.mysql_category_id ?? food.category_id, food.mysql_sub_category_id ?? food.sub_category_id),
                 rating_count: Number(food.rating_count ?? 0),
                 avg_rating: Number(food.avg_rating ?? 0),
                 rating: food.rating ?? [],
@@ -955,6 +965,8 @@ let VendorExtrasController = class VendorExtrasController {
             restaurant_id: Number(restaurant.mysql_id),
             mysql_category_id: b.category_id !== undefined && b.category_id !== '' ? Number(b.category_id) : null,
             category_id: b.category_id !== undefined && b.category_id !== '' ? Number(b.category_id) : null,
+            mysql_sub_category_id: b.sub_category_id !== undefined && b.sub_category_id !== '' ? Number(b.sub_category_id) : null,
+            sub_category_id: b.sub_category_id !== undefined && b.sub_category_id !== '' ? Number(b.sub_category_id) : null,
             name: trName ?? String(b.name ?? 'Untitled food'),
             description: trDesc ?? String(b.description ?? ''),
             translations,
@@ -1024,6 +1036,11 @@ let VendorExtrasController = class VendorExtrasController {
         if (b.category_id !== undefined && b.category_id !== '') {
             data.category_id = Number(b.category_id);
             data.mysql_category_id = Number(b.category_id);
+        }
+        if (b.sub_category_id !== undefined) {
+            const sid = b.sub_category_id !== '' ? Number(b.sub_category_id) : null;
+            data.sub_category_id = sid;
+            data.mysql_sub_category_id = sid;
         }
         if (b.stock_type !== undefined)
             data.stock_type = String(b.stock_type);
