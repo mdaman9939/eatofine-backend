@@ -1326,7 +1326,8 @@ export class VendorExtrasController {
       // Flutter sends these as JSON strings (or arrays) — parse so add-ons and
       // variations actually persist instead of landing as "[object Object]".
       addon_ids: this.parseJsonish(b.addon_ids),
-      variations: this.parseJsonish(b.variations),
+      // The restaurant app sends variations under `options` (not `variations`).
+      variations: this.parseJsonish(b.options ?? b.variations),
       choice_options: this.parseJsonish(b.choice_options),
       created_at: now,
       updated_at: now,
@@ -1381,6 +1382,17 @@ export class VendorExtrasController {
       data.maximum_cart_quantity = Number(b.maximum_cart_quantity);
     }
     if (b.is_halal !== undefined) data.is_halal = !!Number(b.is_halal);
+    // Variations / add-ons / tags were NOT updated before, so editing a food and
+    // adding (or removing) variations silently wiped them on the next open. The
+    // app sends the FULL current set under `options` (variations), `addon_ids`,
+    // `tags` — mirror product/store and replace with what the app sends.
+    if (b.options !== undefined || b.variations !== undefined) {
+      data.variations = this.parseJsonish(b.options ?? b.variations);
+    }
+    if (b.choice_options !== undefined) data.choice_options = this.parseJsonish(b.choice_options);
+    if (b.addon_ids !== undefined) data.addon_ids = this.parseJsonish(b.addon_ids);
+    if (b.tags !== undefined) data.tags = this.parseJsonish(b.tags);
+    if (b.tag_ids !== undefined) data.tag_ids = this.parseJsonish(b.tag_ids);
     const imageName = await this.saveUploaded(files?.image?.[0], 'product');
     const metaImage = await this.saveUploaded(files?.meta_image?.[0], 'product');
     if (imageName) data.image = imageName;

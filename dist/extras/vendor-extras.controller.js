@@ -983,7 +983,7 @@ let VendorExtrasController = class VendorExtrasController {
             avg_rating: 0,
             rating_count: 0,
             addon_ids: this.parseJsonish(b.addon_ids),
-            variations: this.parseJsonish(b.variations),
+            variations: this.parseJsonish(b.options ?? b.variations),
             choice_options: this.parseJsonish(b.choice_options),
             created_at: now,
             updated_at: now,
@@ -1038,6 +1038,17 @@ let VendorExtrasController = class VendorExtrasController {
         }
         if (b.is_halal !== undefined)
             data.is_halal = !!Number(b.is_halal);
+        if (b.options !== undefined || b.variations !== undefined) {
+            data.variations = this.parseJsonish(b.options ?? b.variations);
+        }
+        if (b.choice_options !== undefined)
+            data.choice_options = this.parseJsonish(b.choice_options);
+        if (b.addon_ids !== undefined)
+            data.addon_ids = this.parseJsonish(b.addon_ids);
+        if (b.tags !== undefined)
+            data.tags = this.parseJsonish(b.tags);
+        if (b.tag_ids !== undefined)
+            data.tag_ids = this.parseJsonish(b.tag_ids);
         const imageName = await this.saveUploaded(files?.image?.[0], 'product');
         const metaImage = await this.saveUploaded(files?.meta_image?.[0], 'product');
         if (imageName)
