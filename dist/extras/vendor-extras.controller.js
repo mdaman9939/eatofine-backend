@@ -1576,6 +1576,16 @@ let VendorExtrasController = class VendorExtrasController {
         }
         if (title)
             data.title = title;
+        if (body.code !== undefined && String(body.code).trim() !== '') {
+            const newCode = String(body.code).trim();
+            const dup = await this.mongo.findOne('coupons', { code: newCode });
+            if (dup && Number(dup.mysql_id) !== id) {
+                return { errors: [{ code: 'code', message: 'coupon code already exists' }] };
+            }
+            data.code = newCode;
+        }
+        if (body.coupon_type !== undefined && String(body.coupon_type).trim() !== '')
+            data.coupon_type = String(body.coupon_type);
         if (body.discount !== undefined && body.discount !== '')
             data.discount = Number(body.discount);
         if (body.discount_type !== undefined)

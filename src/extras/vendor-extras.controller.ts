@@ -2039,6 +2039,18 @@ export class VendorExtrasController {
       } catch { /* ignore malformed translations */ }
     }
     if (title) data.title = title;
+    // Coupon CODE was never updated before — editing it silently no-op'd while
+    // the app still showed "coupon updated". Update it, but block collisions with
+    // a DIFFERENT coupon that already owns the new code.
+    if (body.code !== undefined && String(body.code).trim() !== '') {
+      const newCode = String(body.code).trim();
+      const dup = await this.mongo.findOne<{ mysql_id: number }>('coupons', { code: newCode });
+      if (dup && Number(dup.mysql_id) !== id) {
+        return { errors: [{ code: 'code', message: 'coupon code already exists' }] };
+      }
+      data.code = newCode;
+    }
+    if (body.coupon_type !== undefined && String(body.coupon_type).trim() !== '') data.coupon_type = String(body.coupon_type);
     if (body.discount !== undefined && body.discount !== '') data.discount = Number(body.discount);
     if (body.discount_type !== undefined) data.discount_type = String(body.discount_type);
     if (body.min_purchase !== undefined && body.min_purchase !== '') data.min_purchase = Number(body.min_purchase);
