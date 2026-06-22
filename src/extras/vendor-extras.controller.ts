@@ -2019,10 +2019,26 @@ export class VendorExtrasController {
   @Post('coupon-update')
   async vendorCouponUpdate(@Body() body: Record<string, unknown> = {}) {
     if (!this.useMongo()) return { message: 'coupon updated' };
-    const id = body.id !== undefined && body.id !== '' ? Number(body.id) : null;
+    // The restaurant app sends the coupon id as `coupon_id` (not `id`) and the
+    // title inside a `translations` JSON string (not `title`). Without these
+    // aliases the edit silently failed with "coupon id required" and the title
+    // never changed.
+    const rawId = body.id ?? body.coupon_id;
+    const id = rawId !== undefined && rawId !== '' ? Number(rawId) : null;
     if (!id) return { errors: [{ code: 'id', message: 'coupon id required' }] };
     const data: Record<string, unknown> = {};
-    if (body.title !== undefined) data.title = String(body.title);
+    let title = body.title !== undefined ? String(body.title) : '';
+    if (!title && body.translations !== undefined) {
+      try {
+        const arr = typeof body.translations === 'string' ? JSON.parse(body.translations) : body.translations;
+        if (Array.isArray(arr)) {
+          const en = arr.find((t) => t && t.key === 'title' && (t.locale === 'en' || !t.locale) && t.value);
+          const any = arr.find((t) => t && t.key === 'title' && t.value);
+          title = String((en?.value ?? any?.value) ?? '');
+        }
+      } catch { /* ignore malformed translations */ }
+    }
+    if (title) data.title = title;
     if (body.discount !== undefined && body.discount !== '') data.discount = Number(body.discount);
     if (body.discount_type !== undefined) data.discount_type = String(body.discount_type);
     if (body.min_purchase !== undefined && body.min_purchase !== '') data.min_purchase = Number(body.min_purchase);
@@ -2040,7 +2056,9 @@ export class VendorExtrasController {
   @HttpCode(200)
   @Post('coupon-status')
   async vendorCouponStatus(@Body() body: Record<string, unknown> = {}) {
-    const id = body.id !== undefined && body.id !== '' ? Number(body.id) : null;
+    // App sends `coupon_id`, not `id`.
+    const rawId = body.id ?? body.coupon_id;
+    const id = rawId !== undefined && rawId !== '' ? Number(rawId) : null;
     if (this.useMongo() && id) {
       await this.mongo.updateOne('coupons', { mysql_id: id }, { status: !!Number(body.status ?? 0), updated_at: new Date() });
     }
@@ -2057,7 +2075,9 @@ export class VendorExtrasController {
   @HttpCode(200)
   @Delete('coupon-delete')
   async vendorCouponDelete(@Body() body: Record<string, unknown> = {}, @Query('id') idQ?: string) {
-    const id = body.id !== undefined && body.id !== '' ? Number(body.id) : (idQ ? Number(idQ) : null);
+    // App sends `coupon_id`, not `id`.
+    const rawId = body.id ?? body.coupon_id;
+    const id = rawId !== undefined && rawId !== '' ? Number(rawId) : (idQ ? Number(idQ) : null);
     if (this.useMongo() && id) await this.mongo.deleteOne('coupons', { mysql_id: id });
     return { message: 'coupon deleted' };
   }

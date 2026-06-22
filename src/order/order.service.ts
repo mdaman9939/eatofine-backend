@@ -222,6 +222,16 @@ export class OrderService {
         }
       }
 
+      // Food GST is the PLATFORM's (admin-configured `food_gst_rate`, default 5%,
+      // collected & remitted by the platform under GST sec 9(5)) — charged at the
+      // SAME rate on every order regardless of the food's/restaurant's own tax, so
+      // GST applies uniformly even to 0%-tax items.
+      const foodGstDoc = await this.mongo.findOne<{ value?: string; key_value?: string }>('business_settings', { key: 'food_gst_rate' });
+      const adminFoodGstRate = (() => {
+        const raw = foodGstDoc?.value ?? foodGstDoc?.key_value;
+        const n = raw != null ? parseFloat(String(raw)) : NaN;
+        return Number.isFinite(n) && n >= 0 ? n : 5;
+      })();
       let orderAmount = 0;
       let totalTax = 0;
       for (const c of body.cart) {
@@ -230,10 +240,8 @@ export class OrderService {
         const qty = c.quantity ?? 1;
         const price = c.price ?? Number(f.price ?? 0);
         const lineTotal = price * qty;
-        const taxRate = Number(f.tax ?? 0) / 100;
-        const lineTax = f.tax_type === 'percent' ? lineTotal * taxRate : Number(f.tax ?? 0) * qty;
         orderAmount += lineTotal;
-        totalTax += lineTax;
+        totalTax += lineTotal * (adminFoodGstRate / 100);
       }
 
       // ── Coupon — backend-validated + discount-ownership aware ──────────────
@@ -351,8 +359,7 @@ export class OrderService {
         if (!f) continue;
         const qty = c.quantity ?? 1;
         const price = c.price ?? Number(f.price ?? 0);
-        const taxRate = Number(f.tax ?? 0) / 100;
-        const lineTax = f.tax_type === 'percent' ? price * qty * taxRate : Number(f.tax ?? 0) * qty;
+        const lineTax = price * qty * (adminFoodGstRate / 100); // platform food GST (sec 9(5))
         const foodDetails = { id: Number(f.mysql_id), name: f.name, price: Number(f.price ?? 0), veg: f.veg ? 1 : 0 };
         items.push({
           food_id: Number(f.mysql_id),
