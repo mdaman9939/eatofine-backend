@@ -267,9 +267,18 @@ let AuthService = class AuthService {
         const restaurant = await this.prisma.restaurants.findFirst({ where: { vendor_id: vendor.id } });
         return { token, restaurant_id: restaurant?.id ?? null, role: 'owner' };
     }
+    async findDeliveryManByPhone(phone) {
+        const exact = await this.mongo.findOne('delivery_men', { phone });
+        if (exact)
+            return exact;
+        const last10 = (phone ?? '').replace(/\D/g, '').slice(-10);
+        if (last10.length !== 10)
+            return null;
+        return this.mongo.findOne('delivery_men', { phone: { $regex: `${last10}$` } });
+    }
     async deliveryManLogin(phone, password) {
         if (this.useMongo()) {
-            const dm = await this.mongo.findOne('delivery_men', { phone });
+            const dm = await this.findDeliveryManByPhone(phone);
             if (!dm || !(await this.verifyPassword(password, dm.password))) {
                 throw new common_1.UnauthorizedException({
                     errors: [{ code: 'auth-001', message: 'User credentials does not match.' }],

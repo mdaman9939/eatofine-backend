@@ -2630,7 +2630,14 @@ let AdminService = class AdminService {
         const addOnSum = (it) => (it.add_ons ?? []).reduce((s, a) => s + Math.max(0, Number(a.price ?? 0)), 0);
         const subtotal = items.reduce((s, i) => s + (Number(i.price ?? 0) + addOnSum(i)) * Number(i.quantity ?? 0), 0);
         const discount = Number(body.discount ?? 0);
-        const taxPercent = body.tax_percent !== undefined ? Number(body.tax_percent) : Number(restaurant.tax ?? 0);
+        const foodGstDoc = await this.mongo.findOne('business_settings', { key: 'food_gst_rate' });
+        const adminFoodGstRate = (() => {
+            const raw = foodGstDoc?.value ?? foodGstDoc?.key_value;
+            const n = raw != null ? parseFloat(String(raw)) : NaN;
+            return Number.isFinite(n) && n >= 0 ? n : 5;
+        })();
+        const sentTax = body.tax_percent !== undefined ? Number(body.tax_percent) : adminFoodGstRate;
+        const taxPercent = sentTax > 0 ? adminFoodGstRate : 0;
         const taxable = Math.max(0, subtotal - discount);
         const taxAmount = taxable * (taxPercent / 100);
         const deliveryCharge = Number(body.delivery_charge ?? 0);

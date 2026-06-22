@@ -52,6 +52,7 @@ export declare class AuthService {
         restaurant_id: bigint | null;
         role: string;
     }>;
+    private findDeliveryManByPhone;
     deliveryManLogin(phone: string, password: string): Promise<{
         token: string;
         topic: string[];
