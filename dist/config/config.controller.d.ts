@@ -141,6 +141,8 @@ export declare class ConfigController {
         refund_policy: string | null;
         cancellation_policy: string | null;
         shipping_policy: string | null;
+        commission_business_model: number;
+        subscription_business_model: number;
     }>;
     placeAutocomplete(searchText?: string): {
         suggestions: {

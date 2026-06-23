@@ -204,6 +204,13 @@ export class ConfigController {
       refund_policy: await this.bs.get('refund_policy'),
       cancellation_policy: await this.bs.get('cancellation_policy'),
       shipping_policy: await this.bs.get('shipping_policy'),
+      // Business models offered on the restaurant app's "My Business Plan" /
+      // "Change Business Plan" screen. Without these the app read
+      // commissionBusinessModel = null, so the Commission option never appeared
+      // next to the subscription packages — only "Pro" showed. Default 1 (both
+      // enabled) so every configured plan option is listed.
+      commission_business_model: await this.bs.getInt('commission_business_model', 1),
+      subscription_business_model: await this.bs.getInt('subscription_business_model', 1),
     };
   }
 

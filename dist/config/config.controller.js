@@ -174,6 +174,8 @@ let ConfigController = class ConfigController {
             refund_policy: await this.bs.get('refund_policy'),
             cancellation_policy: await this.bs.get('cancellation_policy'),
             shipping_policy: await this.bs.get('shipping_policy'),
+            commission_business_model: await this.bs.getInt('commission_business_model', 1),
+            subscription_business_model: await this.bs.getInt('subscription_business_model', 1),
         };
     }
     placeAutocomplete(searchText) {
