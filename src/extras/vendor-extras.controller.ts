@@ -1648,13 +1648,45 @@ export class VendorExtrasController {
 
   // ── Categories ───────────────────────────────────────────────────
   @Get('categories')
-  async categories() {
+  async categories(@Req() req: AuthedRequest, @Query('search') search?: string) {
     if (this.useMongo()) {
-      const rows = await this.mongo.findMany<MongoCategoryDoc>('categories', { parent_id: 0, status: true });
-      return rows.map((r) => ({ id: Number(r.mysql_id), name: r.name ?? null, image: r.image ?? null, status: r.status ?? null }));
+      const filter: Record<string, unknown> = { parent_id: 0, status: true };
+      if (search && search.trim()) filter.name = { $regex: search.trim(), $options: 'i' };
+      const rows = await this.mongo.findMany<MongoCategoryDoc>('categories', filter);
+      const catIds = rows.map((r) => Number(r.mysql_id)).filter((n) => Number.isFinite(n));
+      // Sub-category count per category (so the card shows "N sub category"
+      // instead of always "No Sub Category").
+      const childAgg = catIds.length
+        ? await this.mongo.aggregate<{ _id: number; count: number }>('categories', [
+            { $match: { parent_id: { $in: catIds } } },
+            { $group: { _id: '$parent_id', count: { $sum: 1 } } },
+          ])
+        : [];
+      const childMap = new Map(childAgg.map((c) => [Number(c._id), Number(c.count)]));
+      // Food count per category FOR THIS RESTAURANT (the screen is restaurant-wise)
+      // — previously absent, so the card always said "No food available".
+      const restaurant = await this.vendorRestaurant(req);
+      const restId = restaurant ? Number(restaurant.mysql_id) : 0;
+      const prodAgg = restId && catIds.length
+        ? await this.mongo.aggregate<{ _id: number; count: number }>('foods', [
+            { $match: { mysql_restaurant_id: restId, mysql_category_id: { $in: catIds } } },
+            { $group: { _id: '$mysql_category_id', count: { $sum: 1 } } },
+          ])
+        : [];
+      const prodMap = new Map(prodAgg.map((c) => [Number(c._id), Number(c.count)]));
+      return rows.map((r) => ({
+        id: Number(r.mysql_id),
+        name: r.name ?? null,
+        image: r.image ?? null,
+        image_full_url: this.buildStorageUrl('category', r.image ?? null),
+        status: r.status ?? null,
+        parent_id: 0,
+        childes_count: childMap.get(Number(r.mysql_id)) ?? 0,
+        products_count: prodMap.get(Number(r.mysql_id)) ?? 0,
+      }));
     }
     const rows = await this.prisma.categories.findMany({ where: { parent_id: 0, status: true } });
-    return rows.map((r) => ({ id: Number(r.id), name: r.name, image: r.image, status: r.status }));
+    return rows.map((r) => ({ id: Number(r.id), name: r.name, image: r.image, status: r.status, childes_count: 0, products_count: 0 }));
   }
 
   @Get('categories/childes')

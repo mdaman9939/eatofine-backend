@@ -855,11 +855,22 @@ export declare class VendorExtrasController {
     productLimits(): {
         remaining: string;
     };
-    categories(): Promise<{
+    categories(req: AuthedRequest, search?: string): Promise<{
         id: number;
         name: string | null;
         image: string | null;
+        image_full_url: string;
         status: boolean | null;
+        parent_id: number;
+        childes_count: number;
+        products_count: number;
+    }[] | {
+        id: number;
+        name: string;
+        image: string;
+        status: boolean;
+        childes_count: number;
+        products_count: number;
     }[]>;
     childCategories(idStr?: string): Promise<{
         id: number;
