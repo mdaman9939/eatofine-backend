@@ -2891,7 +2891,7 @@ export class AdminService {
     lng?: string | number | null,
     orderValue = 0,
     distance?: number | null,
-  ): Promise<{ distance_km: number; delivery_charge: number; delivery_gst: number; free_delivery: boolean }> {
+  ): Promise<{ distance_km: number; delivery_charge: number; delivery_gst: number; free_delivery: boolean; slab_min_km?: number | null; slab_max_km?: number | null; priced_by?: string | null }> {
     let distanceKm = distance != null && Number.isFinite(Number(distance)) ? Math.max(0, Number(distance)) : NaN;
     if (Number.isNaN(distanceKm)) {
       const rLat = Number(restaurant.latitude), rLng = Number(restaurant.longitude);
@@ -2899,11 +2899,16 @@ export class AdminService {
       distanceKm = [rLat, rLng, uLat, uLng].every((n) => Number.isFinite(n)) ? haversineKm(rLat, rLng, uLat, uLng) : 0;
     }
     let deliveryCharge = 0; let deliveryGst = 0; let free = false;
+    let slabMin: number | null = null; let slabMax: number | null = null; let pricedBy: string | null = null;
     try {
       const dc = await this.userCharges.calculate({ distance_km: distanceKm, order_value: Math.max(0, Number(orderValue) || 0) });
       if (dc.free_delivery) { free = true; deliveryCharge = 0; }
-      else if (dc.matched_slab) { deliveryCharge = Number((dc as { subtotal?: number }).subtotal ?? 0); deliveryGst = Number(dc.gst_amount ?? 0); }
-      else { deliveryCharge = Number(restaurant.minimum_shipping_charge ?? 0); }
+      else if (dc.matched_slab) {
+        deliveryCharge = Number((dc as { subtotal?: number }).subtotal ?? 0);
+        deliveryGst = Number(dc.gst_amount ?? 0);
+        slabMin = Number(dc.matched_slab.min_km); slabMax = Number(dc.matched_slab.max_km);
+        pricedBy = (dc as { priced_by?: string }).priced_by ?? 'exact';
+      } else { deliveryCharge = Number(restaurant.minimum_shipping_charge ?? 0); }
     } catch { deliveryCharge = Number(restaurant.minimum_shipping_charge ?? 0); }
     // Final guard: never let a NaN reach the POS (it serializes to null and the
     // bill shows ₹0). Fall back to the restaurant flat fee, then 0.
@@ -2914,6 +2919,9 @@ export class AdminService {
       delivery_charge: safe(deliveryCharge),
       delivery_gst: safe(deliveryGst),
       free_delivery: free,
+      slab_min_km: slabMin,
+      slab_max_km: slabMax,
+      priced_by: pricedBy,
     };
   }
 

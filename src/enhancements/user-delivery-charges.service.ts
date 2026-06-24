@@ -387,15 +387,25 @@ export class UserDeliveryChargesService {
     const slabs = await this.listSlabs();
     const activeSlabs = slabs.filter((s) => s.status && Number.isFinite(s.min_km) && Number.isFinite(s.max_km));
     let slab = activeSlabs.find((s) => input.distance_km >= s.min_km && input.distance_km <= s.max_km);
+    // When the distance falls OUTSIDE every configured tier we still price it from
+    // the slabs (never ₹0, never a flat cap that ignores distance):
+    //   • a gap between tiers (e.g. 6-7, 8-10 km) → round UP to the next tier;
+    //   • beyond the farthest tier → that tier's charge SCALED by distance
+    //     (fee × distance / tier.max_km) so a longer trip always costs more.
+    let beyondScale = 1;
+    let priced: 'exact' | 'rounded_up' | 'extrapolated' = 'exact';
     if (!slab && activeSlabs.length) {
-      // No EXACT tier — the admin's slabs have a gap (e.g. 6-7, 8-10 km) or the
-      // trip is beyond the farthest tier. Charge the NEAREST active slab rather
-      // than ₹0, so a real delivery is always priced. Distance-to-range = 0 when
-      // inside, else the gap to the closest edge.
-      const gap = (s: { min_km: number; max_km: number }) =>
-        input.distance_km < s.min_km ? s.min_km - input.distance_km
-          : input.distance_km > s.max_km ? input.distance_km - s.max_km : 0;
-      slab = activeSlabs.reduce((best, s) => (gap(s) < gap(best) ? s : best));
+      const sorted = [...activeSlabs].sort((a, b) => a.min_km - b.min_km);
+      const farthest = sorted.reduce((a, b) => (b.max_km > a.max_km ? b : a));
+      if (input.distance_km > farthest.max_km) {
+        slab = farthest;
+        beyondScale = farthest.max_km > 0 ? input.distance_km / farthest.max_km : 1;
+        priced = 'extrapolated';
+      } else {
+        // In a gap — charge the next tier up (the cheapest tier starting past it).
+        slab = sorted.find((s) => s.min_km > input.distance_km) ?? farthest;
+        priced = 'rounded_up';
+      }
     }
     if (!slab) {
       return {
@@ -412,7 +422,9 @@ export class UserDeliveryChargesService {
     // whole delivery fee (incl. this reward) settles to the delivery partner, so
     // a bigger reward on the longer slabs means a better payout for long trips.
     const longTripReward = +(Number(slab.extra_per_km) || 0).toFixed(2);
-    const baseTotal = slab.base_charge + longTripReward;
+    // Scale the tier's charge by distance when extrapolating beyond the farthest
+    // tier (beyondScale = 1 for an exact / rounded-up match).
+    const baseTotal = +(((slab.base_charge + longTripReward) * beyondScale)).toFixed(2);
 
     const when = input.when ? new Date(input.when) : new Date();
     const dow = when.getDay();
@@ -468,6 +480,9 @@ export class UserDeliveryChargesService {
     return {
       distance_km: input.distance_km, order_value: input.order_value,
       matched_slab: { id: slab.id, min_km: slab.min_km, max_km: slab.max_km, base_charge: slab.base_charge, extra_per_km: slab.extra_per_km, gst_rate: slab.gst_rate },
+      // How the tier was applied: exact match, rounded up across a gap, or
+      // distance-scaled beyond the farthest tier — surfaced for the UI.
+      priced_by: priced,
       base_charge: slab.base_charge, extra_charge: longTripReward,
       base_after_surge: baseAfterSurge,
       surge_multiplier: surgeMul,
