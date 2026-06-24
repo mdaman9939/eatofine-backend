@@ -3003,7 +3003,10 @@ export class AdminService {
       extraPackaging = 0;
     }
     const taxAmount = taxable * (taxPercent / 100);
-    const orderAmount = taxable + taxAmount + deliveryCharge + additionalCharge + extraPackaging;
+    // Round the grand total to paise so the stored order_amount equals the
+    // POS-displayed total (the POS rounds its additional-charge / packaging
+    // components identically and uses the same unrounded tax in its total).
+    const orderAmount = Math.round((taxable + taxAmount + deliveryCharge + additionalCharge + extraPackaging) * 100) / 100;
 
     const now = new Date();
     const orderId = await this.mongo.nextMysqlId('orders');
@@ -3015,7 +3018,7 @@ export class AdminService {
       // through the existing dispatch endpoint; Take Away / Dine In never get one.
       mysql_delivery_man_id: null,
       order_amount: orderAmount,
-      total_tax_amount: taxAmount,
+      total_tax_amount: Math.round(taxAmount * 100) / 100,
       // Manual discount + the coupon's restaurant-funded share are borne by the
       // restaurant; the coupon's admin-funded share is borne by Eatofine.
       restaurant_discount_amount: Math.round((discount + couponResult.restaurantDiscount) * 100) / 100,

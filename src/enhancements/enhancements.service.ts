@@ -422,12 +422,11 @@ export class EnhancementsService {
         hsn_sac: r.hsn_sac ?? null,
         description: r.description ?? null,
         status: !!r.status,
-        // Order types this charge applies to. Legacy rows without the field show
-        // all three (matches the "applies everywhere" runtime default) so the
-        // admin form pre-checks every box and POS sees an explicit set.
-        order_types: Array.isArray(r.order_types) && r.order_types.length
-          ? r.order_types
-          : [...ORDER_TYPES],
+        // Order types this charge applies to. Only a genuinely absent/non-array
+        // field defaults to all three (legacy "applies everywhere"); an explicit
+        // empty array is preserved as "applies to none" so it round-trips and
+        // matches chargeAppliesToOrderType / the customer + POS charge math.
+        order_types: Array.isArray(r.order_types) ? r.order_types : [...ORDER_TYPES],
       }));
     }
     const rows = await this.prisma.$queryRawUnsafe<Row[]>(
