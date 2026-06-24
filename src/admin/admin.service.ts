@@ -9,8 +9,10 @@ import { CANCEL_REASONS, type CancelReason } from '../lifecycle/order-lifecycle.
 import { storageFullUrl } from '../common/storage-url';
 import { issueCreditNote } from '../completion/credit-note.util';
 import { creditCustomerWallet, type CustomerWalletCreditResult } from '../wallet/customer-wallet.util';
-import { sanitizeOrderTypes } from '../common/additional-charge';
+import { sanitizeOrderTypes, computeFlatAdditionalCharge, type AdditionalChargeRow } from '../common/additional-charge';
 import { validateAndComputeCoupon, incrementCouponUses } from '../common/coupon';
+import { haversineKm } from '../common/geo';
+import { UserDeliveryChargesService } from '../enhancements/user-delivery-charges.service';
 
 /** Shared shape for the admin food create + update endpoints. */
 export interface FoodWriteBody {
@@ -96,6 +98,7 @@ export class AdminService {
     private readonly mongo: MongoDataService,
     private readonly settlement: SettlementService,
     private readonly lifecycle: OrderLifecycleService,
+    private readonly userCharges: UserDeliveryChargesService,
   ) {}
 
   /** Feature flag — when "1", admin reads route to MongoDB instead of MySQL. */
@@ -1179,7 +1182,9 @@ export class AdminService {
           { $group: { _id: null, total: { $sum: '$order_amount' } } },
         ]),
         this.mongo.findMany<Record<string, unknown>>('orders', { mysql_user_id: u.mysql_id }, { sort: { mysql_id: -1 }, limit: 200 }),
-        this.mongo.findMany<Record<string, unknown>>('customer_addresses', { mysql_user_id: u.mysql_id }, { limit: 20 }),
+        // customer_addresses links by user_id (what the customer app writes), not
+        // mysql_user_id — the latter always returned empty.
+        this.mongo.findMany<Record<string, unknown>>('customer_addresses', { user_id: u.mysql_id }, { limit: 20 }),
         this.mongo.findOne<{ balance?: number }>('wallets', { mysql_user_id: u.mysql_id }),
       ]);
 
@@ -2849,6 +2854,76 @@ export class AdminService {
     return [];
   }
 
+  /** A customer's saved delivery addresses WITH coordinates — powers the POS
+   *  delivery address picker. Keyed by `user_id` like the customer app's own
+   *  address list (admin getUser intentionally omits coordinates). */
+  async listUserAddresses(userId: number) {
+    if (!this.useMongo()) return { addresses: [] };
+    const rows = await this.mongo.findMany<{
+      mysql_id: number; address_type?: string; address?: string;
+      latitude?: string | number; longitude?: string | number;
+      zone_id?: number; mysql_zone_id?: number;
+      contact_person_name?: string; contact_person_number?: string; is_default?: boolean;
+    }>('customer_addresses', { user_id: Number(userId) }, { sort: { mysql_id: -1 } });
+    return {
+      addresses: rows.map((a) => ({
+        id: Number(a.mysql_id),
+        address_type: a.address_type ?? null,
+        address: a.address ?? null,
+        latitude: a.latitude != null ? String(a.latitude) : null,
+        longitude: a.longitude != null ? String(a.longitude) : null,
+        zone_id: a.zone_id ?? a.mysql_zone_id ?? null,
+        contact_person_name: a.contact_person_name ?? null,
+        contact_person_number: a.contact_person_number ?? null,
+        is_default: a.is_default ? 1 : 0,
+      })),
+    };
+  }
+
+  /** Distance-slab delivery fee for the POS — IDENTICAL math to the customer
+   *  order flow (order.service.placeOrder): prefer an explicit distance, else
+   *  haversine from the restaurant to the drop-off, then the slab/surge engine,
+   *  falling back to the restaurant's flat minimum on no match. Used by both the
+   *  POS delivery quote AND createPosOrder so the shown fee equals the charged. */
+  private async computePosDelivery(
+    restaurant: { latitude?: string | number; longitude?: string | number; minimum_shipping_charge?: number },
+    lat?: string | number | null,
+    lng?: string | number | null,
+    orderValue = 0,
+    distance?: number | null,
+  ): Promise<{ distance_km: number; delivery_charge: number; delivery_gst: number; free_delivery: boolean }> {
+    let distanceKm = distance != null && Number.isFinite(Number(distance)) ? Math.max(0, Number(distance)) : NaN;
+    if (Number.isNaN(distanceKm)) {
+      const rLat = Number(restaurant.latitude), rLng = Number(restaurant.longitude);
+      const uLat = Number(lat), uLng = Number(lng);
+      distanceKm = [rLat, rLng, uLat, uLng].every((n) => Number.isFinite(n)) ? haversineKm(rLat, rLng, uLat, uLng) : 0;
+    }
+    let deliveryCharge = 0; let deliveryGst = 0; let free = false;
+    try {
+      const dc = await this.userCharges.calculate({ distance_km: distanceKm, order_value: Math.max(0, Number(orderValue) || 0) });
+      if (dc.free_delivery) { free = true; deliveryCharge = 0; }
+      else if (dc.matched_slab) { deliveryCharge = Number((dc as { subtotal?: number }).subtotal ?? 0); deliveryGst = Number(dc.gst_amount ?? 0); }
+      else { deliveryCharge = Number(restaurant.minimum_shipping_charge ?? 0); }
+    } catch { deliveryCharge = Number(restaurant.minimum_shipping_charge ?? 0); }
+    return {
+      distance_km: Math.round(distanceKm * 100) / 100,
+      delivery_charge: Math.round(deliveryCharge * 100) / 100,
+      delivery_gst: Math.round(deliveryGst * 100) / 100,
+      free_delivery: free,
+    };
+  }
+
+  /** POS delivery-fee preview: the admin selects a customer address (or drops a
+   *  map pin) and sees the auto fee before placing. createPosOrder recomputes it
+   *  with the same inputs so the displayed fee is exactly what is charged. */
+  async posDeliveryQuote(body: { restaurant_id?: number; latitude?: string; longitude?: string; distance?: number; order_value?: number }) {
+    if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+    if (!body.restaurant_id) throw new BadRequestException({ errors: [{ code: 'restaurant_id', message: 'restaurant is required' }] });
+    const restaurant = await this.mongo.findByMysqlId<{ mysql_id: number; latitude?: string; longitude?: string; minimum_shipping_charge?: number }>('restaurants', Number(body.restaurant_id));
+    if (!restaurant) throw new NotFoundException({ errors: [{ code: 'restaurant', message: 'Restaurant not found' }] });
+    return this.computePosDelivery(restaurant, body.latitude, body.longitude, Number(body.order_value ?? 0), body.distance);
+  }
+
   /** Order types food GST (+ extra packaging) applies to. From the
    *  `food_gst_order_types` business setting (Additional Charges screen);
    *  backfilled from the legacy `charges_on_takeaway_dinein` toggle. Mirrors
@@ -2906,6 +2981,13 @@ export class AdminService {
     body: {
       restaurant_id?: number;
       items?: Array<{ food_id?: number; name?: string; price?: number; quantity?: number; add_ons?: Array<{ id?: number; name?: string; price?: number }> }>;
+      // Existing customer (selected in the POS) — links the order + drives the
+      // saved-address delivery flow. customer_name/phone remain for walk-ins.
+      customer_id?: number;
+      customer_address_id?: number;
+      latitude?: string;
+      longitude?: string;
+      distance?: number;
       customer_name?: string;
       customer_phone?: string;
       address?: string;
@@ -2916,6 +2998,9 @@ export class AdminService {
       coupon_code?: string;
       tax_percent?: number;
       delivery_charge?: number;
+      // The single POS switch — apply or waive the configured additional charge
+      // (Platform Fee). The amount itself is recomputed server-side, never trusted.
+      apply_additional_charge?: boolean;
       additional_charge?: number;
       extra_packaging_amount?: number;
       order_note?: string;
@@ -2942,7 +3027,7 @@ export class AdminService {
       tableNumber = tn;
     }
 
-    const restaurant = await this.mongo.findByMysqlId<{ mysql_id: number; tax?: number }>('restaurants', Number(body.restaurant_id));
+    const restaurant = await this.mongo.findByMysqlId<{ mysql_id: number; tax?: number; latitude?: string; longitude?: string; minimum_shipping_charge?: number }>('restaurants', Number(body.restaurant_id));
     if (!restaurant) throw new NotFoundException({ errors: [{ code: 'restaurant', message: 'Restaurant not found' }] });
 
     // Optional customer phone — accept only a valid Indian 10-digit mobile.
@@ -2983,16 +3068,41 @@ export class AdminService {
     })();
     const sentTax = body.tax_percent !== undefined ? Number(body.tax_percent) : adminFoodGstRate;
     let taxPercent = sentTax > 0 ? adminFoodGstRate : 0; // toggle off → 0; else enforce platform rate
-    // Manual discount + coupon both reduce the taxable base.
+    // Coupon reduces the taxable base (manual discount is removed from POS).
     const taxable = Math.max(0, subtotal - discount - couponDiscount);
-    const deliveryCharge = Number(body.delivery_charge ?? 0);
-    // Platform additional charges + restaurant extra-packaging, as configured.
-    // The per-charge platform/convenience/packaging fees are filtered by order
-    // type on the (admin-controlled) POS client — which now carries each charge's
-    // order_types — so we trust the additional_charge it computed for the
-    // selected type. Server still enforces the per-order-type GST + extra
-    // packaging gate below.
-    const additionalCharge = Math.max(0, Number(body.additional_charge ?? 0));
+
+    // ── Delivery (Home Delivery only) — auto-computed from the customer's
+    // selected saved address (or a dropped map pin) via the SAME distance-slab
+    // engine the customer app uses. Take Away / Dine In carry no delivery. ──
+    let deliveryCharge = 0;
+    let deliveryGst = 0;
+    let deliveryLat: string | null = null;
+    let deliveryLng: string | null = null;
+    let deliveryAddressText: string | null = body.address ?? null;
+    if (orderType === 'delivery') {
+      if (body.customer_address_id) {
+        const addr = await this.mongo.findOne<{ latitude?: string | number; longitude?: string | number; address?: string }>('customer_addresses', { mysql_id: Number(body.customer_address_id) });
+        if (addr) {
+          deliveryLat = addr.latitude != null ? String(addr.latitude) : null;
+          deliveryLng = addr.longitude != null ? String(addr.longitude) : null;
+          deliveryAddressText = addr.address ?? deliveryAddressText;
+        }
+      }
+      if (deliveryLat == null && body.latitude != null) deliveryLat = String(body.latitude);
+      if (deliveryLng == null && body.longitude != null) deliveryLng = String(body.longitude);
+      const dq = await this.computePosDelivery(restaurant, deliveryLat, deliveryLng, subtotal, body.distance);
+      deliveryCharge = dq.delivery_charge;
+      deliveryGst = dq.delivery_gst;
+    }
+
+    // Platform additional charge — recomputed SERVER-SIDE from the configured
+    // charges for this order type (fixed-only, +GST), IDENTICAL to the customer
+    // flow (order.service.placeOrder → computeFlatAdditionalCharge). Never trusts
+    // the client amount; the single Apply switch only decides apply vs waive.
+    const addChargeRows = await this.mongo.findMany<AdditionalChargeRow>('additional_user_charges', {});
+    const additionalCharge = body.apply_additional_charge === false
+      ? 0
+      : computeFlatAdditionalCharge(addChargeRows, orderType).amount;
     let extraPackaging = Math.max(0, Number(body.extra_packaging_amount ?? 0));
     // Food GST + extra packaging apply only to the order types the admin
     // configured (food_gst_order_types; backfilled from the legacy
@@ -3002,17 +3112,22 @@ export class AdminService {
       taxPercent = 0;
       extraPackaging = 0;
     }
-    const taxAmount = taxable * (taxPercent / 100);
+    const foodGst = taxable * (taxPercent / 100);
+    // total_tax_amount = food GST + delivery GST (the invoice's GST line), like
+    // the customer order flow.
+    const taxAmount = Math.round((foodGst + deliveryGst) * 100) / 100;
     // Round the grand total to paise so the stored order_amount equals the
-    // POS-displayed total (the POS rounds its additional-charge / packaging
-    // components identically and uses the same unrounded tax in its total).
-    const orderAmount = Math.round((taxable + taxAmount + deliveryCharge + additionalCharge + extraPackaging) * 100) / 100;
+    // POS-displayed total (the POS uses the same unrounded food GST + the quoted
+    // delivery GST + identically-rounded charge components in its total).
+    const orderAmount = Math.round((taxable + foodGst + deliveryGst + deliveryCharge + additionalCharge + extraPackaging) * 100) / 100;
 
     const now = new Date();
     const orderId = await this.mongo.nextMysqlId('orders');
     await this.mongo.insertOne('orders', {
       mysql_id: orderId,
-      mysql_user_id: null,
+      // Link to the selected customer (so it shows in their order history);
+      // null for a walk-in entered by name/phone only.
+      mysql_user_id: body.customer_id ? Number(body.customer_id) : null,
       mysql_restaurant_id: Number(body.restaurant_id),
       // No delivery man at creation. For `delivery` orders one is assigned later
       // through the existing dispatch endpoint; Take Away / Dine In never get one.
@@ -3037,7 +3152,7 @@ export class AdminService {
       created_by: createdBy?.id ?? null,
       created_by_type: createdBy?.kind ?? null,
       order_note: body.order_note ?? null,
-      delivery_address: body.address ?? null,
+      delivery_address: orderType === 'delivery' ? deliveryAddressText : null,
       contact_person_name: body.customer_name ?? 'Walk-in customer',
       contact_person_number: customerPhone || null,
       pending: now,

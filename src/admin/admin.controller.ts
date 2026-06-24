@@ -116,6 +116,13 @@ export class AdminController {
     return this.admin.createPosOrder(body, createdBy);
   }
 
+  // POS delivery-fee preview for a chosen address / map pin (distance-slab based).
+  @Post('pos/delivery-quote')
+  @HttpCode(200)
+  posDeliveryQuote(@Body() body: Parameters<AdminService['posDeliveryQuote']>[0]) {
+    return this.admin.posDeliveryQuote(body);
+  }
+
   @Patch('orders/:id/status')
   updateOrderStatus(
     @Param('id', ParseIntPipe) id: number,
@@ -196,6 +203,12 @@ export class AdminController {
   @Get('users/:id')
   userDetail(@Param('id', ParseIntPipe) id: number) {
     return this.admin.getUser(id);
+  }
+
+  // Customer's saved addresses WITH coordinates — for the POS delivery picker.
+  @Get('users/:id/addresses')
+  userAddresses(@Param('id', ParseIntPipe) id: number) {
+    return this.admin.listUserAddresses(id);
   }
 
   @Patch('users/:id/status')
