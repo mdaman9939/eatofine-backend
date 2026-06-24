@@ -318,9 +318,16 @@ export class OrderService {
       // (food_gst_order_types, set from the Additional Charges screen). Delivery
       // GST is separate (it only exists on delivery orders) and always rolls in.
       const orderTypeName = String(body.order_type ?? 'delivery');
-      if (!(await this.foodGstOrderTypes()).includes(orderTypeName)) {
+      const foodGstApplies = (await this.foodGstOrderTypes()).includes(orderTypeName);
+      if (!foodGstApplies) {
         totalTax = 0; // food GST off for this order type
       }
+      // The rate actually applied to THIS order (0 when food GST is off for the
+      // order type) — frozen onto the order + each line for the invoice snapshot.
+      const effectiveFoodGstRate = foodGstApplies ? adminFoodGstRate : 0;
+      // Rounded food GST the order is charged (before the separate delivery GST).
+      // The per-line snapshots below are made to sum EXACTLY to this.
+      const orderFoodGst = Math.round(totalTax * 100) / 100;
       // Delivery GST rolls into the order's tax so the invoice CGST/SGST covers it.
       totalTax = Math.round((totalTax + deliveryGst) * 100) / 100;
       // ── Platform/packaging/convenience fees — PER ORDER TYPE ──
@@ -343,13 +350,27 @@ export class OrderService {
         if (!f) continue;
         const qty = c.quantity ?? 1;
         const price = c.price ?? Number(f.price ?? 0);
-        const lineTax = price * qty * (adminFoodGstRate / 100); // platform food GST (sec 9(5))
-        const foodDetails = { id: Number(f.mysql_id), name: f.name, price: Number(f.price ?? 0), veg: f.veg ? 1 : 0 };
+        // Platform food GST (sec 9(5)) at the EFFECTIVE rate — 0 when food GST is
+        // off for this order type — so the per-line snapshot sums to the order's
+        // total_tax_amount (no phantom GST on a take-away the order didn't charge).
+        const lineTax = Math.round(price * qty * (effectiveFoodGstRate / 100) * 100) / 100;
+        // Self-contained per-line snapshot — the order is the single source of
+        // truth for records/invoices, so we freeze the GST rate + amount applied
+        // here. Nothing downstream re-reads the live food or food_gst_rate.
+        const foodDetails = {
+          id: Number(f.mysql_id),
+          name: f.name,
+          price: Number(f.price ?? 0),
+          veg: f.veg ? 1 : 0,
+          gst_rate: effectiveFoodGstRate,
+          gst_amount: lineTax,
+        };
         items.push({
           food_id: Number(f.mysql_id),
           price,
           quantity: qty,
-          tax_amount: Math.round(lineTax * 100) / 100,
+          tax_amount: lineTax,
+          gst_rate: effectiveFoodGstRate,
           food_details: foodDetails,
           variation: c.variations ?? [],
           add_ons: [],
@@ -358,6 +379,21 @@ export class OrderService {
           total_add_on_price: 0,
           category_id: f.mysql_category_id ?? null,
         });
+      }
+
+      // Foot the per-line GST snapshot EXACTLY to the order's charged food GST —
+      // rounding each line independently can drift a paise across lines, which
+      // would otherwise show on the GST invoice / credit note (which sum the
+      // per-line tax). The largest line absorbs the residual.
+      if (items.length > 0) {
+        const perLineSum = items.reduce((s, it) => s + Number(it.tax_amount ?? 0), 0);
+        const residual = Math.round((orderFoodGst - perLineSum) * 100) / 100;
+        if (residual !== 0) {
+          const target = items.reduce((a, b) => (Number(b.tax_amount) >= Number(a.tax_amount) ? b : a), items[0]);
+          target.tax_amount = Math.round((Number(target.tax_amount) + residual) * 100) / 100;
+          const fd = target.food_details as { gst_amount?: number } | undefined;
+          if (fd) fd.gst_amount = target.tax_amount as number;
+        }
       }
 
       // Resolve delivery_address from request body OR the customer's saved
@@ -431,6 +467,9 @@ export class OrderService {
         order_type: body.order_type ?? 'delivery',
         order_amount: finalAmount,
         total_tax_amount: Math.round(totalTax * 100) / 100,
+        // Frozen platform food-GST rate applied to this order — the invoice reads
+        // this snapshot, never the (mutable) live food_gst_rate setting.
+        food_gst_rate: effectiveFoodGstRate,
         delivery_charge: deliveryCharge,
         coupon_discount_amount: couponDiscount,
         coupon_code: couponCode,
@@ -471,6 +510,7 @@ export class OrderService {
           price: it.price,
           quantity: it.quantity,
           tax_amount: it.tax_amount,
+          gst_rate: it.gst_rate,
           discount_on_food: it.discount_on_food,
           discount_type: it.discount_type,
           total_add_on_price: it.total_add_on_price,

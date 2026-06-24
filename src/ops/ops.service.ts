@@ -6,6 +6,7 @@ import { OrderLifecycleService } from '../lifecycle/order-lifecycle.service';
 import { RefundService } from '../refund/refund.service';
 import { scenarioForRestaurantReject, type ScenarioKey } from '../refund/refund-policy';
 import { storageBaseUrl } from '../common/storage-url';
+import { parseFoodDetails } from '../common/food-details';
 
 const VENDOR_STATUSES = ['accepted', 'confirmed', 'processing', 'handover', 'ready_for_pickup', 'served', 'completed', 'canceled'] as const;
 // The delivery app drives the full pickup→deliver flow and sends 'confirmed'
@@ -278,7 +279,7 @@ export class OpsService {
         price: Number(d.price),
         quantity: d.quantity,
         tax_amount: Number(d.tax_amount),
-        food_details: d.food_details ? JSON.parse(d.food_details) : null,
+        food_details: d.food_details ? parseFoodDetails(d.food_details) : null,
       })),
       customer: customer
         ? {
@@ -535,7 +536,7 @@ export class OpsService {
         food_id: d.food_id,
         price: Number(d.price),
         quantity: d.quantity,
-        food_details: d.food_details ? JSON.parse(d.food_details) : null,
+        food_details: d.food_details ? parseFoodDetails(d.food_details) : null,
       })),
     };
   }

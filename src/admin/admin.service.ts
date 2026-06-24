@@ -3134,6 +3134,9 @@ export class AdminService {
       mysql_delivery_man_id: null,
       order_amount: orderAmount,
       total_tax_amount: Math.round(taxAmount * 100) / 100,
+      // Frozen platform food-GST rate applied to this order (the invoice reads
+      // this snapshot, never the live food_gst_rate setting).
+      food_gst_rate: taxPercent,
       // Manual discount + the coupon's restaurant-funded share are borne by the
       // restaurant; the coupon's admin-funded share is borne by Eatofine.
       restaurant_discount_amount: Math.round((discount + couponResult.restaurantDiscount) * 100) / 100,
@@ -3162,8 +3165,27 @@ export class AdminService {
       updated_at: now,
     });
 
-    // Line items — getOrder() reads these from `order_details` by order_id.
-    for (const it of items) {
+    // Line items — getOrder() + invoices read these from `order_details`. Each
+    // line is a self-contained snapshot (food id/name/price + the frozen GST rate
+    // & amount), so records/invoices never recompute from live config. The
+    // order's food GST is distributed across lines pro-rata to line value, with
+    // the last line absorbing the rounding remainder so the parts sum exactly.
+    const lineValue = (it: { price?: number; quantity?: number; add_ons?: Array<{ price?: number }> }) =>
+      (Number(it.price ?? 0) + addOnSum(it)) * Number(it.quantity ?? 0);
+    // Distribute the ROUNDED food GST (= the food portion of total_tax_amount) so
+    // the per-line snapshots sum exactly to what the order stores/charges.
+    const roundedFoodGst = Math.round(foodGst * 100) / 100;
+    let taxDistributed = 0;
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const lv = lineValue(it);
+      const isLast = i === items.length - 1;
+      const lineTax = roundedFoodGst <= 0 || subtotal <= 0
+        ? 0
+        : isLast
+          ? Math.round((roundedFoodGst - taxDistributed) * 100) / 100
+          : Math.round(roundedFoodGst * (lv / subtotal) * 100) / 100;
+      taxDistributed += lineTax;
       const detailId = await this.mongo.nextMysqlId('order_details');
       await this.mongo.insertOne('order_details', {
         mysql_id: detailId,
@@ -3171,10 +3193,18 @@ export class AdminService {
         food_id: Number(it.food_id),
         price: Number(it.price ?? 0),
         quantity: Number(it.quantity ?? 0),
-        tax_amount: 0,
+        tax_amount: lineTax,
+        gst_rate: taxPercent,
         total_add_on_price: Number((addOnSum(it) * Number(it.quantity ?? 0)).toFixed(2)),
         add_ons: (it.add_ons ?? []).map((a) => ({ id: a.id ?? null, name: a.name ?? null, price: Math.max(0, Number(a.price ?? 0)) })),
-        food_details: JSON.stringify({ name: it.name ?? null, add_ons: (it.add_ons ?? []).map((a) => a.name).filter(Boolean) }),
+        food_details: {
+          id: Number(it.food_id),
+          name: it.name ?? null,
+          price: Number(it.price ?? 0),
+          gst_rate: taxPercent,
+          gst_amount: lineTax,
+          add_ons: (it.add_ons ?? []).map((a) => a.name).filter(Boolean),
+        },
         created_at: now,
         updated_at: now,
       });
@@ -8011,8 +8041,11 @@ AdminService.prototype.deliverymanEarningReport = async function (this: AdminSer
   };
 };
 
-function parseJsonField(s: string | null | undefined): unknown {
-  if (!s) return null;
+function parseJsonField(s: unknown): unknown {
+  if (s == null) return null;
+  // Already a parsed object/array (food_details is stored as an object snapshot).
+  if (typeof s === 'object') return s;
+  if (typeof s !== 'string') return s;
   try {
     return JSON.parse(s);
   } catch {

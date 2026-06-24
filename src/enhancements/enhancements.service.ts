@@ -4,6 +4,7 @@ import { MongoDataService } from '../mongo/mongo-data.service';
 import { BusinessSettingsService } from '../business-settings/business-settings.service';
 import { toNum } from '../common/decimal';
 import { sanitizeOrderTypes, ORDER_TYPES } from '../common/additional-charge';
+import { parseFoodDetails } from '../common/food-details';
 
 // BRD enhancements: §5.1 Slab Plan + §5.3 GST Engine + §5.2 Invoices + §5.4 TDS.
 // New tables (business_plan_slabs, tax_master) are demo-time additions not yet
@@ -83,6 +84,9 @@ interface MongoOrderDoc {
   order_amount: number;
   delivery_charge: number;
   total_tax_amount: number;
+  // Frozen platform food-GST rate applied at order time (snapshot). Null on
+  // legacy orders that predate it → invoice falls back to the live setting.
+  food_gst_rate?: number | null;
   additional_charge?: number | null;
   extra_packaging_amount?: number | null;
   coupon_discount_amount?: number | null;
@@ -880,11 +884,15 @@ export class EnhancementsService {
       const eatofineNo = await this.assignInvoiceNumber(order, 'eatofine_invoice_number', 'ETFU', fy, order.eatofine_invoice_number);
 
       // Admin-configurable invoice rates (defaults = previously hardcoded values).
-      const [svcCgstRate, svcSgstRate, foodGstRate] = await Promise.all([
+      const [svcCgstRate, svcSgstRate, liveFoodGstRate] = await Promise.all([
         this.bs.getNumber('service_invoice_cgst_rate', 9),
         this.bs.getNumber('service_invoice_sgst_rate', 9),
         this.bs.getNumber('food_gst_rate', 5),
       ]);
+      // Single source of truth: prefer the food GST rate FROZEN on the order at
+      // creation time; fall back to the live setting only for legacy orders that
+      // predate the snapshot.
+      const foodGstRate = order.food_gst_rate != null ? Number(order.food_gst_rate) : liveFoodGstRate;
 
       // ── Page 1: restaurant ("On Behalf of Restaurant") food invoice ──────
       const r2inv = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
@@ -896,15 +904,25 @@ export class EnhancementsService {
       // orders store GST at the order level only, not per line — so the page-1
       // CGST/IGST would otherwise show ₹0).
       const perLineTax = items.reduce((s, it) => s + Number(it.tax_amount ?? 0), 0);
-      const foodTax = perLineTax > 0 ? perLineTax : r2inv(netValue * (foodGstRate / 100));
+      // Food GST = the per-line snapshot when present; else derive from the net
+      // food value × rate (legacy orders). But never invent GST on an order that
+      // charged none — if the order's total tax is 0, the food GST is 0 (e.g. a
+      // take-away placed when food GST was off for that order type).
+      const foodTax = Number(order.total_tax_amount ?? 0) <= 0
+        ? 0
+        : perLineTax > 0 ? perLineTax : r2inv(netValue * (foodGstRate / 100));
       // Extra packaging is a RESTAURANT charge (restaurant.extra_packaging_amount),
       // billed at face value — no GST was collected on it at order time.
       const packaging = Number(order.extra_packaging_amount ?? 0);
       const foodHalfTax = r2inv(foodTax / 2);
       const gstRateHalf = netValue > 0 ? r2inv(((foodTax / netValue) * 100) / 2) : r2inv(foodGstRate / 2);
+      // food_details is stored as an OBJECT snapshot (both flows). Parse robustly
+      // so legacy string-encoded rows still resolve the item name.
       const restItems = items.map((it) => {
+        const raw: unknown = it.food_details;
         let parsed: { name?: string } = {};
-        try { parsed = JSON.parse(it.food_details ?? '{}'); } catch { /* ignore */ }
+        if (raw && typeof raw === 'object') parsed = raw as { name?: string };
+        else if (typeof raw === 'string') { try { parsed = JSON.parse(raw); } catch { /* ignore */ } }
         return {
           name: parsed.name ?? `Item #${it.food_id ?? '?'}`,
           qty: Number(it.quantity),
@@ -990,8 +1008,7 @@ export class EnhancementsService {
           address: this.flattenAddress(order.delivery_address),
         },
         items: items.map((it) => {
-          let parsed: { name?: string } = {};
-          try { parsed = JSON.parse(it.food_details ?? '{}'); } catch { /* ignore */ }
+          const parsed = parseFoodDetails(it.food_details) as { name?: string };
           return {
             id: Number(it.mysql_id),
             name: parsed.name ?? `Item #${it.food_id ?? '?'}`,
@@ -1043,8 +1060,7 @@ export class EnhancementsService {
         address: this.flattenAddress(order.delivery_address),
       },
       items: items.map((it) => {
-        let parsed: { name?: string } = {};
-        try { parsed = JSON.parse(it.food_details ?? '{}'); } catch { /* ignore */ }
+        const parsed = parseFoodDetails(it.food_details) as { name?: string };
         return {
           id: Number(it.id),
           name: parsed.name ?? `Item #${it.food_id ?? '?'}`,

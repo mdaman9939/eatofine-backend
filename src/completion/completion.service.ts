@@ -875,11 +875,16 @@ export class CompletionService {
         : Promise.resolve(null),
     ]);
 
-    const [svcCgstRate, svcSgstRate, foodGstRate] = await Promise.all([
+    const [svcCgstRate, svcSgstRate, liveFoodGstRate] = await Promise.all([
       this.bs.getNumber('service_invoice_cgst_rate', 9),
       this.bs.getNumber('service_invoice_sgst_rate', 9),
       this.bs.getNumber('food_gst_rate', 5),
     ]);
+    // Prefer the food GST rate frozen on the order (snapshot); fall back to the
+    // live setting only for legacy orders — so the credit note reverses exactly
+    // what the invoice charged.
+    const orderFoodGstRate = (order as { food_gst_rate?: number | null }).food_gst_rate;
+    const foodGstRate = orderFoodGstRate != null ? Number(orderFoodGstRate) : liveFoodGstRate;
 
     const r2 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
     const ph = (v?: string | null) => (v && String(v).trim() !== '' ? String(v) : null);
@@ -913,13 +918,21 @@ export class CompletionService {
     // Per-line GST when present; else derive food GST from net food × food GST
     // rate (mirrors getInvoice so the credit note reverses the same figure).
     const perLineTax = items.reduce((s, it) => s + Number(it.tax_amount ?? 0), 0);
-    const foodTax = perLineTax > 0 ? perLineTax : r2(netValue * (foodGstRate / 100));
+    // Never reverse GST the order never charged — if total tax is 0, food GST is 0.
+    const orderTotalTax = Number((order as { total_tax_amount?: number }).total_tax_amount ?? 0);
+    const foodTax = orderTotalTax <= 0
+      ? 0
+      : perLineTax > 0 ? perLineTax : r2(netValue * (foodGstRate / 100));
     const packaging = Number(order.extra_packaging_amount ?? 0);
     const foodHalfTax = r2(foodTax / 2);
     const gstRateHalf = netValue > 0 ? r2(((foodTax / netValue) * 100) / 2) : r2(foodGstRate / 2);
     const restItems = items.map((it) => {
+      // food_details is an OBJECT snapshot (both flows); legacy rows may be a
+      // JSON string — handle both.
+      const raw: unknown = it.food_details;
       let parsed: { name?: string } = {};
-      try { parsed = JSON.parse(it.food_details ?? '{}'); } catch { /* ignore */ }
+      if (raw && typeof raw === 'object') parsed = raw as { name?: string };
+      else if (typeof raw === 'string') { try { parsed = JSON.parse(raw); } catch { /* ignore */ } }
       return {
         name: parsed.name ?? `Item #${it.food_id ?? '?'}`,
         qty: Number(it.quantity ?? 0),
