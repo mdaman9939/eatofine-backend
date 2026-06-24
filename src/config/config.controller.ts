@@ -4,7 +4,7 @@ import { BusinessSettingsService } from '../business-settings/business-settings.
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { ZoneService } from '../zone/zone.service';
-import { computeFlatAdditionalCharge, type AdditionalChargeRow } from '../common/additional-charge';
+import { computeFlatAdditionalCharge, sanitizeOrderTypes, type AdditionalChargeRow } from '../common/additional-charge';
 
 interface MongoCurrencyDoc {
   mysql_id?: number;
@@ -52,10 +52,34 @@ export class ConfigController {
 
     // Consolidate the admin's active FIXED additional charges (Platform/Packaging
     // /Convenience fees) into the single flat charge the app reads & displays.
+    // Each charge now carries `order_types`, so we compute a PER-ORDER-TYPE flat
+    // charge: the app picks the entry for the type the customer selected, so
+    // switching Take Away / Dine In / Home Delivery auto-applies exactly the
+    // charges the admin enabled for that type — all from the Additional Charges
+    // screen, with nothing hard-coded per app.
     const addChargeRows = this.useMongo()
       ? await this.mongo.findMany<AdditionalChargeRow>('additional_user_charges', {})
       : [];
-    const addCharge = computeFlatAdditionalCharge(addChargeRows);
+    // Legacy flat value (delivery) kept for older app builds that read it.
+    const addCharge = computeFlatAdditionalCharge(addChargeRows, 'delivery');
+    const chargeForType = (t: string) => {
+      const c = computeFlatAdditionalCharge(addChargeRows, t);
+      return { amount: c.amount, name: c.name, status: c.amount > 0 ? 1 : 0 };
+    };
+    const additionalChargeByType = {
+      take_away: chargeForType('take_away'),
+      dine_in: chargeForType('dine_in'),
+      delivery: chargeForType('delivery'),
+    };
+    // Which order types food GST (+ extra packaging) applies to. Replaces the
+    // GST half of the old all-or-nothing `charges_on_takeaway_dinein` toggle.
+    // Backfilled from that toggle so behaviour is unchanged until the admin sets
+    // it from the Additional Charges screen.
+    const foodGstSetting = await this.bs.get('food_gst_order_types');
+    const chargesOnTakeawayDinein = await this.bs.getBool('charges_on_takeaway_dinein');
+    const foodGstOrderTypes = foodGstSetting
+      ? sanitizeOrderTypes(foodGstSetting)
+      : (chargesOnTakeawayDinein ? ['take_away', 'dine_in', 'delivery'] : ['delivery']);
 
     return {
       business_name: await this.bs.get('business_name'),
@@ -139,6 +163,12 @@ export class ConfigController {
       additional_charge_status: addCharge.amount > 0 ? 1 : 0,
       additional_charge_name: addCharge.name,
       additional_charge: addCharge.amount,
+      // Per-order-type additional charge: { take_away|dine_in|delivery:
+      // { amount, name, status } }. New app builds pick the entry for the
+      // selected order type; old builds fall back to the flat keys above.
+      additional_charge_by_type: additionalChargeByType,
+      // Order types that food GST (+ extra packaging) applies to.
+      food_gst_order_types: foodGstOrderTypes,
       // Whether the extra charges (GST / platform / convenience / packaging /
       // extra-packaging) apply to Take Away & Dine In. OFF by default — those
       // charges are taken on Home Delivery only until the admin enables this

@@ -175,6 +175,12 @@ export class AdminController {
     return this.admin.getRestaurantTabs(id, toInt(limit, 50));
   }
 
+  // Active coupons usable for this restaurant — powers the POS coupon picker.
+  @Get('restaurants/:id/coupons')
+  restaurantCoupons(@Param('id', ParseIntPipe) id: number) {
+    return this.admin.listRestaurantCoupons(id);
+  }
+
   @Patch('restaurants/:id')
   updateRestaurant(@Param('id', ParseIntPipe) id: number, @Body() body: Parameters<AdminService['updateRestaurant']>[1]) {
     return this.admin.updateRestaurant(id, body);

@@ -9,6 +9,8 @@ import { CANCEL_REASONS, type CancelReason } from '../lifecycle/order-lifecycle.
 import { storageFullUrl } from '../common/storage-url';
 import { issueCreditNote } from '../completion/credit-note.util';
 import { creditCustomerWallet, type CustomerWalletCreditResult } from '../wallet/customer-wallet.util';
+import { sanitizeOrderTypes } from '../common/additional-charge';
+import { validateAndComputeCoupon, incrementCouponUses } from '../common/coupon';
 
 /** Shared shape for the admin food create + update endpoints. */
 export interface FoodWriteBody {
@@ -2847,6 +2849,56 @@ export class AdminService {
     return [];
   }
 
+  /** Order types food GST (+ extra packaging) applies to. From the
+   *  `food_gst_order_types` business setting (Additional Charges screen);
+   *  backfilled from the legacy `charges_on_takeaway_dinein` toggle. Mirrors
+   *  order.service.foodGstOrderTypes + the customer get-Tax handler. */
+  private async posFoodGstOrderTypes(): Promise<string[]> {
+    const gstDoc = await this.mongo.findOne<{ value?: string; key_value?: string }>('business_settings', { key: 'food_gst_order_types' });
+    const raw = gstDoc?.value ?? gstDoc?.key_value;
+    if (raw) return sanitizeOrderTypes(raw);
+    const tdDoc = await this.mongo.findOne<{ value?: string; key_value?: string }>('business_settings', { key: 'charges_on_takeaway_dinein' });
+    const tdV = tdDoc?.value ?? tdDoc?.key_value;
+    return (tdV === '1' || tdV === 'true') ? ['take_away', 'dine_in', 'delivery'] : ['delivery'];
+  }
+
+  /** Active coupons usable for a restaurant (restaurant-specific + platform-wide)
+   *  for the POS coupon picker. Filters by status + date window + usage limit;
+   *  the exact discount is recomputed authoritatively at place-order time. */
+  async listRestaurantCoupons(restaurantId: number) {
+    if (!this.useMongo()) return { total: 0, coupons: [] };
+    const now = new Date();
+    const rows = await this.mongo.findMany<{
+      mysql_id: number; code?: string; title?: string; discount?: number; discount_type?: string;
+      min_purchase?: number; max_discount?: number; start_date?: Date | string | null;
+      expire_date?: Date | string | null; limit?: number | null; total_uses?: number | null;
+      status?: boolean | number; mysql_restaurant_id?: number | null; coupon_type?: string;
+    }>('coupons', {
+      $or: [
+        { mysql_restaurant_id: Number(restaurantId) },
+        { mysql_restaurant_id: null },
+        { mysql_restaurant_id: { $exists: false } },
+      ],
+    }, { sort: { mysql_id: -1 }, limit: 200 });
+    const coupons = rows
+      .filter((c) => c.status === true || c.status === 1 || c.status === undefined)
+      .filter((c) => !c.start_date || new Date(c.start_date) <= now)
+      .filter((c) => !c.expire_date || new Date(c.expire_date) >= now)
+      .filter((c) => c.limit == null || Number(c.total_uses ?? 0) < Number(c.limit))
+      .map((c) => ({
+        id: Number(c.mysql_id),
+        code: c.code ?? '',
+        title: c.title ?? c.code ?? 'Coupon',
+        discount: Number(c.discount ?? 0),
+        discount_type: String(c.discount_type ?? 'percentage'),
+        min_purchase: Number(c.min_purchase ?? 0),
+        max_discount: Number(c.max_discount ?? 0),
+        coupon_type: c.coupon_type ?? null,
+        restaurant_id: c.mysql_restaurant_id != null ? Number(c.mysql_restaurant_id) : null,
+      }));
+    return { total: coupons.length, coupons };
+  }
+
   /** Place a POS order on behalf of a restaurant (admin walk-in / phone order).
    *  Mirrors Laravel's POSController::placeOrder — creates the order plus its
    *  line items so it shows up in the orders list + detail like any order. */
@@ -2861,6 +2913,7 @@ export class AdminService {
       table_number?: string | number;
       payment_method?: string;
       discount?: number;
+      coupon_code?: string;
       tax_percent?: number;
       delivery_charge?: number;
       additional_charge?: number;
@@ -2906,6 +2959,18 @@ export class AdminService {
       (it.add_ons ?? []).reduce((s, a) => s + Math.max(0, Number(a.price ?? 0)), 0);
     const subtotal = items.reduce((s, i) => s + (Number(i.price ?? 0) + addOnSum(i)) * Number(i.quantity ?? 0), 0);
     const discount = Number(body.discount ?? 0);
+    // ── POS coupon — validated + computed authoritatively, shared with the
+    // customer flow (common/coupon.ts). Stacks on top of any manual discount;
+    // the coupon's restaurant/admin-funded split is recorded separately. ──
+    const couponResult = await validateAndComputeCoupon(this.mongo, {
+      code: body.coupon_code,
+      orderAmount: subtotal,
+      restaurantId: Number(body.restaurant_id),
+    });
+    if (body.coupon_code && String(body.coupon_code).trim() && !couponResult.applied) {
+      throw new BadRequestException({ errors: [{ code: 'coupon_code', message: couponResult.reason ?? 'Coupon is not applicable' }] });
+    }
+    const couponDiscount = couponResult.couponDiscount;
     // Food GST is collected & remitted by the PLATFORM (e-commerce operator under
     // GST sec 9(5)), NOT the restaurant — so the rate is the admin-configured
     // `food_gst_rate` (default 5%), never restaurant.tax. The POS GST toggle can
@@ -2918,19 +2983,24 @@ export class AdminService {
     })();
     const sentTax = body.tax_percent !== undefined ? Number(body.tax_percent) : adminFoodGstRate;
     let taxPercent = sentTax > 0 ? adminFoodGstRate : 0; // toggle off → 0; else enforce platform rate
-    const taxable = Math.max(0, subtotal - discount);
+    // Manual discount + coupon both reduce the taxable base.
+    const taxable = Math.max(0, subtotal - discount - couponDiscount);
     const deliveryCharge = Number(body.delivery_charge ?? 0);
     // Platform additional charges + restaurant extra-packaging, as configured.
-    let additionalCharge = Math.max(0, Number(body.additional_charge ?? 0));
+    // The per-charge platform/convenience/packaging fees are filtered by order
+    // type on the (admin-controlled) POS client — which now carries each charge's
+    // order_types — so we trust the additional_charge it computed for the
+    // selected type. Server still enforces the per-order-type GST + extra
+    // packaging gate below.
+    const additionalCharge = Math.max(0, Number(body.additional_charge ?? 0));
     let extraPackaging = Math.max(0, Number(body.extra_packaging_amount ?? 0));
-    // Extra charges (GST + platform/convenience/packaging + extra packaging)
-    // apply to Home Delivery always; to Take Away / Dine In only when the admin
-    // enabled `charges_on_takeaway_dinein` (Order Settings). Default OFF — server
-    // enforces it even if the POS client sends amounts.
-    if (orderType === 'take_away' || orderType === 'dine_in') {
-      const cDoc = await this.mongo.findOne<{ value?: string; key_value?: string }>('business_settings', { key: 'charges_on_takeaway_dinein' });
-      const cRaw = cDoc?.value ?? cDoc?.key_value;
-      if (!(cRaw === '1' || cRaw === 'true')) { taxPercent = 0; additionalCharge = 0; extraPackaging = 0; }
+    // Food GST + extra packaging apply only to the order types the admin
+    // configured (food_gst_order_types; backfilled from the legacy
+    // charges_on_takeaway_dinein toggle). Server-enforced even if the client sends
+    // amounts. Mirrors order.service.placeOrder + get-Tax.
+    if (!(await this.posFoodGstOrderTypes()).includes(orderType)) {
+      taxPercent = 0;
+      extraPackaging = 0;
     }
     const taxAmount = taxable * (taxPercent / 100);
     const orderAmount = taxable + taxAmount + deliveryCharge + additionalCharge + extraPackaging;
@@ -2946,7 +3016,13 @@ export class AdminService {
       mysql_delivery_man_id: null,
       order_amount: orderAmount,
       total_tax_amount: taxAmount,
-      restaurant_discount_amount: discount,
+      // Manual discount + the coupon's restaurant-funded share are borne by the
+      // restaurant; the coupon's admin-funded share is borne by Eatofine.
+      restaurant_discount_amount: Math.round((discount + couponResult.restaurantDiscount) * 100) / 100,
+      admin_discount_amount: couponResult.adminDiscount,
+      coupon_discount_amount: couponDiscount,
+      coupon_code: couponResult.couponCode,
+      discount_owner: couponResult.couponCode ? couponResult.couponOwner : null,
       delivery_charge: deliveryCharge,
       additional_charge: additionalCharge,
       extra_packaging_amount: extraPackaging,
@@ -2985,6 +3061,9 @@ export class AdminService {
         updated_at: now,
       });
     }
+
+    // Count the coupon redemption (atomic) so usage limits are enforced.
+    await incrementCouponUses(this.mongo, couponResult.couponMysqlId);
 
     return { ok: true, id: orderId, order_amount: orderAmount };
   }
@@ -6032,8 +6111,24 @@ AdminService.prototype.listWithdrawRequests = async function (this: AdminService
   const offset = opts.offset ?? 0;
   if (this['useMongo']()) {
     const filter: Record<string, unknown> = {};
-    if (opts.type) filter.type = opts.type;
+    // The admin page asks for type "deliveryman" / "restaurant", but the stored
+    // `type` field is unreliable ("manual" / "vendor" / etc.). Filter by which
+    // party the request belongs to (delivery_man_id vs vendor_id), tolerating
+    // both the legacy and mysql_-prefixed field names.
+    const t = String(opts.type ?? '').toLowerCase();
+    if (t === 'deliveryman' || t === 'delivery_man' || t === 'dm') {
+      filter.$or = [{ delivery_man_id: { $ne: null } }, { mysql_delivery_man_id: { $ne: null } }];
+    } else if (t === 'restaurant' || t === 'vendor') {
+      filter.$or = [{ vendor_id: { $ne: null } }, { mysql_vendor_id: { $ne: null } }];
+    } else if (opts.type) {
+      filter.type = opts.type;
+    }
     if (opts.approved !== undefined) filter.approved = opts.approved;
+    const num = (v: unknown): number => {
+      if (v === null || v === undefined) return 0;
+      const n = typeof v === 'number' ? v : parseFloat(String(v));
+      return Number.isFinite(n) ? n : 0;
+    };
     const [rows, total] = await Promise.all([
       this['mongo'].findMany<Record<string, unknown>>('withdraw_requests', filter, {
         limit,
@@ -6046,7 +6141,10 @@ AdminService.prototype.listWithdrawRequests = async function (this: AdminService
       rows.map((r) => ({
         ...r,
         id: Number(r.mysql_id),
-        amount: r.amount !== undefined && r.amount !== null ? Number(r.amount) : 0,
+        // Normalise party id under both names so the page can show the requester.
+        delivery_man_id: r.delivery_man_id ?? r.mysql_delivery_man_id ?? null,
+        vendor_id: r.vendor_id ?? r.mysql_vendor_id ?? null,
+        amount: num(r.amount),
       })),
       total,
       limit,

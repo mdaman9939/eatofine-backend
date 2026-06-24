@@ -23,6 +23,7 @@ import { MongoDataService } from '../mongo/mongo-data.service';
 import { OrderLifecycleService } from '../lifecycle/order-lifecycle.service';
 import { DmWalletService } from '../wallet/dm-wallet.service';
 import { storageFullUrl } from '../common/storage-url';
+import { sanitizeOrderTypes } from '../common/additional-charge';
 import { resolveParticipant, findOrCreateConversation, participantProfile, type PartySlot } from './messaging.helper';
 
 interface MulterFile {
@@ -1120,14 +1121,22 @@ export class CustomerExtrasController {
       };
       rate = await readNum('food_gst_rate', 5);
       if (rate < 0) rate = 5;
-      // Take Away / Dine In are taxed only when the admin enabled charges there
-      // (mirrors order.service.placeOrder + the admin POS gating).
-      const isNonDelivery = body?.order_type === 'take_away' || body?.order_type === 'dine_in';
-      if (isNonDelivery) {
-        const doc = await this.mongo.findOne<{ value?: string; key_value?: string }>('business_settings', { key: 'charges_on_takeaway_dinein' });
-        const v = doc?.value ?? doc?.key_value;
-        if (!(v === '1' || v === 'true')) rate = 0;
+      // Food GST applies only to the order types the admin configured
+      // (food_gst_order_types, Additional Charges screen; backfilled from the
+      // legacy charges_on_takeaway_dinein toggle). Mirrors order.service.placeOrder
+      // + the admin POS gating so the preview equals what is charged.
+      const orderTypeName = String(body?.order_type ?? 'delivery');
+      const gstDoc = await this.mongo.findOne<{ value?: string; key_value?: string }>('business_settings', { key: 'food_gst_order_types' });
+      const gstRaw = gstDoc?.value ?? gstDoc?.key_value;
+      let gstTypes: string[];
+      if (gstRaw) {
+        gstTypes = sanitizeOrderTypes(gstRaw);
+      } else {
+        const tdDoc = await this.mongo.findOne<{ value?: string; key_value?: string }>('business_settings', { key: 'charges_on_takeaway_dinein' });
+        const tdV = tdDoc?.value ?? tdDoc?.key_value;
+        gstTypes = (tdV === '1' || tdV === 'true') ? ['take_away', 'dine_in', 'delivery'] : ['delivery'];
       }
+      if (!gstTypes.includes(orderTypeName)) rate = 0;
     }
 
     const taxAmount = Math.round(foodSubtotal * (rate / 100) * 100) / 100;

@@ -5352,10 +5352,24 @@ AdminService.prototype.listWithdrawRequests = async function (opts) {
     const offset = opts.offset ?? 0;
     if (this['useMongo']()) {
         const filter = {};
-        if (opts.type)
+        const t = String(opts.type ?? '').toLowerCase();
+        if (t === 'deliveryman' || t === 'delivery_man' || t === 'dm') {
+            filter.$or = [{ delivery_man_id: { $ne: null } }, { mysql_delivery_man_id: { $ne: null } }];
+        }
+        else if (t === 'restaurant' || t === 'vendor') {
+            filter.$or = [{ vendor_id: { $ne: null } }, { mysql_vendor_id: { $ne: null } }];
+        }
+        else if (opts.type) {
             filter.type = opts.type;
+        }
         if (opts.approved !== undefined)
             filter.approved = opts.approved;
+        const num = (v) => {
+            if (v === null || v === undefined)
+                return 0;
+            const n = typeof v === 'number' ? v : parseFloat(String(v));
+            return Number.isFinite(n) ? n : 0;
+        };
         const [rows, total] = await Promise.all([
             this['mongo'].findMany('withdraw_requests', filter, {
                 limit,
@@ -5367,7 +5381,9 @@ AdminService.prototype.listWithdrawRequests = async function (opts) {
         return paginate(rows.map((r) => ({
             ...r,
             id: Number(r.mysql_id),
-            amount: r.amount !== undefined && r.amount !== null ? Number(r.amount) : 0,
+            delivery_man_id: r.delivery_man_id ?? r.mysql_delivery_man_id ?? null,
+            vendor_id: r.vendor_id ?? r.mysql_vendor_id ?? null,
+            amount: num(r.amount),
         })), total, limit, offset);
     }
     const where = {};

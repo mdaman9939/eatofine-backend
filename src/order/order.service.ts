@@ -5,7 +5,8 @@ import { storageFullUrl } from '../common/storage-url';
 import { FcmService } from '../notifications/fcm.service';
 import { UserDeliveryChargesService } from '../enhancements/user-delivery-charges.service';
 import { ZoneService } from '../zone/zone.service';
-import { computeFlatAdditionalCharge, type AdditionalChargeRow } from '../common/additional-charge';
+import { computeFlatAdditionalCharge, sanitizeOrderTypes, type AdditionalChargeRow } from '../common/additional-charge';
+import { validateAndComputeCoupon } from '../common/coupon';
 
 /** Great-circle distance between two lat/lng points, in kilometres. */
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -97,6 +98,23 @@ export class OrderService {
     );
     const raw = doc?.value ?? doc?.key_value;
     return raw === '1' || raw === 'true';
+  }
+
+  /** Order types that food GST (+ extra packaging) applies to. From the
+   *  `food_gst_order_types` business setting (Additional Charges screen);
+   *  backfilled from the legacy `charges_on_takeaway_dinein` toggle so the
+   *  default behaviour (delivery-only, or all types when the toggle was on) is
+   *  unchanged. Mirrors config.controller + get-Tax + admin POS. */
+  private async foodGstOrderTypes(): Promise<string[]> {
+    const doc = await this.mongo.findOne<{ value?: string; key_value?: string }>(
+      'business_settings',
+      { key: 'food_gst_order_types' },
+    );
+    const raw = doc?.value ?? doc?.key_value;
+    if (raw) return sanitizeOrderTypes(raw);
+    return (await this.chargesApplyOnNonDelivery())
+      ? ['take_away', 'dine_in', 'delivery']
+      : ['delivery'];
   }
 
   /** Push a real-time "new order" FCM notification to the restaurant's vendor
@@ -251,53 +269,19 @@ export class OrderService {
       //   restaurant-funded → restaurant_discount_amount (restaurant bears it)
       //   admin-funded      → admin_discount_amount (Eatofine bears it)
       //   shared            → split per the coupon's configured amounts
-      let couponDiscount = 0;
-      let couponCode: string | null = null;
-      let couponAdminDiscount = 0;
-      let couponRestaurantDiscount = 0;
-      let couponMysqlId: number | null = null;
-      let couponOwner = 'admin';
-      if (body.coupon_code && String(body.coupon_code).trim()) {
-        const code = String(body.coupon_code).trim();
-        const coupon = await this.mongo.findOne<{
-          mysql_id: number; code?: string; discount?: number; discount_type?: string;
-          min_purchase?: number; max_discount?: number; start_date?: Date | string | null;
-          expire_date?: Date | string | null; limit?: number | null; total_uses?: number | null;
-          status?: boolean | number; mysql_restaurant_id?: number | null;
-          discount_owner?: string; admin_discount_amount?: number; restaurant_discount_amount?: number;
-        }>('coupons', { code });
-        const now2 = new Date();
-        const okStatus = !!coupon && (coupon.status === true || coupon.status === 1 || coupon.status === undefined);
-        const okStart = !coupon?.start_date || new Date(coupon.start_date) <= now2;
-        const okEnd = !coupon?.expire_date || new Date(coupon.expire_date) >= now2;
-        const okMin = !coupon?.min_purchase || orderAmount >= Number(coupon.min_purchase);
-        const okRest = coupon?.mysql_restaurant_id == null || Number(coupon.mysql_restaurant_id) === Number(body.restaurant_id);
-        const okLimit = coupon?.limit == null || Number(coupon.total_uses ?? 0) < Number(coupon.limit);
-        if (coupon && okStatus && okStart && okEnd && okMin && okRest && okLimit) {
-          const dType = String(coupon.discount_type ?? 'percentage');
-          let d = dType === 'percent' || dType === 'percentage'
-            ? (orderAmount * Number(coupon.discount ?? 0)) / 100
-            : Number(coupon.discount ?? 0);
-          const maxD = Number(coupon.max_discount ?? 0);
-          if (maxD > 0) d = Math.min(d, maxD);
-          couponDiscount = Math.min(Math.round(d * 100) / 100, orderAmount);
-          couponCode = code;
-          couponMysqlId = Number(coupon.mysql_id);
-          couponOwner = ['admin', 'restaurant', 'shared'].includes(String(coupon.discount_owner)) ? String(coupon.discount_owner) : 'admin';
-          if (couponOwner === 'restaurant') {
-            couponRestaurantDiscount = couponDiscount;
-          } else if (couponOwner === 'shared') {
-            const cfgA = Math.max(0, Number(coupon.admin_discount_amount ?? 0));
-            const cfgR = Math.max(0, Number(coupon.restaurant_discount_amount ?? 0));
-            const tot = cfgA + cfgR;
-            const aShare = tot > 0 ? Math.round(((couponDiscount * cfgA) / tot) * 100) / 100 : couponDiscount;
-            couponAdminDiscount = aShare;
-            couponRestaurantDiscount = Math.round((couponDiscount - aShare) * 100) / 100;
-          } else {
-            couponAdminDiscount = couponDiscount;
-          }
-        }
-      }
+      // Shared with the admin POS via validateAndComputeCoupon (common/coupon.ts)
+      // so both flows compute the identical discount + owner split.
+      const couponResult = await validateAndComputeCoupon(this.mongo, {
+        code: body.coupon_code,
+        orderAmount,
+        restaurantId: body.restaurant_id,
+      });
+      const couponDiscount = couponResult.couponDiscount;
+      const couponCode = couponResult.couponCode;
+      const couponAdminDiscount = couponResult.adminDiscount;
+      const couponRestaurantDiscount = couponResult.restaurantDiscount;
+      const couponMysqlId = couponResult.couponMysqlId;
+      const couponOwner = couponResult.couponOwner;
 
       // ── Delivery charge — distance-slab engine (User Delivery Charges) ──
       // The customer fee comes from the configured distance slabs + surge +
@@ -330,22 +314,22 @@ export class OrderService {
           deliveryCharge = Number(restaurant.minimum_shipping_charge ?? 0);
         }
       }
+      // ── Food GST — applies only to the order types the admin configured ──
+      // (food_gst_order_types, set from the Additional Charges screen). Delivery
+      // GST is separate (it only exists on delivery orders) and always rolls in.
+      const orderTypeName = String(body.order_type ?? 'delivery');
+      if (!(await this.foodGstOrderTypes()).includes(orderTypeName)) {
+        totalTax = 0; // food GST off for this order type
+      }
       // Delivery GST rolls into the order's tax so the invoice CGST/SGST covers it.
       totalTax = Math.round((totalTax + deliveryGst) * 100) / 100;
-      // Platform/packaging/convenience fees — the SAME flat value the customer
-      // app shows from config, so the displayed total matches what we charge.
+      // ── Platform/packaging/convenience fees — PER ORDER TYPE ──
+      // Each charge carries `order_types`; we sum only the ones the admin enabled
+      // for THIS order type. The customer app reads the SAME per-type value from
+      // config (additional_charge_by_type), so the displayed total matches what
+      // we charge. (Backfilled charges keep the old behaviour by default.)
       const addChargeRows = await this.mongo.findMany<AdditionalChargeRow>('additional_user_charges', {});
-      let additionalCharge = computeFlatAdditionalCharge(addChargeRows).amount;
-      // Extra charges (food tax + platform/convenience/packaging fees) apply to
-      // Home Delivery always; for Take Away / Dine In only when the admin has
-      // enabled `charges_on_takeaway_dinein` (Order Settings). Default OFF, so a
-      // walk-in pickup / dine-in is charged the food subtotal only. This must
-      // mirror the customer app's checkout gating and the admin POS.
-      const isNonDelivery = body.order_type === 'take_away' || body.order_type === 'dine_in';
-      if (isNonDelivery && !(await this.chargesApplyOnNonDelivery())) {
-        additionalCharge = 0;
-        totalTax = 0;
-      }
+      const additionalCharge = computeFlatAdditionalCharge(addChargeRows, orderTypeName).amount;
       const finalAmount = Math.round((orderAmount - couponDiscount + totalTax + deliveryCharge + additionalCharge) * 100) / 100;
       const otp = String(Math.floor(1000 + Math.random() * 9000));
       const now = new Date();

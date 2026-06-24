@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { BusinessSettingsService } from '../business-settings/business-settings.service';
 import { toNum } from '../common/decimal';
+import { sanitizeOrderTypes, ORDER_TYPES } from '../common/additional-charge';
 
 // BRD enhancements: §5.1 Slab Plan + §5.3 GST Engine + §5.2 Invoices + §5.4 TDS.
 // New tables (business_plan_slabs, tax_master) are demo-time additions not yet
@@ -58,6 +59,7 @@ interface MongoAdditionalChargeDoc {
   hsn_sac: string | null;
   description: string | null;
   status: number | boolean;
+  order_types?: string[] | null;
 }
 
 interface MongoTdsDoc {
@@ -420,6 +422,12 @@ export class EnhancementsService {
         hsn_sac: r.hsn_sac ?? null,
         description: r.description ?? null,
         status: !!r.status,
+        // Order types this charge applies to. Legacy rows without the field show
+        // all three (matches the "applies everywhere" runtime default) so the
+        // admin form pre-checks every box and POS sees an explicit set.
+        order_types: Array.isArray(r.order_types) && r.order_types.length
+          ? r.order_types
+          : [...ORDER_TYPES],
       }));
     }
     const rows = await this.prisma.$queryRawUnsafe<Row[]>(
@@ -436,9 +444,27 @@ export class EnhancementsService {
     }));
   }
 
-  async createAdditionalCharge(body: { charge_head: string; charge_type?: 'fixed' | 'percentage'; amount: number; gst_applicable?: boolean; gst_rate?: number; hsn_sac?: string; description?: string }) {
+  /** Resolve the order types a charge applies to from the request body. Accepts
+   *  either an explicit `order_types` array/CSV, or the three boolean checkboxes
+   *  the admin form submits (apply_take_away / apply_dine_in / apply_delivery).
+   *  Returns undefined when the body says nothing about order types. */
+  private resolveOrderTypes(body: Record<string, unknown>): string[] | undefined {
+    if (body.order_types !== undefined) return sanitizeOrderTypes(body.order_types);
+    const has = ['apply_take_away', 'apply_dine_in', 'apply_delivery'].some((k) => k in body);
+    if (!has) return undefined;
+    const on = (v: unknown) => v === true || v === 1 || v === '1' || v === 'true';
+    const out: string[] = [];
+    if (on(body.apply_take_away)) out.push('take_away');
+    if (on(body.apply_dine_in)) out.push('dine_in');
+    if (on(body.apply_delivery)) out.push('delivery');
+    return out;
+  }
+
+  async createAdditionalCharge(body: { charge_head: string; charge_type?: 'fixed' | 'percentage'; amount: number; gst_applicable?: boolean; gst_rate?: number; hsn_sac?: string; description?: string; order_types?: string[]; apply_take_away?: boolean; apply_dine_in?: boolean; apply_delivery?: boolean }) {
     if (!body.charge_head?.trim()) throw new BadRequestException({ errors: [{ code: 'charge_head', message: 'required' }] });
     if (typeof body.amount !== 'number') throw new BadRequestException({ errors: [{ code: 'amount', message: 'required' }] });
+    // New charges apply to every order type unless the admin says otherwise.
+    const orderTypes = this.resolveOrderTypes(body) ?? [...ORDER_TYPES];
     if (this.useMongo()) {
       const nextId = await this.mongo.nextMysqlId('additional_user_charges');
       const now = new Date();
@@ -451,6 +477,7 @@ export class EnhancementsService {
         gst_rate: body.gst_rate ?? 0,
         hsn_sac: body.hsn_sac ?? null,
         description: body.description ?? null,
+        order_types: orderTypes,
         status: 1,
         created_at: now,
         updated_at: now,
@@ -467,7 +494,7 @@ export class EnhancementsService {
     return { ok: true };
   }
 
-  async updateAdditionalCharge(id: number, body: { charge_head?: string; charge_type?: 'fixed' | 'percentage'; amount?: number; gst_applicable?: boolean; gst_rate?: number; hsn_sac?: string; description?: string; status?: boolean }) {
+  async updateAdditionalCharge(id: number, body: { charge_head?: string; charge_type?: 'fixed' | 'percentage'; amount?: number; gst_applicable?: boolean; gst_rate?: number; hsn_sac?: string; description?: string; status?: boolean; order_types?: string[]; apply_take_away?: boolean; apply_dine_in?: boolean; apply_delivery?: boolean }) {
     if (this.useMongo()) {
       const set: Record<string, unknown> = {};
       if (body.charge_head !== undefined) set.charge_head = body.charge_head;
@@ -478,6 +505,8 @@ export class EnhancementsService {
       if (body.hsn_sac !== undefined) set.hsn_sac = body.hsn_sac;
       if (body.description !== undefined) set.description = body.description;
       if (body.status !== undefined) set.status = body.status ? 1 : 0;
+      const orderTypes = this.resolveOrderTypes(body);
+      if (orderTypes !== undefined) set.order_types = orderTypes;
       if (!Object.keys(set).length) throw new BadRequestException({ errors: [{ code: 'body', message: 'no fields' }] });
       set.updated_at = new Date();
       await this.mongo.updateOne('additional_user_charges', { mysql_id: Number(id) }, set);
