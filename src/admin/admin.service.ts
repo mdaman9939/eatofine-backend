@@ -2905,10 +2905,14 @@ export class AdminService {
       else if (dc.matched_slab) { deliveryCharge = Number((dc as { subtotal?: number }).subtotal ?? 0); deliveryGst = Number(dc.gst_amount ?? 0); }
       else { deliveryCharge = Number(restaurant.minimum_shipping_charge ?? 0); }
     } catch { deliveryCharge = Number(restaurant.minimum_shipping_charge ?? 0); }
+    // Final guard: never let a NaN reach the POS (it serializes to null and the
+    // bill shows ₹0). Fall back to the restaurant flat fee, then 0.
+    const safe = (n: number) => (Number.isFinite(n) ? Math.round(n * 100) / 100 : 0);
+    if (!Number.isFinite(deliveryCharge)) deliveryCharge = Number(restaurant.minimum_shipping_charge ?? 0) || 0;
     return {
-      distance_km: Math.round(distanceKm * 100) / 100,
-      delivery_charge: Math.round(deliveryCharge * 100) / 100,
-      delivery_gst: Math.round(deliveryGst * 100) / 100,
+      distance_km: safe(distanceKm),
+      delivery_charge: safe(deliveryCharge),
+      delivery_gst: safe(deliveryGst),
       free_delivery: free,
     };
   }

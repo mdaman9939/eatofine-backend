@@ -313,6 +313,10 @@ export class OrderService {
         } catch {
           deliveryCharge = Number(restaurant.minimum_shipping_charge ?? 0);
         }
+        // Never let a NaN delivery fee poison order_amount (it would store/charge
+        // NaN). Fall back to the restaurant flat fee, then 0.
+        if (!Number.isFinite(deliveryCharge)) deliveryCharge = Number(restaurant.minimum_shipping_charge ?? 0) || 0;
+        if (!Number.isFinite(deliveryGst)) deliveryGst = 0;
       }
       // ── Food GST — applies only to the order types the admin configured ──
       // (food_gst_order_types, set from the Additional Charges screen). Delivery

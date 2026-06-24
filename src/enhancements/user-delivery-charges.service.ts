@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
+import { toNum } from '../common/decimal';
 
 // BRD §6 — User-side delivery charge: slabs + surcharges + free-delivery threshold + surge pricing matrix.
 // Per BRD §6.5 the result IS GST-applicable (unlike §5.4 DM side).
@@ -75,11 +76,14 @@ export class UserDeliveryChargesService {
       );
       return docs.map((r) => ({
         id: Number(r.mysql_id),
-        min_km: Number(r.min_km),
-        max_km: Number(r.max_km),
-        base_charge: Number(r.base_charge),
-        extra_per_km: Number(r.extra_per_km),
-        gst_rate: Number(r.gst_rate),
+        // toNum decodes migrated decimal.js objects ({s,e,d}) → a NaN here would
+        // make the slab never match (distance >= NaN is false) and silently
+        // collapse the fee to the ₹0 fallback.
+        min_km: toNum(r.min_km),
+        max_km: toNum(r.max_km),
+        base_charge: toNum(r.base_charge),
+        extra_per_km: toNum(r.extra_per_km),
+        gst_rate: toNum(r.gst_rate),
         status: !!r.status,
       }));
     }
@@ -172,8 +176,10 @@ export class UserDeliveryChargesService {
         label: r.label,
         config_json: typeof r.config_json === 'string' ? JSON.parse(r.config_json) : r.config_json,
         surcharge_type_value: r.surcharge_type_value,
-        amount: Number(r.amount),
-        gst_rate: Number(r.gst_rate),
+        // toNum decodes migrated decimal.js objects (some surcharge amounts are
+        // stored as {s,e,d}) so they don't become NaN in the fee math.
+        amount: toNum(r.amount),
+        gst_rate: toNum(r.gst_rate),
         status: !!r.status,
       }));
     }
@@ -268,7 +274,7 @@ export class UserDeliveryChargesService {
       );
       const r = docs[0];
       if (!r) return { id: 0, min_order_value: 0, status: false };
-      return { id: Number(r.mysql_id), min_order_value: Number(r.min_order_value), status: !!r.status };
+      return { id: Number(r.mysql_id), min_order_value: toNum(r.min_order_value), status: !!r.status };
     }
     const rows = await this.prisma.$queryRawUnsafe<FreeRow[]>(
       `SELECT id, min_order_value, status FROM free_delivery_settings ORDER BY id ASC LIMIT 1`,
@@ -317,7 +323,10 @@ export class UserDeliveryChargesService {
       return docs.map((r) => ({
         day_of_week: Number(r.day_of_week),
         hour_of_day: Number(r.hour_of_day),
-        multiplier: Number(r.multiplier),
+        // Migrated MySQL DECIMAL cells land in Mongo as a decimal.js object
+        // ({s,e,d}); plain Number() on them is NaN, which silently zeroes the
+        // whole delivery fee. toNum decodes them; default 1 = no surge.
+        multiplier: toNum(r.multiplier, 1),
         status: !!r.status,
       }));
     }
@@ -402,7 +411,10 @@ export class UserDeliveryChargesService {
     // Surge cell (multiplier on subtotal)
     const grid = await this.getSurgeGrid();
     const surgeCell = grid.find((g) => g.day_of_week === dow && g.hour_of_day === hour && g.status);
-    const surgeMul = surgeCell ? surgeCell.multiplier : 1;
+    // A surge multiplier must scale UP (>= 1). Guard against a missing/invalid/0
+    // cell so a bad value never collapses the delivery fee to ₹0.
+    const surgeMul = surgeCell && Number.isFinite(surgeCell.multiplier) && surgeCell.multiplier > 0
+      ? surgeCell.multiplier : 1;
 
     // Other surcharges
     const surcharges = await this.listSurcharges();
@@ -467,9 +479,10 @@ export class UserDeliveryChargesService {
       starting_coverage_area?: number; maximum_coverage_area?: number; status?: boolean | number;
     }>('vehicles', { status: { $in: [true, 1] } }, { sort: { starting_coverage_area: 1, mysql_id: 1 } });
     for (const v of rows) {
-      const extra = Number(v.extra_charges ?? 0);
-      const start = Number(v.starting_coverage_area ?? 0);
-      const max = Number(v.maximum_coverage_area ?? 0);
+      // toNum decodes migrated decimal.js objects so a tier never adds NaN.
+      const extra = toNum(v.extra_charges);
+      const start = toNum(v.starting_coverage_area);
+      const max = toNum(v.maximum_coverage_area);
       if (extra <= 0 || max <= 0) continue; // unconfigured tier — no surcharge
       if (distanceKm >= start && distanceKm <= max) {
         return { amount: +extra.toFixed(2), label: `Vehicle: ${v.type ?? `#${v.mysql_id}`}` };
