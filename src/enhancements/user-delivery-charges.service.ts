@@ -385,7 +385,18 @@ export class UserDeliveryChargesService {
     }
 
     const slabs = await this.listSlabs();
-    const slab = slabs.find((s) => s.status && input.distance_km >= s.min_km && input.distance_km <= s.max_km);
+    const activeSlabs = slabs.filter((s) => s.status && Number.isFinite(s.min_km) && Number.isFinite(s.max_km));
+    let slab = activeSlabs.find((s) => input.distance_km >= s.min_km && input.distance_km <= s.max_km);
+    if (!slab && activeSlabs.length) {
+      // No EXACT tier — the admin's slabs have a gap (e.g. 6-7, 8-10 km) or the
+      // trip is beyond the farthest tier. Charge the NEAREST active slab rather
+      // than ₹0, so a real delivery is always priced. Distance-to-range = 0 when
+      // inside, else the gap to the closest edge.
+      const gap = (s: { min_km: number; max_km: number }) =>
+        input.distance_km < s.min_km ? s.min_km - input.distance_km
+          : input.distance_km > s.max_km ? input.distance_km - s.max_km : 0;
+      slab = activeSlabs.reduce((best, s) => (gap(s) < gap(best) ? s : best));
+    }
     if (!slab) {
       return {
         distance_km: input.distance_km, order_value: input.order_value,
@@ -393,7 +404,7 @@ export class UserDeliveryChargesService {
         base_charge: 0, extra_charge: 0, surcharges: [], surge_multiplier: 1,
         gst_amount: 0, total: 0,
         free_delivery: false,
-        notes: 'No active slab matches the given distance.',
+        notes: 'No active slab configured.',
       };
     }
     // Long-trip reward: a FLAT bonus added on top of the slab's base charge for
