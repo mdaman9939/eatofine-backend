@@ -13,6 +13,7 @@ exports.UserDeliveryChargesService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
+const decimal_1 = require("../common/decimal");
 let UserDeliveryChargesService = class UserDeliveryChargesService {
     prisma;
     mongo;
@@ -29,11 +30,11 @@ let UserDeliveryChargesService = class UserDeliveryChargesService {
             const docs = await this.mongo.findMany('user_delivery_slabs', {}, { sort: { min_km: 1 } });
             return docs.map((r) => ({
                 id: Number(r.mysql_id),
-                min_km: Number(r.min_km),
-                max_km: Number(r.max_km),
-                base_charge: Number(r.base_charge),
-                extra_per_km: Number(r.extra_per_km),
-                gst_rate: Number(r.gst_rate),
+                min_km: (0, decimal_1.toNum)(r.min_km),
+                max_km: (0, decimal_1.toNum)(r.max_km),
+                base_charge: (0, decimal_1.toNum)(r.base_charge),
+                extra_per_km: (0, decimal_1.toNum)(r.extra_per_km),
+                gst_rate: (0, decimal_1.toNum)(r.gst_rate),
                 status: !!r.status,
             }));
         }
@@ -139,8 +140,8 @@ let UserDeliveryChargesService = class UserDeliveryChargesService {
                 label: r.label,
                 config_json: typeof r.config_json === 'string' ? JSON.parse(r.config_json) : r.config_json,
                 surcharge_type_value: r.surcharge_type_value,
-                amount: Number(r.amount),
-                gst_rate: Number(r.gst_rate),
+                amount: (0, decimal_1.toNum)(r.amount),
+                gst_rate: (0, decimal_1.toNum)(r.gst_rate),
                 status: !!r.status,
             }));
         }
@@ -247,7 +248,7 @@ let UserDeliveryChargesService = class UserDeliveryChargesService {
             const r = docs[0];
             if (!r)
                 return { id: 0, min_order_value: 0, status: false };
-            return { id: Number(r.mysql_id), min_order_value: Number(r.min_order_value), status: !!r.status };
+            return { id: Number(r.mysql_id), min_order_value: (0, decimal_1.toNum)(r.min_order_value), status: !!r.status };
         }
         const rows = await this.prisma.$queryRawUnsafe(`SELECT id, min_order_value, status FROM free_delivery_settings ORDER BY id ASC LIMIT 1`);
         const r = rows[0];
@@ -293,7 +294,7 @@ let UserDeliveryChargesService = class UserDeliveryChargesService {
             return docs.map((r) => ({
                 day_of_week: Number(r.day_of_week),
                 hour_of_day: Number(r.hour_of_day),
-                multiplier: Number(r.multiplier),
+                multiplier: (0, decimal_1.toNum)(r.multiplier, 1),
                 status: !!r.status,
             }));
         }
@@ -338,7 +339,23 @@ let UserDeliveryChargesService = class UserDeliveryChargesService {
             };
         }
         const slabs = await this.listSlabs();
-        const slab = slabs.find((s) => s.status && input.distance_km >= s.min_km && input.distance_km <= s.max_km);
+        const activeSlabs = slabs.filter((s) => s.status && Number.isFinite(s.min_km) && Number.isFinite(s.max_km));
+        let slab = activeSlabs.find((s) => input.distance_km >= s.min_km && input.distance_km <= s.max_km);
+        let beyondScale = 1;
+        let priced = 'exact';
+        if (!slab && activeSlabs.length) {
+            const sorted = [...activeSlabs].sort((a, b) => a.min_km - b.min_km);
+            const farthest = sorted.reduce((a, b) => (b.max_km > a.max_km ? b : a));
+            if (input.distance_km > farthest.max_km) {
+                slab = farthest;
+                beyondScale = farthest.max_km > 0 ? input.distance_km / farthest.max_km : 1;
+                priced = 'extrapolated';
+            }
+            else {
+                slab = sorted.find((s) => s.min_km > input.distance_km) ?? farthest;
+                priced = 'rounded_up';
+            }
+        }
         if (!slab) {
             return {
                 distance_km: input.distance_km, order_value: input.order_value,
@@ -346,18 +363,19 @@ let UserDeliveryChargesService = class UserDeliveryChargesService {
                 base_charge: 0, extra_charge: 0, surcharges: [], surge_multiplier: 1,
                 gst_amount: 0, total: 0,
                 free_delivery: false,
-                notes: 'No active slab matches the given distance.',
+                notes: 'No active slab configured.',
             };
         }
         const longTripReward = +(Number(slab.extra_per_km) || 0).toFixed(2);
-        const baseTotal = slab.base_charge + longTripReward;
+        const baseTotal = +(((slab.base_charge + longTripReward) * beyondScale)).toFixed(2);
         const when = input.when ? new Date(input.when) : new Date();
         const dow = when.getDay();
         const hour = when.getHours();
         const isoDate = when.toISOString().slice(0, 10);
         const grid = await this.getSurgeGrid();
         const surgeCell = grid.find((g) => g.day_of_week === dow && g.hour_of_day === hour && g.status);
-        const surgeMul = surgeCell ? surgeCell.multiplier : 1;
+        const surgeMul = surgeCell && Number.isFinite(surgeCell.multiplier) && surgeCell.multiplier > 0
+            ? surgeCell.multiplier : 1;
         const surcharges = await this.listSurcharges();
         const applicable = [];
         for (const s of surcharges) {
@@ -399,6 +417,7 @@ let UserDeliveryChargesService = class UserDeliveryChargesService {
         return {
             distance_km: input.distance_km, order_value: input.order_value,
             matched_slab: { id: slab.id, min_km: slab.min_km, max_km: slab.max_km, base_charge: slab.base_charge, extra_per_km: slab.extra_per_km, gst_rate: slab.gst_rate },
+            priced_by: priced,
             base_charge: slab.base_charge, extra_charge: longTripReward,
             base_after_surge: baseAfterSurge,
             surge_multiplier: surgeMul,
@@ -415,9 +434,9 @@ let UserDeliveryChargesService = class UserDeliveryChargesService {
             return { amount: 0, label: '' };
         const rows = await this.mongo.findMany('vehicles', { status: { $in: [true, 1] } }, { sort: { starting_coverage_area: 1, mysql_id: 1 } });
         for (const v of rows) {
-            const extra = Number(v.extra_charges ?? 0);
-            const start = Number(v.starting_coverage_area ?? 0);
-            const max = Number(v.maximum_coverage_area ?? 0);
+            const extra = (0, decimal_1.toNum)(v.extra_charges);
+            const start = (0, decimal_1.toNum)(v.starting_coverage_area);
+            const max = (0, decimal_1.toNum)(v.maximum_coverage_area);
             if (extra <= 0 || max <= 0)
                 continue;
             if (distanceKm >= start && distanceKm <= max) {

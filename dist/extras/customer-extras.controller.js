@@ -57,6 +57,7 @@ const mongo_data_service_1 = require("../mongo/mongo-data.service");
 const order_lifecycle_service_1 = require("../lifecycle/order-lifecycle.service");
 const dm_wallet_service_1 = require("../wallet/dm-wallet.service");
 const storage_url_1 = require("../common/storage-url");
+const additional_charge_1 = require("../common/additional-charge");
 const messaging_helper_1 = require("./messaging.helper");
 const STORAGE_ROOT = (() => {
     if (process.env.STORAGE_ROOT)
@@ -840,13 +841,20 @@ let CustomerExtrasController = class CustomerExtrasController {
             rate = await readNum('food_gst_rate', 5);
             if (rate < 0)
                 rate = 5;
-            const isNonDelivery = body?.order_type === 'take_away' || body?.order_type === 'dine_in';
-            if (isNonDelivery) {
-                const doc = await this.mongo.findOne('business_settings', { key: 'charges_on_takeaway_dinein' });
-                const v = doc?.value ?? doc?.key_value;
-                if (!(v === '1' || v === 'true'))
-                    rate = 0;
+            const orderTypeName = String(body?.order_type ?? 'delivery');
+            const gstDoc = await this.mongo.findOne('business_settings', { key: 'food_gst_order_types' });
+            const gstRaw = gstDoc?.value ?? gstDoc?.key_value;
+            let gstTypes;
+            if (gstRaw) {
+                gstTypes = (0, additional_charge_1.sanitizeOrderTypes)(gstRaw);
             }
+            else {
+                const tdDoc = await this.mongo.findOne('business_settings', { key: 'charges_on_takeaway_dinein' });
+                const tdV = tdDoc?.value ?? tdDoc?.key_value;
+                gstTypes = (tdV === '1' || tdV === 'true') ? ['take_away', 'dine_in', 'delivery'] : ['delivery'];
+            }
+            if (!gstTypes.includes(orderTypeName))
+                rate = 0;
         }
         const taxAmount = Math.round(foodSubtotal * (rate / 100) * 100) / 100;
         return { total_tax_amount: taxAmount, tax_amount: taxAmount, tax_included: 0 };

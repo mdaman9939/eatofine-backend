@@ -88,14 +88,14 @@ export declare class EnhancementsController {
     }>;
     listAdditionalCharges(): Promise<{
         id: number;
+        amount: number;
+        gst_rate: number;
+        gst_applicable: boolean;
+        status: boolean;
         charge_head: string;
         charge_type: "fixed" | "percentage";
-        amount: number;
-        gst_applicable: boolean;
-        gst_rate: number;
         hsn_sac: string | null;
         description: string | null;
-        status: boolean;
     }[]>;
     createAdditionalCharge(body: Parameters<EnhancementsService['createAdditionalCharge']>[0]): Promise<{
         ok: boolean;
@@ -431,6 +431,7 @@ export declare class EnhancementsController {
         total: number;
         free_delivery: boolean;
         notes: string;
+        priced_by?: undefined;
         base_after_surge?: undefined;
         vehicle_extra?: undefined;
         vehicle_tier?: undefined;
@@ -446,6 +447,7 @@ export declare class EnhancementsController {
             extra_per_km: number;
             gst_rate: number;
         };
+        priced_by: "exact" | "rounded_up" | "extrapolated";
         base_charge: number;
         extra_charge: number;
         base_after_surge: number;

@@ -103,6 +103,9 @@ let AdminController = class AdminController {
         const createdBy = req.actor ? { kind: req.actor.kind, id: Number(req.actor.id) } : undefined;
         return this.admin.createPosOrder(body, createdBy);
     }
+    posDeliveryQuote(body) {
+        return this.admin.posDeliveryQuote(body);
+    }
     updateOrderStatus(id, body) {
         return this.admin.updateOrderStatus(id, body.status, body.reason);
     }
@@ -133,6 +136,9 @@ let AdminController = class AdminController {
     restaurantTabs(id, limit) {
         return this.admin.getRestaurantTabs(id, toInt(limit, 50));
     }
+    restaurantCoupons(id) {
+        return this.admin.listRestaurantCoupons(id);
+    }
     updateRestaurant(id, body) {
         return this.admin.updateRestaurant(id, body);
     }
@@ -141,6 +147,9 @@ let AdminController = class AdminController {
     }
     userDetail(id) {
         return this.admin.getUser(id);
+    }
+    userAddresses(id) {
+        return this.admin.listUserAddresses(id);
     }
     updateUserStatus(id, body) {
         return this.admin.updateUserStatus(id, body.status);
@@ -375,6 +384,18 @@ let AdminController = class AdminController {
     }
     deleteDmIncentive(id) {
         return this.admin.deleteDmIncentive(id);
+    }
+    listDmRewardClaims(status) {
+        return this.admin.listDmRewardClaims(status);
+    }
+    approveDmRewardClaim(id) {
+        return this.admin.approveDmRewardClaim(id);
+    }
+    rejectDmRewardClaim(id, body) {
+        return this.admin.rejectDmRewardClaim(id, body?.reason);
+    }
+    dmDisbursementReport(limit) {
+        return this.admin.dmDisbursementReport(limit ? Number(limit) : undefined);
     }
     subscriptionOrders() {
         return this.admin.listSubscriptionOrders();
@@ -986,6 +1007,14 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "placePosOrder", null);
 __decorate([
+    (0, common_1.Post)('pos/delivery-quote'),
+    (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "posDeliveryQuote", null);
+__decorate([
     (0, common_1.Patch)('orders/:id/status'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __param(1, (0, common_1.Body)()),
@@ -1061,6 +1090,13 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "restaurantTabs", null);
 __decorate([
+    (0, common_1.Get)('restaurants/:id/coupons'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "restaurantCoupons", null);
+__decorate([
     (0, common_1.Patch)('restaurants/:id'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
     __param(1, (0, common_1.Body)()),
@@ -1084,6 +1120,13 @@ __decorate([
     __metadata("design:paramtypes", [Number]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "userDetail", null);
+__decorate([
+    (0, common_1.Get)('users/:id/addresses'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "userAddresses", null);
 __decorate([
     (0, common_1.Patch)('users/:id/status'),
     __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
@@ -1662,6 +1705,35 @@ __decorate([
     __metadata("design:paramtypes", [Number]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "deleteDmIncentive", null);
+__decorate([
+    (0, common_1.Get)('dm-reward-claims'),
+    __param(0, (0, common_1.Query)('status')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "listDmRewardClaims", null);
+__decorate([
+    (0, common_1.Patch)('dm-reward-claims/:id/approve'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "approveDmRewardClaim", null);
+__decorate([
+    (0, common_1.Patch)('dm-reward-claims/:id/reject'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseIntPipe)),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "rejectDmRewardClaim", null);
+__decorate([
+    (0, common_1.Get)('dm-disbursement-report'),
+    __param(0, (0, common_1.Query)('limit')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "dmDisbursementReport", null);
 __decorate([
     (0, common_1.Get)('subscription-orders'),
     __metadata("design:type", Function),

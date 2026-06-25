@@ -13,6 +13,8 @@ import { sanitizeOrderTypes, computeFlatAdditionalCharge, type AdditionalChargeR
 import { validateAndComputeCoupon, incrementCouponUses } from '../common/coupon';
 import { haversineKm } from '../common/geo';
 import { UserDeliveryChargesService } from '../enhancements/user-delivery-charges.service';
+import { DmWalletService } from '../wallet/dm-wallet.service';
+import { FcmService } from '../notifications/fcm.service';
 
 /** Shared shape for the admin food create + update endpoints. */
 export interface FoodWriteBody {
@@ -99,6 +101,8 @@ export class AdminService {
     private readonly settlement: SettlementService,
     private readonly lifecycle: OrderLifecycleService,
     private readonly userCharges: UserDeliveryChargesService,
+    private readonly dmWallet: DmWalletService,
+    private readonly fcm: FcmService,
   ) {}
 
   /** Feature flag — when "1", admin reads route to MongoDB instead of MySQL. */
@@ -3800,11 +3804,12 @@ export class AdminService {
     }
     if (!this.useMongo()) throw new BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
     const nextId = await this.mongo.nextMysqlId('dm_bonuses');
-    const period = ['daily', 'weekly', 'lifetime'].includes(String(body.period)) ? String(body.period) : 'daily';
+    const period = ['daily', 'weekly', 'monthly', 'lifetime'].includes(String(body.period)) ? String(body.period) : 'daily';
+    const type = body.type === 'incentive' ? 'incentive' : 'bonus';
     await this.mongo.insertOne('dm_bonuses', {
       mysql_id: nextId,
       name: body.name,
-      type: body.type ?? 'rule',
+      type,
       amount: Number(body.amount),
       trigger: body.trigger ?? '',
       threshold: Number(body.threshold ?? 0),
@@ -3814,7 +3819,46 @@ export class AdminService {
       created_at: new Date(),
       updated_at: new Date(),
     });
+    // Tell riders a new reward is live so they can work toward it (best-effort).
+    await this.notifyRidersOfReward(
+      `New ${type} available`,
+      `${body.name} — ${Number(body.threshold ?? 0)} deliveries (${period}) → ₹${Number(body.amount)}`,
+    ).catch(() => undefined);
     return { ok: true, id: nextId };
+  }
+
+  /** Push a "new reward" notification to every rider with an FCM token
+   *  (best-effort, capped). Fired when the admin creates a bonus/incentive. */
+  private async notifyRidersOfReward(title: string, bodyText: string): Promise<void> {
+    if (!this.useMongo() || !this.fcm.isEnabled()) return;
+    const riders = await this.mongo.findMany<{ fcm_token?: string | null }>(
+      'delivery_men', { fcm_token: { $nin: [null, ''] } }, { limit: 2000, projection: { fcm_token: 1 } as Record<string, 0 | 1> },
+    ).catch(() => [] as Array<{ fcm_token?: string | null }>);
+    await Promise.all(
+      riders.map((r) => this.fcm.sendToToken(r.fcm_token, { title, body: bodyText }, { type: 'dm_reward' }).catch(() => false)),
+    );
+  }
+
+  // ── Rider reward claims (bonus/incentive → admin approval → wallet) ────────
+  async listDmRewardClaims(status?: string) {
+    const items = await this.dmWallet.listRewardClaims({ status: status || undefined });
+    return { total: items.length, items };
+  }
+
+  async approveDmRewardClaim(id: number) {
+    const res = await this.dmWallet.approveRewardClaim(Number(id));
+    if (!res.ok) throw new BadRequestException({ errors: [{ code: res.reason ?? 'approve', message: res.reason ?? 'could not approve' }] });
+    return { ok: true, id: Number(id) };
+  }
+
+  async rejectDmRewardClaim(id: number, reason?: string) {
+    await this.dmWallet.rejectRewardClaim(Number(id), reason ?? null);
+    return { ok: true, id: Number(id) };
+  }
+
+  async dmDisbursementReport(limit?: number) {
+    const items = await this.dmWallet.listDmDisbursementReport({ limit: limit ? Number(limit) : undefined });
+    return { total: items.length, items };
   }
 
   async toggleDmBonus(id: number, status: boolean) {

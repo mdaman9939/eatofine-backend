@@ -572,11 +572,13 @@ let CompletionService = class CompletionService {
                 ? this.mongo.findByMysqlId('users', Number(order.mysql_user_id))
                 : Promise.resolve(null),
         ]);
-        const [svcCgstRate, svcSgstRate, foodGstRate] = await Promise.all([
+        const [svcCgstRate, svcSgstRate, liveFoodGstRate] = await Promise.all([
             this.bs.getNumber('service_invoice_cgst_rate', 9),
             this.bs.getNumber('service_invoice_sgst_rate', 9),
             this.bs.getNumber('food_gst_rate', 5),
         ]);
+        const orderFoodGstRate = order.food_gst_rate;
+        const foodGstRate = orderFoodGstRate != null ? Number(orderFoodGstRate) : liveFoodGstRate;
         const r2 = (n) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
         const ph = (v) => (v && String(v).trim() !== '' ? String(v) : null);
         const flatAddr = (v) => {
@@ -608,16 +610,24 @@ let CompletionService = class CompletionService {
         const discountTotal = Number(order.coupon_discount_amount ?? 0) + Number(order.restaurant_discount_amount ?? 0);
         const netValue = Math.max(0, foodSubtotal - discountTotal);
         const perLineTax = items.reduce((s, it) => s + Number(it.tax_amount ?? 0), 0);
-        const foodTax = perLineTax > 0 ? perLineTax : r2(netValue * (foodGstRate / 100));
+        const orderTotalTax = Number(order.total_tax_amount ?? 0);
+        const foodTax = orderTotalTax <= 0
+            ? 0
+            : perLineTax > 0 ? perLineTax : r2(netValue * (foodGstRate / 100));
         const packaging = Number(order.extra_packaging_amount ?? 0);
         const foodHalfTax = r2(foodTax / 2);
         const gstRateHalf = netValue > 0 ? r2(((foodTax / netValue) * 100) / 2) : r2(foodGstRate / 2);
         const restItems = items.map((it) => {
+            const raw = it.food_details;
             let parsed = {};
-            try {
-                parsed = JSON.parse(it.food_details ?? '{}');
+            if (raw && typeof raw === 'object')
+                parsed = raw;
+            else if (typeof raw === 'string') {
+                try {
+                    parsed = JSON.parse(raw);
+                }
+                catch { }
             }
-            catch { }
             return {
                 name: parsed.name ?? `Item #${it.food_id ?? '?'}`,
                 qty: Number(it.quantity ?? 0),

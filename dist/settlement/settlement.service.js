@@ -163,7 +163,6 @@ let SettlementService = class SettlementService {
         if (dmId > 0) {
             await this.creditWalletOnce(orderId, 'deliveryman', 'delivery_man_wallets', { mysql_delivery_man_id: dmId }, { delivery_man_id: dmId }, b.deliveryman_earning, { owner_id: dmId, reference: `settlement#${orderId}` });
             await this.dmWallet.reconcileTips(orderId).catch(() => undefined);
-            await this.dmWallet.evaluateBonuses(dmId).catch(() => undefined);
             await this.dmWallet.evaluateIncentives(dmId).catch(() => undefined);
             if ((order.payment_method ?? 'cash_on_delivery') === 'cash_on_delivery') {
                 await this.dmWallet.recordCod(dmId, orderId, Number(order.order_amount ?? 0)).catch(() => undefined);

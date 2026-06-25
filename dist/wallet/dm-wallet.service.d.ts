@@ -13,6 +13,30 @@ export declare class DmWalletService {
     private readIncentiveConfig;
     private incentiveWindow;
     evaluateIncentives(dmId: number, whenIso?: string): Promise<boolean>;
+    private rewardWindow;
+    private deliveredCount;
+    rewardProgress(dmId: number, whenIso?: string): Promise<Array<Record<string, unknown>>>;
+    claimReward(dmId: number, bonusId: number, whenIso?: string): Promise<{
+        ok: boolean;
+        reason?: string;
+        deliveries?: number;
+        threshold?: number;
+        claim?: Record<string, unknown>;
+    }>;
+    listRewardClaims(opts?: {
+        status?: string;
+        limit?: number;
+    }): Promise<Array<Record<string, unknown>>>;
+    approveRewardClaim(id: number): Promise<{
+        ok: boolean;
+        reason?: string;
+    }>;
+    rejectRewardClaim(id: number, reason?: string | null): Promise<{
+        ok: boolean;
+    }>;
+    listDmDisbursementReport(opts?: {
+        limit?: number;
+    }): Promise<Array<Record<string, unknown>>>;
     recordCod(dmId: number, orderId: number, amount: number): Promise<void>;
     getWallet(dmId: number): Promise<WalletDoc | null>;
     getPayoutSummary(dmId: number): Promise<{

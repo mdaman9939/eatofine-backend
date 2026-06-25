@@ -658,6 +658,28 @@ export class AdminController {
     return this.admin.deleteDmIncentive(id);
   }
 
+  // ── DM reward claims (rider-raised bonus/incentive → admin approval) ──────
+  @Get('dm-reward-claims')
+  listDmRewardClaims(@Query('status') status?: string) {
+    return this.admin.listDmRewardClaims(status);
+  }
+
+  @Patch('dm-reward-claims/:id/approve')
+  approveDmRewardClaim(@Param('id', ParseIntPipe) id: number) {
+    return this.admin.approveDmRewardClaim(id);
+  }
+
+  @Patch('dm-reward-claims/:id/reject')
+  rejectDmRewardClaim(@Param('id', ParseIntPipe) id: number, @Body() body: { reason?: string }) {
+    return this.admin.rejectDmRewardClaim(id, body?.reason);
+  }
+
+  // DM disbursement report: approved reward claims + customer tips, with times.
+  @Get('dm-disbursement-report')
+  dmDisbursementReport(@Query('limit') limit?: string) {
+    return this.admin.dmDisbursementReport(limit ? Number(limit) : undefined);
+  }
+
   // ── Subscription orders (filter from existing orders) ────────────────
 
   @Get('subscription-orders')

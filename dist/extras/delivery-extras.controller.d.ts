@@ -636,6 +636,28 @@ export declare class DeliveryExtrasController {
             at: Date | null;
         }[];
     }>;
+    rewardProgress(req: AuthedRequest): Promise<{
+        items: Record<string, unknown>[];
+    }>;
+    rewardClaim(req: AuthedRequest, body?: {
+        bonus_id?: number | string;
+        reward_id?: number | string;
+    }): Promise<{
+        message: string;
+        errors?: undefined;
+        claim?: undefined;
+    } | {
+        errors: {
+            code: string;
+            message: string;
+        }[];
+        message?: undefined;
+        claim?: undefined;
+    } | {
+        message: string;
+        claim: Record<string, unknown> | undefined;
+        errors?: undefined;
+    }>;
     requestWithdraw(req: AuthedRequest, body?: {
         amount?: number | string;
         note?: string;

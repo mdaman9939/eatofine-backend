@@ -54,6 +54,12 @@ const order_lifecycle_constants_1 = require("../lifecycle/order-lifecycle.consta
 const storage_url_1 = require("../common/storage-url");
 const credit_note_util_1 = require("../completion/credit-note.util");
 const customer_wallet_util_1 = require("../wallet/customer-wallet.util");
+const additional_charge_1 = require("../common/additional-charge");
+const coupon_1 = require("../common/coupon");
+const geo_1 = require("../common/geo");
+const user_delivery_charges_service_1 = require("../enhancements/user-delivery-charges.service");
+const dm_wallet_service_1 = require("../wallet/dm-wallet.service");
+const fcm_service_1 = require("../notifications/fcm.service");
 function vegToBool(v, fallback = true) {
     if (v === undefined || v === null)
         return fallback;
@@ -96,11 +102,17 @@ let AdminService = class AdminService {
     mongo;
     settlement;
     lifecycle;
-    constructor(prisma, mongo, settlement, lifecycle) {
+    userCharges;
+    dmWallet;
+    fcm;
+    constructor(prisma, mongo, settlement, lifecycle, userCharges, dmWallet, fcm) {
         this.prisma = prisma;
         this.mongo = mongo;
         this.settlement = settlement;
         this.lifecycle = lifecycle;
+        this.userCharges = userCharges;
+        this.dmWallet = dmWallet;
+        this.fcm = fcm;
     }
     useMongo() {
         const v = (process.env.USE_MONGO_ADMIN ?? '1').toLowerCase();
@@ -1049,7 +1061,7 @@ let AdminService = class AdminService {
                     { $group: { _id: null, total: { $sum: '$order_amount' } } },
                 ]),
                 this.mongo.findMany('orders', { mysql_user_id: u.mysql_id }, { sort: { mysql_id: -1 }, limit: 200 }),
-                this.mongo.findMany('customer_addresses', { mysql_user_id: u.mysql_id }, { limit: 20 }),
+                this.mongo.findMany('customer_addresses', { user_id: u.mysql_id }, { limit: 20 }),
                 this.mongo.findOne('wallets', { mysql_user_id: u.mysql_id }),
             ]);
             const breakdown = { delivered: 0, ongoing: 0, canceled: 0, refunded: 0 };
@@ -2610,6 +2622,118 @@ let AdminService = class AdminService {
         }
         return [];
     }
+    async listUserAddresses(userId) {
+        if (!this.useMongo())
+            return { addresses: [] };
+        const rows = await this.mongo.findMany('customer_addresses', { user_id: Number(userId) }, { sort: { mysql_id: -1 } });
+        return {
+            addresses: rows.map((a) => ({
+                id: Number(a.mysql_id),
+                address_type: a.address_type ?? null,
+                address: a.address ?? null,
+                latitude: a.latitude != null ? String(a.latitude) : null,
+                longitude: a.longitude != null ? String(a.longitude) : null,
+                zone_id: a.zone_id ?? a.mysql_zone_id ?? null,
+                contact_person_name: a.contact_person_name ?? null,
+                contact_person_number: a.contact_person_number ?? null,
+                is_default: a.is_default ? 1 : 0,
+            })),
+        };
+    }
+    async computePosDelivery(restaurant, lat, lng, orderValue = 0, distance) {
+        let distanceKm = distance != null && Number.isFinite(Number(distance)) ? Math.max(0, Number(distance)) : NaN;
+        if (Number.isNaN(distanceKm)) {
+            const rLat = Number(restaurant.latitude), rLng = Number(restaurant.longitude);
+            const uLat = Number(lat), uLng = Number(lng);
+            distanceKm = [rLat, rLng, uLat, uLng].every((n) => Number.isFinite(n)) ? (0, geo_1.haversineKm)(rLat, rLng, uLat, uLng) : 0;
+        }
+        let deliveryCharge = 0;
+        let deliveryGst = 0;
+        let free = false;
+        let slabMin = null;
+        let slabMax = null;
+        let pricedBy = null;
+        try {
+            const dc = await this.userCharges.calculate({ distance_km: distanceKm, order_value: Math.max(0, Number(orderValue) || 0) });
+            if (dc.free_delivery) {
+                free = true;
+                deliveryCharge = 0;
+            }
+            else if (dc.matched_slab) {
+                deliveryCharge = Number(dc.subtotal ?? 0);
+                deliveryGst = Number(dc.gst_amount ?? 0);
+                slabMin = Number(dc.matched_slab.min_km);
+                slabMax = Number(dc.matched_slab.max_km);
+                pricedBy = dc.priced_by ?? 'exact';
+            }
+            else {
+                deliveryCharge = Number(restaurant.minimum_shipping_charge ?? 0);
+            }
+        }
+        catch {
+            deliveryCharge = Number(restaurant.minimum_shipping_charge ?? 0);
+        }
+        const safe = (n) => (Number.isFinite(n) ? Math.round(n * 100) / 100 : 0);
+        if (!Number.isFinite(deliveryCharge))
+            deliveryCharge = Number(restaurant.minimum_shipping_charge ?? 0) || 0;
+        return {
+            distance_km: safe(distanceKm),
+            delivery_charge: safe(deliveryCharge),
+            delivery_gst: safe(deliveryGst),
+            free_delivery: free,
+            slab_min_km: slabMin,
+            slab_max_km: slabMax,
+            priced_by: pricedBy,
+        };
+    }
+    async posDeliveryQuote(body) {
+        if (!this.useMongo())
+            throw new common_1.BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
+        if (!body.restaurant_id)
+            throw new common_1.BadRequestException({ errors: [{ code: 'restaurant_id', message: 'restaurant is required' }] });
+        const restaurant = await this.mongo.findByMysqlId('restaurants', Number(body.restaurant_id));
+        if (!restaurant)
+            throw new common_1.NotFoundException({ errors: [{ code: 'restaurant', message: 'Restaurant not found' }] });
+        return this.computePosDelivery(restaurant, body.latitude, body.longitude, Number(body.order_value ?? 0), body.distance);
+    }
+    async posFoodGstOrderTypes() {
+        const gstDoc = await this.mongo.findOne('business_settings', { key: 'food_gst_order_types' });
+        const raw = gstDoc?.value ?? gstDoc?.key_value;
+        if (raw)
+            return (0, additional_charge_1.sanitizeOrderTypes)(raw);
+        const tdDoc = await this.mongo.findOne('business_settings', { key: 'charges_on_takeaway_dinein' });
+        const tdV = tdDoc?.value ?? tdDoc?.key_value;
+        return (tdV === '1' || tdV === 'true') ? ['take_away', 'dine_in', 'delivery'] : ['delivery'];
+    }
+    async listRestaurantCoupons(restaurantId) {
+        if (!this.useMongo())
+            return { total: 0, coupons: [] };
+        const now = new Date();
+        const rows = await this.mongo.findMany('coupons', {
+            $or: [
+                { mysql_restaurant_id: Number(restaurantId) },
+                { mysql_restaurant_id: null },
+                { mysql_restaurant_id: { $exists: false } },
+            ],
+        }, { sort: { mysql_id: -1 }, limit: 200 });
+        const coupons = rows
+            .filter((c) => c.status === true || c.status === 1 || c.status === undefined)
+            .filter((c) => !c.start_date || new Date(c.start_date) <= now)
+            .filter((c) => !c.expire_date || new Date(c.expire_date) >= now)
+            .filter((c) => c.limit == null || Number(c.total_uses ?? 0) < Number(c.limit))
+            .map((c) => ({
+            id: Number(c.mysql_id),
+            code: c.code ?? '',
+            title: c.title ?? c.code ?? 'Coupon',
+            discount: Number(c.discount ?? 0),
+            discount_type: String(c.discount_type ?? 'percentage'),
+            min_purchase: Number(c.min_purchase ?? 0),
+            max_discount: Number(c.max_discount ?? 0),
+            coupon_type: c.coupon_type ?? null,
+            restaurant_id: c.mysql_restaurant_id != null ? Number(c.mysql_restaurant_id) : null,
+        }));
+        return { total: coupons.length, coupons };
+    }
     async createPosOrder(body, createdBy) {
         if (!body.restaurant_id)
             throw new common_1.BadRequestException({ errors: [{ code: 'restaurant_id', message: 'restaurant is required' }] });
@@ -2643,6 +2767,15 @@ let AdminService = class AdminService {
         const addOnSum = (it) => (it.add_ons ?? []).reduce((s, a) => s + Math.max(0, Number(a.price ?? 0)), 0);
         const subtotal = items.reduce((s, i) => s + (Number(i.price ?? 0) + addOnSum(i)) * Number(i.quantity ?? 0), 0);
         const discount = Number(body.discount ?? 0);
+        const couponResult = await (0, coupon_1.validateAndComputeCoupon)(this.mongo, {
+            code: body.coupon_code,
+            orderAmount: subtotal,
+            restaurantId: Number(body.restaurant_id),
+        });
+        if (body.coupon_code && String(body.coupon_code).trim() && !couponResult.applied) {
+            throw new common_1.BadRequestException({ errors: [{ code: 'coupon_code', message: couponResult.reason ?? 'Coupon is not applicable' }] });
+        }
+        const couponDiscount = couponResult.couponDiscount;
         const foodGstDoc = await this.mongo.findOne('business_settings', { key: 'food_gst_rate' });
         const adminFoodGstRate = (() => {
             const raw = foodGstDoc?.value ?? foodGstDoc?.key_value;
@@ -2651,31 +2784,56 @@ let AdminService = class AdminService {
         })();
         const sentTax = body.tax_percent !== undefined ? Number(body.tax_percent) : adminFoodGstRate;
         let taxPercent = sentTax > 0 ? adminFoodGstRate : 0;
-        const taxable = Math.max(0, subtotal - discount);
-        const deliveryCharge = Number(body.delivery_charge ?? 0);
-        let additionalCharge = Math.max(0, Number(body.additional_charge ?? 0));
-        let extraPackaging = Math.max(0, Number(body.extra_packaging_amount ?? 0));
-        if (orderType === 'take_away' || orderType === 'dine_in') {
-            const cDoc = await this.mongo.findOne('business_settings', { key: 'charges_on_takeaway_dinein' });
-            const cRaw = cDoc?.value ?? cDoc?.key_value;
-            if (!(cRaw === '1' || cRaw === 'true')) {
-                taxPercent = 0;
-                additionalCharge = 0;
-                extraPackaging = 0;
+        const taxable = Math.max(0, subtotal - discount - couponDiscount);
+        let deliveryCharge = 0;
+        let deliveryGst = 0;
+        let deliveryLat = null;
+        let deliveryLng = null;
+        let deliveryAddressText = body.address ?? null;
+        if (orderType === 'delivery') {
+            if (body.customer_address_id) {
+                const addr = await this.mongo.findOne('customer_addresses', { mysql_id: Number(body.customer_address_id) });
+                if (addr) {
+                    deliveryLat = addr.latitude != null ? String(addr.latitude) : null;
+                    deliveryLng = addr.longitude != null ? String(addr.longitude) : null;
+                    deliveryAddressText = addr.address ?? deliveryAddressText;
+                }
             }
+            if (deliveryLat == null && body.latitude != null)
+                deliveryLat = String(body.latitude);
+            if (deliveryLng == null && body.longitude != null)
+                deliveryLng = String(body.longitude);
+            const dq = await this.computePosDelivery(restaurant, deliveryLat, deliveryLng, subtotal, body.distance);
+            deliveryCharge = dq.delivery_charge;
+            deliveryGst = dq.delivery_gst;
         }
-        const taxAmount = taxable * (taxPercent / 100);
-        const orderAmount = taxable + taxAmount + deliveryCharge + additionalCharge + extraPackaging;
+        const addChargeRows = await this.mongo.findMany('additional_user_charges', {});
+        const additionalCharge = body.apply_additional_charge === false
+            ? 0
+            : (0, additional_charge_1.computeFlatAdditionalCharge)(addChargeRows, orderType).amount;
+        let extraPackaging = Math.max(0, Number(body.extra_packaging_amount ?? 0));
+        if (!(await this.posFoodGstOrderTypes()).includes(orderType)) {
+            taxPercent = 0;
+            extraPackaging = 0;
+        }
+        const foodGst = taxable * (taxPercent / 100);
+        const taxAmount = Math.round((foodGst + deliveryGst) * 100) / 100;
+        const orderAmount = Math.round((taxable + foodGst + deliveryGst + deliveryCharge + additionalCharge + extraPackaging) * 100) / 100;
         const now = new Date();
         const orderId = await this.mongo.nextMysqlId('orders');
         await this.mongo.insertOne('orders', {
             mysql_id: orderId,
-            mysql_user_id: null,
+            mysql_user_id: body.customer_id ? Number(body.customer_id) : null,
             mysql_restaurant_id: Number(body.restaurant_id),
             mysql_delivery_man_id: null,
             order_amount: orderAmount,
-            total_tax_amount: taxAmount,
-            restaurant_discount_amount: discount,
+            total_tax_amount: Math.round(taxAmount * 100) / 100,
+            food_gst_rate: taxPercent,
+            restaurant_discount_amount: Math.round((discount + couponResult.restaurantDiscount) * 100) / 100,
+            admin_discount_amount: couponResult.adminDiscount,
+            coupon_discount_amount: couponDiscount,
+            coupon_code: couponResult.couponCode,
+            discount_owner: couponResult.couponCode ? couponResult.couponOwner : null,
             delivery_charge: deliveryCharge,
             additional_charge: additionalCharge,
             extra_packaging_amount: extraPackaging,
@@ -2687,7 +2845,7 @@ let AdminService = class AdminService {
             created_by: createdBy?.id ?? null,
             created_by_type: createdBy?.kind ?? null,
             order_note: body.order_note ?? null,
-            delivery_address: body.address ?? null,
+            delivery_address: orderType === 'delivery' ? deliveryAddressText : null,
             contact_person_name: body.customer_name ?? 'Walk-in customer',
             contact_person_number: customerPhone || null,
             pending: now,
@@ -2696,7 +2854,19 @@ let AdminService = class AdminService {
             created_at_legacy: now,
             updated_at: now,
         });
-        for (const it of items) {
+        const lineValue = (it) => (Number(it.price ?? 0) + addOnSum(it)) * Number(it.quantity ?? 0);
+        const roundedFoodGst = Math.round(foodGst * 100) / 100;
+        let taxDistributed = 0;
+        for (let i = 0; i < items.length; i++) {
+            const it = items[i];
+            const lv = lineValue(it);
+            const isLast = i === items.length - 1;
+            const lineTax = roundedFoodGst <= 0 || subtotal <= 0
+                ? 0
+                : isLast
+                    ? Math.round((roundedFoodGst - taxDistributed) * 100) / 100
+                    : Math.round(roundedFoodGst * (lv / subtotal) * 100) / 100;
+            taxDistributed += lineTax;
             const detailId = await this.mongo.nextMysqlId('order_details');
             await this.mongo.insertOne('order_details', {
                 mysql_id: detailId,
@@ -2704,14 +2874,23 @@ let AdminService = class AdminService {
                 food_id: Number(it.food_id),
                 price: Number(it.price ?? 0),
                 quantity: Number(it.quantity ?? 0),
-                tax_amount: 0,
+                tax_amount: lineTax,
+                gst_rate: taxPercent,
                 total_add_on_price: Number((addOnSum(it) * Number(it.quantity ?? 0)).toFixed(2)),
                 add_ons: (it.add_ons ?? []).map((a) => ({ id: a.id ?? null, name: a.name ?? null, price: Math.max(0, Number(a.price ?? 0)) })),
-                food_details: JSON.stringify({ name: it.name ?? null, add_ons: (it.add_ons ?? []).map((a) => a.name).filter(Boolean) }),
+                food_details: {
+                    id: Number(it.food_id),
+                    name: it.name ?? null,
+                    price: Number(it.price ?? 0),
+                    gst_rate: taxPercent,
+                    gst_amount: lineTax,
+                    add_ons: (it.add_ons ?? []).map((a) => a.name).filter(Boolean),
+                },
                 created_at: now,
                 updated_at: now,
             });
         }
+        await (0, coupon_1.incrementCouponUses)(this.mongo, couponResult.couponMysqlId);
         return { ok: true, id: orderId, order_amount: orderAmount };
     }
     async bulkImportRestaurants(rows) {
@@ -3198,11 +3377,12 @@ let AdminService = class AdminService {
         if (!this.useMongo())
             throw new common_1.BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
         const nextId = await this.mongo.nextMysqlId('dm_bonuses');
-        const period = ['daily', 'weekly', 'lifetime'].includes(String(body.period)) ? String(body.period) : 'daily';
+        const period = ['daily', 'weekly', 'monthly', 'lifetime'].includes(String(body.period)) ? String(body.period) : 'daily';
+        const type = body.type === 'incentive' ? 'incentive' : 'bonus';
         await this.mongo.insertOne('dm_bonuses', {
             mysql_id: nextId,
             name: body.name,
-            type: body.type ?? 'rule',
+            type,
             amount: Number(body.amount),
             trigger: body.trigger ?? '',
             threshold: Number(body.threshold ?? 0),
@@ -3212,7 +3392,32 @@ let AdminService = class AdminService {
             created_at: new Date(),
             updated_at: new Date(),
         });
+        await this.notifyRidersOfReward(`New ${type} available`, `${body.name} — ${Number(body.threshold ?? 0)} deliveries (${period}) → ₹${Number(body.amount)}`).catch(() => undefined);
         return { ok: true, id: nextId };
+    }
+    async notifyRidersOfReward(title, bodyText) {
+        if (!this.useMongo() || !this.fcm.isEnabled())
+            return;
+        const riders = await this.mongo.findMany('delivery_men', { fcm_token: { $nin: [null, ''] } }, { limit: 2000, projection: { fcm_token: 1 } }).catch(() => []);
+        await Promise.all(riders.map((r) => this.fcm.sendToToken(r.fcm_token, { title, body: bodyText }, { type: 'dm_reward' }).catch(() => false)));
+    }
+    async listDmRewardClaims(status) {
+        const items = await this.dmWallet.listRewardClaims({ status: status || undefined });
+        return { total: items.length, items };
+    }
+    async approveDmRewardClaim(id) {
+        const res = await this.dmWallet.approveRewardClaim(Number(id));
+        if (!res.ok)
+            throw new common_1.BadRequestException({ errors: [{ code: res.reason ?? 'approve', message: res.reason ?? 'could not approve' }] });
+        return { ok: true, id: Number(id) };
+    }
+    async rejectDmRewardClaim(id, reason) {
+        await this.dmWallet.rejectRewardClaim(Number(id), reason ?? null);
+        return { ok: true, id: Number(id) };
+    }
+    async dmDisbursementReport(limit) {
+        const items = await this.dmWallet.listDmDisbursementReport({ limit: limit ? Number(limit) : undefined });
+        return { total: items.length, items };
     }
     async toggleDmBonus(id, status) {
         if (!this.useMongo())
@@ -4364,7 +4569,10 @@ exports.AdminService = AdminService = __decorate([
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
         mongo_data_service_1.MongoDataService,
         settlement_service_1.SettlementService,
-        order_lifecycle_service_1.OrderLifecycleService])
+        order_lifecycle_service_1.OrderLifecycleService,
+        user_delivery_charges_service_1.UserDeliveryChargesService,
+        dm_wallet_service_1.DmWalletService,
+        fcm_service_1.FcmService])
 ], AdminService);
 function bigToNumber(row) {
     const out = { ...row };
@@ -6991,8 +7199,12 @@ AdminService.prototype.deliverymanEarningReport = async function (limit, opts = 
     };
 };
 function parseJsonField(s) {
-    if (!s)
+    if (s == null)
         return null;
+    if (typeof s === 'object')
+        return s;
+    if (typeof s !== 'string')
+        return s;
     try {
         return JSON.parse(s);
     }

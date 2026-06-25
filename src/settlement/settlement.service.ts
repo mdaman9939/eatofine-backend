@@ -331,7 +331,11 @@ export class SettlementService {
       //   • bonuses — award completion bonuses whose threshold is now met
       //   • COD     — track cash collected on a cash-on-delivery order
       await this.dmWallet.reconcileTips(orderId).catch(() => undefined);
-      await this.dmWallet.evaluateBonuses(dmId).catch(() => undefined);
+      // Bonuses are NO LONGER auto-credited here: rider rewards (bonus + incentive)
+      // now follow rider-claim → admin approval → wallet (see DmWalletService
+      // rewardProgress/claimReward/approveRewardClaim). Auto-crediting would
+      // double-pay a reward the rider also claims, so it is intentionally disabled.
+      // await this.dmWallet.evaluateBonuses(dmId).catch(() => undefined);
       // Auto-raise a pending incentive claim when the rider hits the configured
       // period delivery target (admin approves to pay — never auto-credits).
       await this.dmWallet.evaluateIncentives(dmId).catch(() => undefined);

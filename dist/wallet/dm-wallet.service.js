@@ -27,6 +27,7 @@ let DmWalletService = class DmWalletService {
                 await this.mongo.ensureIndex('dm_cod_collections', { order_id: 1 }, { unique: true, name: 'uniq_cod_order' });
                 await this.mongo.ensureIndex('dm_wallet_transactions', { mysql_id: 1 }, { unique: true, name: 'uniq_id' });
                 await this.mongo.ensureIndex('dm_incentive_awards', { dm_id: 1, period_key: 1 }, { unique: true, name: 'uniq_dm_incentive_period' });
+                await this.mongo.ensureIndex('dm_reward_claims', { dm_id: 1, bonus_id: 1, period_key: 1 }, { unique: true, name: 'uniq_dm_reward_claim' });
             })().catch((e) => {
                 this.indexing = null;
                 throw e;
@@ -188,6 +189,168 @@ let DmWalletService = class DmWalletService {
             updated_at: new Date(),
         });
         return true;
+    }
+    rewardWindow(period, when) {
+        if (period === 'monthly') {
+            const d = new Date(when);
+            const start = new Date(d.getFullYear(), d.getMonth(), 1);
+            start.setHours(0, 0, 0, 0);
+            return { key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, since: start };
+        }
+        return this.periodWindow(period, when);
+    }
+    async deliveredCount(dmId, since) {
+        const filter = {
+            mysql_delivery_man_id: Number(dmId),
+            order_status: { $in: ['delivered', 'completed'] },
+        };
+        if (since)
+            filter.created_at = { $gte: since };
+        return this.mongo.count('orders', filter);
+    }
+    async rewardProgress(dmId, whenIso) {
+        if (!dmId)
+            return [];
+        const rules = await this.mongo.findMany('dm_bonuses', { status: { $in: [true, 1] } }, { limit: 100 });
+        const active = rules.filter((b) => Number(b.threshold ?? 0) > 0 && Number(b.amount ?? 0) > 0);
+        const when = whenIso ? new Date(whenIso) : new Date();
+        const out = [];
+        for (const b of active) {
+            const period = String(b.period ?? 'daily');
+            const { key, since } = this.rewardWindow(period, when);
+            const count = await this.deliveredCount(Number(dmId), since);
+            const threshold = Number(b.threshold);
+            const periodKey = `${period}:${key}`;
+            const existing = await this.mongo.findOne('dm_reward_claims', {
+                dm_id: Number(dmId), bonus_id: Number(b.mysql_id), period_key: periodKey,
+            });
+            out.push({
+                id: Number(b.mysql_id),
+                name: b.name ?? null,
+                type: String(b.type ?? 'bonus'),
+                period,
+                amount: r2(Number(b.amount)),
+                threshold,
+                deliveries: count,
+                achieved: count >= threshold,
+                claim_status: existing ? String(existing.status ?? 'pending') : null,
+                claimable: count >= threshold && !existing,
+            });
+        }
+        return out;
+    }
+    async claimReward(dmId, bonusId, whenIso) {
+        if (!dmId)
+            return { ok: false, reason: 'no_rider' };
+        await this.ensureIndexes();
+        const b = await this.mongo.findByMysqlId('dm_bonuses', Number(bonusId));
+        if (!b || !(b.status === true || b.status === 1))
+            return { ok: false, reason: 'rule_inactive' };
+        const threshold = Number(b.threshold ?? 0);
+        const amount = r2(Number(b.amount ?? 0));
+        if (threshold <= 0 || amount <= 0)
+            return { ok: false, reason: 'rule_invalid' };
+        const period = String(b.period ?? 'daily');
+        const when = whenIso ? new Date(whenIso) : new Date();
+        const { key, since } = this.rewardWindow(period, when);
+        const count = await this.deliveredCount(Number(dmId), since);
+        if (count < threshold)
+            return { ok: false, reason: 'target_not_met', deliveries: count, threshold };
+        const periodKey = `${period}:${key}`;
+        const dm = await this.mongo.findOne('delivery_men', { mysql_id: Number(dmId) });
+        const dmName = [dm?.f_name, dm?.l_name].filter(Boolean).join(' ') || `Rider #${dmId}`;
+        const now = new Date();
+        const record = {
+            mysql_id: await this.mongo.nextMysqlId('dm_reward_claims'),
+            dm_id: Number(dmId), dm_name: dmName,
+            bonus_id: Number(bonusId), bonus_name: b.name ?? null, type: String(b.type ?? 'bonus'),
+            period, period_key: periodKey, threshold, deliveries: count, amount,
+            status: 'pending', reason: null,
+            requested_at: now, decided_at: null, credited_at: null,
+            created_at: now, updated_at: now,
+        };
+        const inserted = await this.mongo.tryInsertUnique('dm_reward_claims', record);
+        if (!inserted)
+            return { ok: false, reason: 'already_claimed' };
+        return { ok: true, claim: record };
+    }
+    async listRewardClaims(opts = {}) {
+        const filter = {};
+        if (opts.status)
+            filter.status = opts.status;
+        const rows = await this.mongo.findMany('dm_reward_claims', filter, { sort: { mysql_id: -1 }, limit: Math.min(opts.limit ?? 300, 1000) });
+        return rows.map((r) => ({
+            id: Number(r.mysql_id),
+            dm_id: Number(r.dm_id ?? 0),
+            dm_name: r.dm_name ?? null,
+            bonus_id: Number(r.bonus_id ?? 0),
+            bonus_name: r.bonus_name ?? null,
+            type: r.type ?? 'bonus',
+            period: r.period ?? null,
+            threshold: Number(r.threshold ?? 0),
+            deliveries: Number(r.deliveries ?? 0),
+            amount: Number(r.amount ?? 0),
+            status: r.status ?? 'pending',
+            reason: r.reason ?? null,
+            requested_at: r.requested_at ?? r.created_at ?? null,
+            decided_at: r.decided_at ?? null,
+            credited_at: r.credited_at ?? null,
+        }));
+    }
+    async approveRewardClaim(id) {
+        const claim = await this.mongo.findByMysqlId('dm_reward_claims', Number(id));
+        if (!claim)
+            return { ok: false, reason: 'not_found' };
+        if (String(claim.status) !== 'pending')
+            return { ok: false, reason: 'not_pending' };
+        const now = new Date();
+        const res = await this.mongo.updateOne('dm_reward_claims', { mysql_id: Number(id), status: 'pending' }, { status: 'approved', decided_at: now, credited_at: now, updated_at: now });
+        if (!res.matchedCount)
+            return { ok: false, reason: 'race' };
+        await this.credit(Number(claim.dm_id), Number(claim.amount), 'reward', `reward#${claim.bonus_id}:${claim.period_key}`, {
+            claim_id: Number(id), bonus_id: Number(claim.bonus_id), bonus_name: claim.bonus_name ?? null, reward_type: claim.type ?? 'bonus',
+        });
+        return { ok: true };
+    }
+    async rejectRewardClaim(id, reason) {
+        await this.mongo.updateOne('dm_reward_claims', { mysql_id: Number(id), status: 'pending' }, { status: 'rejected', reason: reason ?? null, decided_at: new Date(), updated_at: new Date() });
+        return { ok: true };
+    }
+    async listDmDisbursementReport(opts = {}) {
+        const limit = Math.min(opts.limit ?? 300, 1000);
+        const [claims, tips] = await Promise.all([
+            this.mongo.findMany('dm_reward_claims', { status: 'approved' }, { sort: { mysql_id: -1 }, limit }),
+            this.mongo.findMany('dm_wallet_transactions', { type: 'tip' }, { sort: { mysql_id: -1 }, limit }),
+        ]);
+        const tipDmIds = Array.from(new Set(tips.map((t) => Number(t.mysql_delivery_man_id ?? t.delivery_man_id ?? 0)).filter((n) => n > 0)));
+        const dms = tipDmIds.length
+            ? await this.mongo.findMany('delivery_men', { mysql_id: { $in: tipDmIds } })
+            : [];
+        const nameById = new Map(dms.map((d) => [Number(d.mysql_id), [d.f_name, d.l_name].filter(Boolean).join(' ') || `Rider #${d.mysql_id}`]));
+        const rewardRows = claims.map((c) => ({
+            kind: String(c.type ?? 'bonus'),
+            dm_id: Number(c.dm_id ?? 0),
+            dm_name: c.dm_name ?? null,
+            amount: Number(c.amount ?? 0),
+            reference: c.bonus_name ?? `${c.type ?? 'bonus'} reward`,
+            order_id: null,
+            at: (c.credited_at ?? c.decided_at ?? c.created_at) ?? null,
+        }));
+        const tipRows = tips.map((t) => {
+            const dmId = Number(t.mysql_delivery_man_id ?? t.delivery_man_id ?? 0);
+            return {
+                kind: 'tip',
+                dm_id: dmId,
+                dm_name: nameById.get(dmId) ?? `Rider #${dmId}`,
+                amount: Number(t.credit ?? 0),
+                reference: 'Customer tip',
+                order_id: t.order_id != null ? Number(t.order_id) : null,
+                at: t.created_at ?? null,
+            };
+        });
+        return [...rewardRows, ...tipRows]
+            .sort((x, y) => (y.at ? new Date(y.at).getTime() : 0) - (x.at ? new Date(x.at).getTime() : 0))
+            .slice(0, limit);
     }
     async recordCod(dmId, orderId, amount) {
         const amt = r2(amount);

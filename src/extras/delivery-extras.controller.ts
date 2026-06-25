@@ -632,6 +632,39 @@ export class DeliveryExtrasController {
     return { items };
   }
 
+  // ── Rider rewards (bonus / incentive): progress + claim ───────────────────
+  // Active reward rules with THIS rider's progress (delivered count vs target),
+  // and whether each is claimable / already claimed for the current period.
+  @Get('reward-progress')
+  async rewardProgress(@Req() req: AuthedRequest) {
+    if (!this.useMongo()) return { items: [] };
+    const items = await this.dmWallet.rewardProgress(Number(req.actor!.id));
+    return { items };
+  }
+
+  // Rider claims a reward they've hit the target for → raises a PENDING claim for
+  // the admin to approve. The server RE-VALIDATES the target (never trusts the
+  // client) and never auto-credits — money moves only on admin approval.
+  @HttpCode(200)
+  @Post('reward-claim')
+  async rewardClaim(@Req() req: AuthedRequest, @Body() body: { bonus_id?: number | string; reward_id?: number | string } = {}) {
+    if (!this.useMongo()) return { message: 'Claim submitted' };
+    const bonusId = Number(body?.bonus_id ?? body?.reward_id ?? 0);
+    if (!bonusId) return { errors: [{ code: 'bonus_id', message: 'bonus_id required' }] };
+    const res = await this.dmWallet.claimReward(Number(req.actor!.id), bonusId);
+    if (!res.ok) {
+      const msg = res.reason === 'target_not_met'
+        ? `Target not met yet (${res.deliveries}/${res.threshold} deliveries)`
+        : res.reason === 'already_claimed'
+          ? 'You have already claimed this reward for this period'
+          : res.reason === 'rule_inactive'
+            ? 'This reward is no longer active'
+            : 'Could not submit claim';
+      return { errors: [{ code: res.reason ?? 'claim', message: msg }] };
+    }
+    return { message: 'Claim submitted for admin approval', claim: res.claim };
+  }
+
   // Rider requests a payout. Reserves the amount as `pending_withdraw` and logs a
   // `withdraw_requests` row for the admin to approve (admin approval debits the
   // balance). Posted as multipart/form-data by the app.

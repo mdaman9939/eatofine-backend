@@ -2,6 +2,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { SettlementService } from '../settlement/settlement.service';
 import { OrderLifecycleService } from '../lifecycle/order-lifecycle.service';
+import { UserDeliveryChargesService } from '../enhancements/user-delivery-charges.service';
+import { DmWalletService } from '../wallet/dm-wallet.service';
+import { FcmService } from '../notifications/fcm.service';
 export interface FoodWriteBody {
     name?: string;
     description?: string;
@@ -43,7 +46,10 @@ export declare class AdminService {
     private readonly mongo;
     private readonly settlement;
     private readonly lifecycle;
-    constructor(prisma: PrismaService, mongo: MongoDataService, settlement: SettlementService, lifecycle: OrderLifecycleService);
+    private readonly userCharges;
+    private readonly dmWallet;
+    private readonly fcm;
+    constructor(prisma: PrismaService, mongo: MongoDataService, settlement: SettlementService, lifecycle: OrderLifecycleService, userCharges: UserDeliveryChargesService, dmWallet: DmWalletService, fcm: FcmService);
     private useMongo;
     getMe(adminId: bigint): Promise<{
         id: number;
@@ -1303,6 +1309,50 @@ export declare class AdminService {
         id: number;
     }>;
     private normaliseIdArray;
+    listUserAddresses(userId: number): Promise<{
+        addresses: {
+            id: number;
+            address_type: string | null;
+            address: string | null;
+            latitude: string | null;
+            longitude: string | null;
+            zone_id: number | null;
+            contact_person_name: string | null;
+            contact_person_number: string | null;
+            is_default: number;
+        }[];
+    }>;
+    private computePosDelivery;
+    posDeliveryQuote(body: {
+        restaurant_id?: number;
+        latitude?: string;
+        longitude?: string;
+        distance?: number;
+        order_value?: number;
+    }): Promise<{
+        distance_km: number;
+        delivery_charge: number;
+        delivery_gst: number;
+        free_delivery: boolean;
+        slab_min_km?: number | null;
+        slab_max_km?: number | null;
+        priced_by?: string | null;
+    }>;
+    private posFoodGstOrderTypes;
+    listRestaurantCoupons(restaurantId: number): Promise<{
+        total: number;
+        coupons: {
+            id: number;
+            code: string;
+            title: string;
+            discount: number;
+            discount_type: string;
+            min_purchase: number;
+            max_discount: number;
+            coupon_type: string | null;
+            restaurant_id: number | null;
+        }[];
+    }>;
     createPosOrder(body: {
         restaurant_id?: number;
         items?: Array<{
@@ -1316,6 +1366,11 @@ export declare class AdminService {
                 price?: number;
             }>;
         }>;
+        customer_id?: number;
+        customer_address_id?: number;
+        latitude?: string;
+        longitude?: string;
+        distance?: number;
         customer_name?: string;
         customer_phone?: string;
         address?: string;
@@ -1323,8 +1378,10 @@ export declare class AdminService {
         table_number?: string | number;
         payment_method?: string;
         discount?: number;
+        coupon_code?: string;
         tax_percent?: number;
         delivery_charge?: number;
+        apply_additional_charge?: boolean;
         additional_charge?: number;
         extra_packaging_amount?: number;
         order_note?: string;
@@ -1576,6 +1633,23 @@ export declare class AdminService {
     }): Promise<{
         ok: boolean;
         id: number;
+    }>;
+    private notifyRidersOfReward;
+    listDmRewardClaims(status?: string): Promise<{
+        total: number;
+        items: Record<string, unknown>[];
+    }>;
+    approveDmRewardClaim(id: number): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
+    rejectDmRewardClaim(id: number, reason?: string): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
+    dmDisbursementReport(limit?: number): Promise<{
+        total: number;
+        items: Record<string, unknown>[];
     }>;
     toggleDmBonus(id: number, status: boolean): Promise<{
         ok: boolean;

@@ -93,15 +93,16 @@ export declare class EnhancementsService {
     }>;
     listAdditionalCharges(): Promise<{
         id: number;
+        amount: number;
+        gst_rate: number;
+        gst_applicable: boolean;
+        status: boolean;
         charge_head: string;
         charge_type: "fixed" | "percentage";
-        amount: number;
-        gst_applicable: boolean;
-        gst_rate: number;
         hsn_sac: string | null;
         description: string | null;
-        status: boolean;
     }[]>;
+    private resolveOrderTypes;
     createAdditionalCharge(body: {
         charge_head: string;
         charge_type?: 'fixed' | 'percentage';
@@ -110,6 +111,10 @@ export declare class EnhancementsService {
         gst_rate?: number;
         hsn_sac?: string;
         description?: string;
+        order_types?: string[];
+        apply_take_away?: boolean;
+        apply_dine_in?: boolean;
+        apply_delivery?: boolean;
     }): Promise<{
         ok: boolean;
     }>;
@@ -122,6 +127,10 @@ export declare class EnhancementsService {
         hsn_sac?: string;
         description?: string;
         status?: boolean;
+        order_types?: string[];
+        apply_take_away?: boolean;
+        apply_dine_in?: boolean;
+        apply_delivery?: boolean;
     }): Promise<{
         ok: boolean;
         id: number;

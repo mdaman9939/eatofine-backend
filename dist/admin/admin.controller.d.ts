@@ -272,6 +272,15 @@ export declare class AdminController {
         id: number;
         order_amount: number;
     }>;
+    posDeliveryQuote(body: Parameters<AdminService['posDeliveryQuote']>[0]): Promise<{
+        distance_km: number;
+        delivery_charge: number;
+        delivery_gst: number;
+        free_delivery: boolean;
+        slab_min_km?: number | null;
+        slab_max_km?: number | null;
+        priced_by?: string | null;
+    }>;
     updateOrderStatus(id: number, body: {
         status: string;
         reason?: string;
@@ -555,6 +564,20 @@ export declare class AdminController {
             rating_count: number;
         };
     }>;
+    restaurantCoupons(id: number): Promise<{
+        total: number;
+        coupons: {
+            id: number;
+            code: string;
+            title: string;
+            discount: number;
+            discount_type: string;
+            min_purchase: number;
+            max_discount: number;
+            coupon_type: string | null;
+            restaurant_id: number | null;
+        }[];
+    }>;
     updateRestaurant(id: number, body: Parameters<AdminService['updateRestaurant']>[1]): Promise<{
         ok: boolean;
         id: number;
@@ -647,6 +670,19 @@ export declare class AdminController {
         };
         addresses?: undefined;
         recent_orders?: undefined;
+    }>;
+    userAddresses(id: number): Promise<{
+        addresses: {
+            id: number;
+            address_type: string | null;
+            address: string | null;
+            latitude: string | null;
+            longitude: string | null;
+            zone_id: number | null;
+            contact_person_name: string | null;
+            contact_person_number: string | null;
+            is_default: number;
+        }[];
     }>;
     updateUserStatus(id: number, body: {
         status: boolean;
@@ -1419,6 +1455,24 @@ export declare class AdminController {
     deleteDmIncentive(id: number): Promise<{
         ok: boolean;
         id: number;
+    }>;
+    listDmRewardClaims(status?: string): Promise<{
+        total: number;
+        items: Record<string, unknown>[];
+    }>;
+    approveDmRewardClaim(id: number): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
+    rejectDmRewardClaim(id: number, body: {
+        reason?: string;
+    }): Promise<{
+        ok: boolean;
+        id: number;
+    }>;
+    dmDisbursementReport(limit?: string): Promise<{
+        total: number;
+        items: Record<string, unknown>[];
     }>;
     subscriptionOrders(): Promise<{
         total: number;

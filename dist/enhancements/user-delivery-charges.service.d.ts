@@ -131,6 +131,7 @@ export declare class UserDeliveryChargesService {
         total: number;
         free_delivery: boolean;
         notes: string;
+        priced_by?: undefined;
         base_after_surge?: undefined;
         vehicle_extra?: undefined;
         vehicle_tier?: undefined;
@@ -146,6 +147,7 @@ export declare class UserDeliveryChargesService {
             extra_per_km: number;
             gst_rate: number;
         };
+        priced_by: "exact" | "rounded_up" | "extrapolated";
         base_charge: number;
         extra_charge: number;
         base_after_surge: number;

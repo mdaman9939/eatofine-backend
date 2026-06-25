@@ -54,7 +54,21 @@ let ConfigController = class ConfigController {
         const addChargeRows = this.useMongo()
             ? await this.mongo.findMany('additional_user_charges', {})
             : [];
-        const addCharge = (0, additional_charge_1.computeFlatAdditionalCharge)(addChargeRows);
+        const addCharge = (0, additional_charge_1.computeFlatAdditionalCharge)(addChargeRows, 'delivery');
+        const chargeForType = (t) => {
+            const c = (0, additional_charge_1.computeFlatAdditionalCharge)(addChargeRows, t);
+            return { amount: c.amount, name: c.name, status: c.amount > 0 ? 1 : 0 };
+        };
+        const additionalChargeByType = {
+            take_away: chargeForType('take_away'),
+            dine_in: chargeForType('dine_in'),
+            delivery: chargeForType('delivery'),
+        };
+        const foodGstSetting = await this.bs.get('food_gst_order_types');
+        const chargesOnTakeawayDinein = await this.bs.getBool('charges_on_takeaway_dinein');
+        const foodGstOrderTypes = foodGstSetting
+            ? (0, additional_charge_1.sanitizeOrderTypes)(foodGstSetting)
+            : (chargesOnTakeawayDinein ? ['take_away', 'dine_in', 'delivery'] : ['delivery']);
         return {
             business_name: await this.bs.get('business_name'),
             logo,
@@ -124,6 +138,8 @@ let ConfigController = class ConfigController {
             additional_charge_status: addCharge.amount > 0 ? 1 : 0,
             additional_charge_name: addCharge.name,
             additional_charge: addCharge.amount,
+            additional_charge_by_type: additionalChargeByType,
+            food_gst_order_types: foodGstOrderTypes,
             charges_on_takeaway_dinein: (await this.bs.getBool('charges_on_takeaway_dinein')) ? 1 : 0,
             take_away: await this.bs.getBool('take_away'),
             dine_in: await this.bs.getBoolDefault('dine_in', true),

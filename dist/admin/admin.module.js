@@ -11,14 +11,16 @@ const common_1 = require("@nestjs/common");
 const admin_controller_1 = require("./admin.controller");
 const admin_service_1 = require("./admin.service");
 const migration_module_1 = require("../mongo/migration.module");
+const user_delivery_charges_service_1 = require("../enhancements/user-delivery-charges.service");
+const dm_wallet_module_1 = require("../wallet/dm-wallet.module");
 let AdminModule = class AdminModule {
 };
 exports.AdminModule = AdminModule;
 exports.AdminModule = AdminModule = __decorate([
     (0, common_1.Module)({
-        imports: [migration_module_1.MigrationModule],
+        imports: [migration_module_1.MigrationModule, dm_wallet_module_1.DmWalletModule],
         controllers: [admin_controller_1.AdminController],
-        providers: [admin_service_1.AdminService],
+        providers: [admin_service_1.AdminService, user_delivery_charges_service_1.UserDeliveryChargesService],
     })
 ], AdminModule);
 //# sourceMappingURL=admin.module.js.map

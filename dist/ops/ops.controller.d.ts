@@ -169,7 +169,7 @@ export declare class OpsController {
             price: number;
             quantity: number;
             tax_amount: number;
-            food_details: any;
+            food_details: Record<string, unknown> | null;
         }[];
         customer: {
             id: bigint;
@@ -277,7 +277,7 @@ export declare class OpsController {
             food_id: bigint | null;
             price: number;
             quantity: number;
-            food_details: any;
+            food_details: Record<string, unknown> | null;
         }[];
         id: bigint;
         user_id: bigint | null;

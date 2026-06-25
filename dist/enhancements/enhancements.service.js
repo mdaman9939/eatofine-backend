@@ -15,6 +15,8 @@ const prisma_service_1 = require("../prisma/prisma.service");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
 const business_settings_service_1 = require("../business-settings/business-settings.service");
 const decimal_1 = require("../common/decimal");
+const additional_charge_1 = require("../common/additional-charge");
+const food_details_1 = require("../common/food-details");
 let EnhancementsService = class EnhancementsService {
     prisma;
     mongo;
@@ -277,6 +279,7 @@ let EnhancementsService = class EnhancementsService {
                 hsn_sac: r.hsn_sac ?? null,
                 description: r.description ?? null,
                 status: !!r.status,
+                order_types: Array.isArray(r.order_types) ? r.order_types : [...additional_charge_1.ORDER_TYPES],
             }));
         }
         const rows = await this.prisma.$queryRawUnsafe(`SELECT id, charge_head, charge_type, amount, gst_applicable, gst_rate, hsn_sac, description, status
@@ -290,11 +293,28 @@ let EnhancementsService = class EnhancementsService {
             status: !!r.status,
         }));
     }
+    resolveOrderTypes(body) {
+        if (body.order_types !== undefined)
+            return (0, additional_charge_1.sanitizeOrderTypes)(body.order_types);
+        const has = ['apply_take_away', 'apply_dine_in', 'apply_delivery'].some((k) => k in body);
+        if (!has)
+            return undefined;
+        const on = (v) => v === true || v === 1 || v === '1' || v === 'true';
+        const out = [];
+        if (on(body.apply_take_away))
+            out.push('take_away');
+        if (on(body.apply_dine_in))
+            out.push('dine_in');
+        if (on(body.apply_delivery))
+            out.push('delivery');
+        return out;
+    }
     async createAdditionalCharge(body) {
         if (!body.charge_head?.trim())
             throw new common_1.BadRequestException({ errors: [{ code: 'charge_head', message: 'required' }] });
         if (typeof body.amount !== 'number')
             throw new common_1.BadRequestException({ errors: [{ code: 'amount', message: 'required' }] });
+        const orderTypes = this.resolveOrderTypes(body) ?? [...additional_charge_1.ORDER_TYPES];
         if (this.useMongo()) {
             const nextId = await this.mongo.nextMysqlId('additional_user_charges');
             const now = new Date();
@@ -307,6 +327,7 @@ let EnhancementsService = class EnhancementsService {
                 gst_rate: body.gst_rate ?? 0,
                 hsn_sac: body.hsn_sac ?? null,
                 description: body.description ?? null,
+                order_types: orderTypes,
                 status: 1,
                 created_at: now,
                 updated_at: now,
@@ -336,6 +357,9 @@ let EnhancementsService = class EnhancementsService {
                 set.description = body.description;
             if (body.status !== undefined)
                 set.status = body.status ? 1 : 0;
+            const orderTypes = this.resolveOrderTypes(body);
+            if (orderTypes !== undefined)
+                set.order_types = orderTypes;
             if (!Object.keys(set).length)
                 throw new common_1.BadRequestException({ errors: [{ code: 'body', message: 'no fields' }] });
             set.updated_at = new Date();
@@ -706,26 +730,34 @@ let EnhancementsService = class EnhancementsService {
             const fy = this.fyCode(dt);
             const invoiceNo = await this.assignInvoiceNumber(order, 'customer_invoice_number', 'OBR', fy, order.customer_invoice_number);
             const eatofineNo = await this.assignInvoiceNumber(order, 'eatofine_invoice_number', 'ETFU', fy, order.eatofine_invoice_number);
-            const [svcCgstRate, svcSgstRate, foodGstRate] = await Promise.all([
+            const [svcCgstRate, svcSgstRate, liveFoodGstRate] = await Promise.all([
                 this.bs.getNumber('service_invoice_cgst_rate', 9),
                 this.bs.getNumber('service_invoice_sgst_rate', 9),
                 this.bs.getNumber('food_gst_rate', 5),
             ]);
+            const foodGstRate = order.food_gst_rate != null ? Number(order.food_gst_rate) : liveFoodGstRate;
             const r2inv = (n) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
             const foodSubtotal = items.reduce((s, it) => s + Number(it.price) * Number(it.quantity), 0);
             const discountTotal = Number(order.coupon_discount_amount ?? 0) + Number(order.restaurant_discount_amount ?? 0);
             const netValue = Math.max(0, foodSubtotal - discountTotal);
             const perLineTax = items.reduce((s, it) => s + Number(it.tax_amount ?? 0), 0);
-            const foodTax = perLineTax > 0 ? perLineTax : r2inv(netValue * (foodGstRate / 100));
+            const foodTax = Number(order.total_tax_amount ?? 0) <= 0
+                ? 0
+                : perLineTax > 0 ? perLineTax : r2inv(netValue * (foodGstRate / 100));
             const packaging = Number(order.extra_packaging_amount ?? 0);
             const foodHalfTax = r2inv(foodTax / 2);
             const gstRateHalf = netValue > 0 ? r2inv(((foodTax / netValue) * 100) / 2) : r2inv(foodGstRate / 2);
             const restItems = items.map((it) => {
+                const raw = it.food_details;
                 let parsed = {};
-                try {
-                    parsed = JSON.parse(it.food_details ?? '{}');
+                if (raw && typeof raw === 'object')
+                    parsed = raw;
+                else if (typeof raw === 'string') {
+                    try {
+                        parsed = JSON.parse(raw);
+                    }
+                    catch { }
                 }
-                catch { }
                 return {
                     name: parsed.name ?? `Item #${it.food_id ?? '?'}`,
                     qty: Number(it.quantity),
@@ -799,11 +831,7 @@ let EnhancementsService = class EnhancementsService {
                     address: this.flattenAddress(order.delivery_address),
                 },
                 items: items.map((it) => {
-                    let parsed = {};
-                    try {
-                        parsed = JSON.parse(it.food_details ?? '{}');
-                    }
-                    catch { }
+                    const parsed = (0, food_details_1.parseFoodDetails)(it.food_details);
                     return {
                         id: Number(it.mysql_id),
                         name: parsed.name ?? `Item #${it.food_id ?? '?'}`,
@@ -856,11 +884,7 @@ let EnhancementsService = class EnhancementsService {
                 address: this.flattenAddress(order.delivery_address),
             },
             items: items.map((it) => {
-                let parsed = {};
-                try {
-                    parsed = JSON.parse(it.food_details ?? '{}');
-                }
-                catch { }
+                const parsed = (0, food_details_1.parseFoodDetails)(it.food_details);
                 return {
                     id: Number(it.id),
                     name: parsed.name ?? `Item #${it.food_id ?? '?'}`,

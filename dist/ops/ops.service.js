@@ -18,6 +18,7 @@ const order_lifecycle_service_1 = require("../lifecycle/order-lifecycle.service"
 const refund_service_1 = require("../refund/refund.service");
 const refund_policy_1 = require("../refund/refund-policy");
 const storage_url_1 = require("../common/storage-url");
+const food_details_1 = require("../common/food-details");
 const VENDOR_STATUSES = ['accepted', 'confirmed', 'processing', 'handover', 'ready_for_pickup', 'served', 'completed', 'canceled'];
 const DM_STATUSES = ['confirmed', 'processing', 'handover', 'ready_for_pickup', 'picked_up', 'out_for_delivery', 'delivered', 'completed', 'canceled'];
 let OpsService = class OpsService {
@@ -203,7 +204,7 @@ let OpsService = class OpsService {
                 price: Number(d.price),
                 quantity: d.quantity,
                 tax_amount: Number(d.tax_amount),
-                food_details: d.food_details ? JSON.parse(d.food_details) : null,
+                food_details: d.food_details ? (0, food_details_1.parseFoodDetails)(d.food_details) : null,
             })),
             customer: customer
                 ? {
@@ -432,7 +433,7 @@ let OpsService = class OpsService {
                 food_id: d.food_id,
                 price: Number(d.price),
                 quantity: d.quantity,
-                food_details: d.food_details ? JSON.parse(d.food_details) : null,
+                food_details: d.food_details ? (0, food_details_1.parseFoodDetails)(d.food_details) : null,
             })),
         };
     }

@@ -87,6 +87,24 @@ export declare class ConfigController {
         additional_charge_status: number;
         additional_charge_name: string;
         additional_charge: number;
+        additional_charge_by_type: {
+            take_away: {
+                amount: number;
+                name: string;
+                status: number;
+            };
+            dine_in: {
+                amount: number;
+                name: string;
+                status: number;
+            };
+            delivery: {
+                amount: number;
+                name: string;
+                status: number;
+            };
+        };
+        food_gst_order_types: string[];
         charges_on_takeaway_dinein: number;
         take_away: boolean;
         dine_in: boolean;

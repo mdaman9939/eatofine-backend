@@ -559,6 +559,31 @@ let DeliveryExtrasController = class DeliveryExtrasController {
         const items = await this.dmWallet.listTransactions(Number(req.actor.id), Math.min(200, Number(limit) || 50));
         return { items };
     }
+    async rewardProgress(req) {
+        if (!this.useMongo())
+            return { items: [] };
+        const items = await this.dmWallet.rewardProgress(Number(req.actor.id));
+        return { items };
+    }
+    async rewardClaim(req, body = {}) {
+        if (!this.useMongo())
+            return { message: 'Claim submitted' };
+        const bonusId = Number(body?.bonus_id ?? body?.reward_id ?? 0);
+        if (!bonusId)
+            return { errors: [{ code: 'bonus_id', message: 'bonus_id required' }] };
+        const res = await this.dmWallet.claimReward(Number(req.actor.id), bonusId);
+        if (!res.ok) {
+            const msg = res.reason === 'target_not_met'
+                ? `Target not met yet (${res.deliveries}/${res.threshold} deliveries)`
+                : res.reason === 'already_claimed'
+                    ? 'You have already claimed this reward for this period'
+                    : res.reason === 'rule_inactive'
+                        ? 'This reward is no longer active'
+                        : 'Could not submit claim';
+            return { errors: [{ code: res.reason ?? 'claim', message: msg }] };
+        }
+        return { message: 'Claim submitted for admin approval', claim: res.claim };
+    }
     async requestWithdraw(req, body = {}) {
         const dmId = Number(req.actor.id);
         const amount = Math.round((Number(body?.amount ?? 0) || 0) * 100) / 100;
@@ -930,6 +955,22 @@ __decorate([
     __metadata("design:paramtypes", [Object, String]),
     __metadata("design:returntype", Promise)
 ], DeliveryExtrasController.prototype, "walletTransactions", null);
+__decorate([
+    (0, common_1.Get)('reward-progress'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], DeliveryExtrasController.prototype, "rewardProgress", null);
+__decorate([
+    (0, common_1.HttpCode)(200),
+    (0, common_1.Post)('reward-claim'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
+], DeliveryExtrasController.prototype, "rewardClaim", null);
 __decorate([
     (0, common_1.HttpCode)(200),
     (0, common_1.Post)('withdraw-request'),
