@@ -4489,6 +4489,8 @@ export class AdminService {
         discounted_amount: discountedAmount,
         vat_tax: tax,
         delivery_charge: delivery,
+        // Customer tip on this order — paid on top, goes to the rider (not admin/restaurant).
+        tips: r2(num(o.dm_tips)),
         order_amount: orderAmount,
         admin_discount: 0,
         restaurant_discount: restDiscount,

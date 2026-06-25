@@ -1831,6 +1831,7 @@ export declare class AdminService {
             discounted_amount: number;
             vat_tax: number;
             delivery_charge: number;
+            tips: number;
             order_amount: number;
             admin_discount: number;
             restaurant_discount: number;
