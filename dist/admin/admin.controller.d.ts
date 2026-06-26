@@ -1881,6 +1881,8 @@ export declare class AdminController {
         approved: boolean;
     }): Promise<unknown>;
     listDmPayouts(): Promise<unknown>;
+    listCustomerWallets(): Promise<unknown>;
+    listRestaurantWallets(): Promise<unknown>;
     recordDmCashDeposit(id: number, body: {
         amount?: number;
     }): Promise<unknown>;

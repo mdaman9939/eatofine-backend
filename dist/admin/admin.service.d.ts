@@ -2174,6 +2174,8 @@ declare module './admin.service' {
         }): Promise<unknown>;
         approveWithdrawRequest(id: number, approve: boolean): Promise<unknown>;
         listDmPayouts(): Promise<unknown>;
+        listCustomerWallets(): Promise<unknown>;
+        listRestaurantWallets(): Promise<unknown>;
         recordDmCashDeposit(id: number, amount: number): Promise<unknown>;
         listWithdrawalMethods(): Promise<unknown>;
         listOfflinePaymentMethods(): Promise<unknown>;

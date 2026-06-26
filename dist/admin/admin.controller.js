@@ -679,6 +679,12 @@ let AdminController = class AdminController {
     listDmPayouts() {
         return this.admin.listDmPayouts();
     }
+    listCustomerWallets() {
+        return this.admin.listCustomerWallets();
+    }
+    listRestaurantWallets() {
+        return this.admin.listRestaurantWallets();
+    }
     recordDmCashDeposit(id, body) {
         return this.admin.recordDmCashDeposit(id, Number(body?.amount ?? 0));
     }
@@ -2286,6 +2292,18 @@ __decorate([
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "listDmPayouts", null);
+__decorate([
+    (0, common_1.Get)('wallets/customers'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "listCustomerWallets", null);
+__decorate([
+    (0, common_1.Get)('wallets/restaurants'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "listRestaurantWallets", null);
 __decorate([
     (0, common_1.Post)('delivery-men/:id/cash-deposit'),
     (0, common_1.HttpCode)(200),

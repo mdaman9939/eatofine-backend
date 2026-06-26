@@ -1174,6 +1174,17 @@ export class AdminController {
     return this.admin.listDmPayouts();
   }
 
+  // ── Wallet overview (admin "Wallets" page tabs) ──────────────────────
+  @Get('wallets/customers')
+  listCustomerWallets() {
+    return this.admin.listCustomerWallets();
+  }
+
+  @Get('wallets/restaurants')
+  listRestaurantWallets() {
+    return this.admin.listRestaurantWallets();
+  }
+
   @Post('delivery-men/:id/cash-deposit')
   @HttpCode(200)
   recordDmCashDeposit(@Param('id', ParseIntPipe) id: number, @Body() body: { amount?: number }) {

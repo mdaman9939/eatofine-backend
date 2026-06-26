@@ -5195,6 +5195,8 @@ declare module './admin.service' {
     listWithdrawRequests(opts: ListOpts & { type?: string; approved?: boolean }): Promise<unknown>;
     approveWithdrawRequest(id: number, approve: boolean): Promise<unknown>;
     listDmPayouts(): Promise<unknown>;
+    listCustomerWallets(): Promise<unknown>;
+    listRestaurantWallets(): Promise<unknown>;
     recordDmCashDeposit(id: number, amount: number): Promise<unknown>;
     listWithdrawalMethods(): Promise<unknown>;
     listOfflinePaymentMethods(): Promise<unknown>;
@@ -6469,6 +6471,62 @@ AdminService.prototype.listDmPayouts = async function (this: AdminService) {
     };
   }).sort((a, b) => b.net_position - a.net_position);
   return { total: items.length, items };
+};
+
+// Wallet overview tabs (admin "Wallets" page). toN safely coerces migrated
+// Decimal128 / {s,e,d} balances to a plain number.
+const _walletToN = (v: unknown): number => {
+  if (v == null) return 0;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  const n = parseFloat(String((v as { toString?: () => string }).toString?.() ?? v));
+  return Number.isFinite(n) ? n : 0;
+};
+const _walletR2 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
+
+// CUSTOMER wallets — `wallets.balance` per user (what the customer app shows).
+AdminService.prototype.listCustomerWallets = async function (this: AdminService) {
+  if (!this['useMongo']()) return { items: [], total: 0, total_balance: 0, holders: 0 };
+  const wallets = await this['mongo'].findMany<Record<string, unknown>>('wallets', {}, { sort: { mysql_id: -1 }, limit: 5000 });
+  const ids = Array.from(new Set(wallets.map((w) => Number(w.mysql_user_id ?? w.user_id ?? 0)).filter((x) => x > 0)));
+  const users = ids.length
+    ? await this['mongo'].findMany<{ mysql_id: number; f_name?: string; l_name?: string; phone?: string }>('users', { mysql_id: { $in: ids } })
+    : [];
+  const byId = new Map(users.map((u) => [Number(u.mysql_id), u]));
+  const items = wallets.map((w) => {
+    const uid = Number(w.mysql_user_id ?? w.user_id ?? 0);
+    const u = byId.get(uid);
+    return {
+      id: uid,
+      name: u ? `${u.f_name ?? ''} ${u.l_name ?? ''}`.trim() || `Customer #${uid}` : `Customer #${uid}`,
+      phone: u?.phone ?? null,
+      balance: _walletR2(_walletToN(w.balance)),
+    };
+  }).filter((x) => x.id > 0).sort((a, b) => b.balance - a.balance);
+  return { items, total: items.length, total_balance: _walletR2(items.reduce((s, i) => s + i.balance, 0)), holders: items.filter((i) => i.balance > 0).length };
+};
+
+// RESTAURANT wallets — `restaurant_wallets` stored balance per restaurant.
+AdminService.prototype.listRestaurantWallets = async function (this: AdminService) {
+  if (!this['useMongo']()) return { items: [], total: 0, total_balance: 0, holders: 0 };
+  const wallets = await this['mongo'].findMany<Record<string, unknown>>('restaurant_wallets', {}, { sort: { mysql_id: -1 }, limit: 5000 });
+  const ids = Array.from(new Set(wallets.map((w) => Number(w.mysql_restaurant_id ?? 0)).filter((x) => x > 0)));
+  const rests = ids.length
+    ? await this['mongo'].findMany<{ mysql_id: number; name?: string; phone?: string }>('restaurants', { mysql_id: { $in: ids } })
+    : [];
+  const byId = new Map(rests.map((r) => [Number(r.mysql_id), r]));
+  const items = wallets.map((w) => {
+    const rid = Number(w.mysql_restaurant_id ?? 0);
+    const r = byId.get(rid);
+    return {
+      id: rid,
+      name: r?.name ?? `Restaurant #${rid}`,
+      phone: r?.phone ?? null,
+      balance: _walletR2(_walletToN(w.balance)),
+      total_earning: _walletR2(_walletToN(w.total_earning)),
+      collected_cash: _walletR2(_walletToN(w.collected_cash)),
+    };
+  }).filter((x) => x.id > 0).sort((a, b) => b.balance - a.balance);
+  return { items, total: items.length, total_balance: _walletR2(items.reduce((s, i) => s + i.balance, 0)), holders: items.filter((i) => i.balance > 0).length };
 };
 
 // Admin records that a rider deposited COD cash back to the platform — reduces

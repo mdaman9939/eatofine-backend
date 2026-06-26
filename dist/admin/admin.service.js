@@ -5674,6 +5674,59 @@ AdminService.prototype.listDmPayouts = async function () {
     }).sort((a, b) => b.net_position - a.net_position);
     return { total: items.length, items };
 };
+const _walletToN = (v) => {
+    if (v == null)
+        return 0;
+    if (typeof v === 'number')
+        return Number.isFinite(v) ? v : 0;
+    const n = parseFloat(String(v.toString?.() ?? v));
+    return Number.isFinite(n) ? n : 0;
+};
+const _walletR2 = (n) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
+AdminService.prototype.listCustomerWallets = async function () {
+    if (!this['useMongo']())
+        return { items: [], total: 0, total_balance: 0, holders: 0 };
+    const wallets = await this['mongo'].findMany('wallets', {}, { sort: { mysql_id: -1 }, limit: 5000 });
+    const ids = Array.from(new Set(wallets.map((w) => Number(w.mysql_user_id ?? w.user_id ?? 0)).filter((x) => x > 0)));
+    const users = ids.length
+        ? await this['mongo'].findMany('users', { mysql_id: { $in: ids } })
+        : [];
+    const byId = new Map(users.map((u) => [Number(u.mysql_id), u]));
+    const items = wallets.map((w) => {
+        const uid = Number(w.mysql_user_id ?? w.user_id ?? 0);
+        const u = byId.get(uid);
+        return {
+            id: uid,
+            name: u ? `${u.f_name ?? ''} ${u.l_name ?? ''}`.trim() || `Customer #${uid}` : `Customer #${uid}`,
+            phone: u?.phone ?? null,
+            balance: _walletR2(_walletToN(w.balance)),
+        };
+    }).filter((x) => x.id > 0).sort((a, b) => b.balance - a.balance);
+    return { items, total: items.length, total_balance: _walletR2(items.reduce((s, i) => s + i.balance, 0)), holders: items.filter((i) => i.balance > 0).length };
+};
+AdminService.prototype.listRestaurantWallets = async function () {
+    if (!this['useMongo']())
+        return { items: [], total: 0, total_balance: 0, holders: 0 };
+    const wallets = await this['mongo'].findMany('restaurant_wallets', {}, { sort: { mysql_id: -1 }, limit: 5000 });
+    const ids = Array.from(new Set(wallets.map((w) => Number(w.mysql_restaurant_id ?? 0)).filter((x) => x > 0)));
+    const rests = ids.length
+        ? await this['mongo'].findMany('restaurants', { mysql_id: { $in: ids } })
+        : [];
+    const byId = new Map(rests.map((r) => [Number(r.mysql_id), r]));
+    const items = wallets.map((w) => {
+        const rid = Number(w.mysql_restaurant_id ?? 0);
+        const r = byId.get(rid);
+        return {
+            id: rid,
+            name: r?.name ?? `Restaurant #${rid}`,
+            phone: r?.phone ?? null,
+            balance: _walletR2(_walletToN(w.balance)),
+            total_earning: _walletR2(_walletToN(w.total_earning)),
+            collected_cash: _walletR2(_walletToN(w.collected_cash)),
+        };
+    }).filter((x) => x.id > 0).sort((a, b) => b.balance - a.balance);
+    return { items, total: items.length, total_balance: _walletR2(items.reduce((s, i) => s + i.balance, 0)), holders: items.filter((i) => i.balance > 0).length };
+};
 AdminService.prototype.recordDmCashDeposit = async function (id, amount) {
     if (!this['useMongo']())
         throw new common_1.BadRequestException({ errors: [{ code: 'config', message: 'Mongo required' }] });
