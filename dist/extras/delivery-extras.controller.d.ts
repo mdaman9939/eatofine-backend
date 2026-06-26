@@ -41,6 +41,12 @@ export declare class DeliveryExtrasController {
         pending_withdraw?: undefined;
         available_to_withdraw?: undefined;
         net_position?: undefined;
+        cash_in_hands?: undefined;
+        Payable_Balance?: undefined;
+        withdraw_able_balance?: undefined;
+        adjust_able?: undefined;
+        show_pay_now_button?: undefined;
+        total_delivery?: undefined;
         on_shift?: undefined;
     } | {
         id: number;
@@ -69,6 +75,12 @@ export declare class DeliveryExtrasController {
         pending_withdraw: number;
         available_to_withdraw: number;
         net_position: number;
+        cash_in_hands: number;
+        Payable_Balance: number;
+        withdraw_able_balance: number;
+        adjust_able: boolean;
+        show_pay_now_button: boolean;
+        total_delivery: number;
         on_shift: boolean;
     } | {
         id: number;
@@ -97,6 +109,12 @@ export declare class DeliveryExtrasController {
         active?: undefined;
         available_to_withdraw?: undefined;
         net_position?: undefined;
+        cash_in_hands?: undefined;
+        Payable_Balance?: undefined;
+        withdraw_able_balance?: undefined;
+        adjust_able?: undefined;
+        show_pay_now_button?: undefined;
+        total_delivery?: undefined;
         on_shift?: undefined;
     }>;
     private saveImage;

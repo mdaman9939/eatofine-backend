@@ -229,6 +229,18 @@ export class DeliveryExtrasController {
         // source of truth so the rider sees exactly what is withdrawable.
         available_to_withdraw: Math.max(0, Math.round((Number(wallet?.balance ?? 0) - Number(wallet?.pending_withdraw ?? 0) - Number(wallet?.collected_cash ?? 0)) * 100) / 100),
         net_position: Math.round((Number(wallet?.balance ?? 0) - Number(wallet?.collected_cash ?? 0)) * 100) / 100,
+        // ── Aliases the DM app's ProfileModel ACTUALLY reads — it uses the SAME
+        // odd casing as the vendor app (Payable_Balance / cash_in_hands /
+        // withdraw_able_balance / adjust_able / show_pay_now_button). The DM
+        // profile only returned `balance`/`collected_cash`, so the "My Account"
+        // screen showed ₹0 for Payable Amount + Cash in Hand even with a balance.
+        cash_in_hands: Number(wallet?.collected_cash ?? 0),
+        Payable_Balance: Math.max(0, Math.round((Number(wallet?.balance ?? 0) - Number(wallet?.pending_withdraw ?? 0) - Number(wallet?.collected_cash ?? 0)) * 100) / 100),
+        withdraw_able_balance: Math.max(0, Math.round((Number(wallet?.balance ?? 0) - Number(wallet?.pending_withdraw ?? 0) - Number(wallet?.collected_cash ?? 0)) * 100) / 100),
+        adjust_able: false,
+        // Pay Now is for settling COD held — only meaningful when cash is in hand.
+        show_pay_now_button: Number(wallet?.collected_cash ?? 0) > 0,
+        total_delivery: allOrders.filter((o) => o.order_status === 'delivered').length,
         // Shift status — false means the rider is off-shift and won't be offered
         // new orders until their shift window (app can show an "off shift" banner).
         on_shift: await this.isOnShift(d),

@@ -236,6 +236,12 @@ let DeliveryExtrasController = class DeliveryExtrasController {
                 pending_withdraw: Number(wallet?.pending_withdraw ?? 0),
                 available_to_withdraw: Math.max(0, Math.round((Number(wallet?.balance ?? 0) - Number(wallet?.pending_withdraw ?? 0) - Number(wallet?.collected_cash ?? 0)) * 100) / 100),
                 net_position: Math.round((Number(wallet?.balance ?? 0) - Number(wallet?.collected_cash ?? 0)) * 100) / 100,
+                cash_in_hands: Number(wallet?.collected_cash ?? 0),
+                Payable_Balance: Math.max(0, Math.round((Number(wallet?.balance ?? 0) - Number(wallet?.pending_withdraw ?? 0) - Number(wallet?.collected_cash ?? 0)) * 100) / 100),
+                withdraw_able_balance: Math.max(0, Math.round((Number(wallet?.balance ?? 0) - Number(wallet?.pending_withdraw ?? 0) - Number(wallet?.collected_cash ?? 0)) * 100) / 100),
+                adjust_able: false,
+                show_pay_now_button: Number(wallet?.collected_cash ?? 0) > 0,
+                total_delivery: allOrders.filter((o) => o.order_status === 'delivered').length,
                 on_shift: await this.isOnShift(d),
             };
         }
