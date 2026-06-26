@@ -5587,13 +5587,28 @@ AdminService.prototype.listWithdrawRequests = async function (opts) {
             }),
             this['mongo'].count('withdraw_requests', filter),
         ]);
-        return paginate(rows.map((r) => ({
-            ...r,
-            id: Number(r.mysql_id),
-            delivery_man_id: r.delivery_man_id ?? r.mysql_delivery_man_id ?? null,
-            vendor_id: r.vendor_id ?? r.mysql_vendor_id ?? null,
-            amount: num(r.amount),
-        })), total, limit, offset);
+        const vIds = Array.from(new Set(rows.map((r) => Number(r.vendor_id ?? r.mysql_vendor_id ?? 0)).filter((x) => x > 0)));
+        const dIds = Array.from(new Set(rows.map((r) => Number(r.delivery_man_id ?? r.mysql_delivery_man_id ?? 0)).filter((x) => x > 0)));
+        const restByVendor = new Map();
+        if (vIds.length) {
+            const rests = await this['mongo'].findMany('restaurants', { mysql_vendor_id: { $in: vIds } }, { projection: { mysql_vendor_id: 1, name: 1 } });
+            for (const rr of rests)
+                if (rr.mysql_vendor_id != null && rr.name)
+                    restByVendor.set(Number(rr.mysql_vendor_id), rr.name);
+        }
+        const dmNames = dIds.length ? await nameMapFor(this['mongo'], 'delivery_men', dIds, personLabel) : new Map();
+        return paginate(rows.map((r) => {
+            const vendorId = r.vendor_id != null ? Number(r.vendor_id) : (r.mysql_vendor_id != null ? Number(r.mysql_vendor_id) : null);
+            const dmId = r.delivery_man_id != null ? Number(r.delivery_man_id) : (r.mysql_delivery_man_id != null ? Number(r.mysql_delivery_man_id) : null);
+            return {
+                ...r,
+                id: Number(r.mysql_id),
+                delivery_man_id: dmId,
+                vendor_id: vendorId,
+                amount: num(r.amount),
+                requester_name: vendorId ? (restByVendor.get(vendorId) ?? null) : (dmId ? (dmNames.get(dmId) ?? null) : null),
+            };
+        }), total, limit, offset);
     }
     const where = {};
     if (opts.type)
@@ -5632,7 +5647,26 @@ AdminService.prototype.approveWithdrawRequest = async function (id, approve) {
             }
             return { ok: true, id, approved: false };
         }
-        await this['mongo'].updateOne('withdraw_requests', { mysql_id: Number(id) }, { approved: approve, updated_at: new Date() });
+        await this['mongo'].updateOne('withdraw_requests', { mysql_id: Number(id) }, { approved: approve, processed: approve, decided_at: new Date(), updated_at: new Date() });
+        const vendorId = Number(w.vendor_id ?? w.mysql_vendor_id ?? 0);
+        if (vendorId > 0 && amt > 0) {
+            if (approve) {
+                const existing = await this['mongo'].findOne('disbursements', { withdraw_request_id: Number(id) });
+                if (!existing) {
+                    const now = new Date();
+                    await this['mongo'].insertOne('disbursements', {
+                        mysql_id: await this['mongo'].nextMysqlId('disbursements'),
+                        mysql_vendor_id: vendorId, vendor_id: vendorId,
+                        withdraw_request_id: Number(id),
+                        total_amount: amt, status: 'pending', payment_method: 'cash',
+                        paid_out: false, wallet_managed: false, created_at: now, updated_at: now,
+                    });
+                }
+            }
+            else {
+                await this['mongo'].deleteOne('disbursements', { withdraw_request_id: Number(id), paid_out: { $ne: true } });
+            }
+        }
         return { ok: true, id, approved: approve };
     }
     const w = await this['prisma'].withdraw_requests.findUnique({ where: { id: BigInt(id) }, select: { id: true } });
