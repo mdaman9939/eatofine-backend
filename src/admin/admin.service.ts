@@ -6508,24 +6508,56 @@ AdminService.prototype.listCustomerWallets = async function (this: AdminService)
 // RESTAURANT wallets — `restaurant_wallets` stored balance per restaurant.
 AdminService.prototype.listRestaurantWallets = async function (this: AdminService) {
   if (!this['useMongo']()) return { items: [], total: 0, total_balance: 0, holders: 0 };
-  const wallets = await this['mongo'].findMany<Record<string, unknown>>('restaurant_wallets', {}, { sort: { mysql_id: -1 }, limit: 5000 });
-  const ids = Array.from(new Set(wallets.map((w) => Number(w.mysql_restaurant_id ?? 0)).filter((x) => x > 0)));
-  const rests = ids.length
-    ? await this['mongo'].findMany<{ mysql_id: number; name?: string; phone?: string }>('restaurants', { mysql_id: { $in: ids } })
-    : [];
-  const byId = new Map(rests.map((r) => [Number(r.mysql_id), r]));
-  const items = wallets.map((w) => {
-    const rid = Number(w.mysql_restaurant_id ?? 0);
-    const r = byId.get(rid);
+  // The vendor app derives the restaurant wallet from DELIVERED orders (item value
+  // net of commission; COD = cash-in-hand) — it ignores any stored balance unless a
+  // real settlement ledger exists (total_earning>0). To MATCH the app exactly, we
+  // compute the same way here instead of trusting restaurant_wallets.balance.
+  const rests = await this['mongo'].findMany<{ mysql_id: number; name?: string; phone?: string; comission?: number; mysql_vendor_id?: number }>(
+    'restaurants', {}, { projection: { mysql_id: 1, name: 1, phone: 1, comission: 1, mysql_vendor_id: 1 } as Record<string, 0 | 1>, limit: 5000 });
+  const restById = new Map(rests.map((r) => [Number(r.mysql_id), r]));
+  const orders = await this['mongo'].findMany<Record<string, unknown>>(
+    'orders', { order_status: 'delivered' },
+    { projection: { mysql_restaurant_id: 1, order_amount: 1, total_tax_amount: 1, delivery_charge: 1, coupon_discount_amount: 1, restaurant_discount_amount: 1, additional_charge: 1, payment_method: 1 } as Record<string, 0 | 1>, limit: 100000 });
+  const earn = new Map<number, { earning: number; cash: number }>();
+  for (const o of orders) {
+    const rid = Number(o.mysql_restaurant_id ?? 0); if (!rid) continue;
+    const rate = Number(restById.get(rid)?.comission ?? 0) || 10;
+    const amount = _walletToN(o.order_amount), tax = _walletToN(o.total_tax_amount), del = _walletToN(o.delivery_charge);
+    const coupon = _walletToN(o.coupon_discount_amount), rd = _walletToN(o.restaurant_discount_amount), extra = _walletToN(o.additional_charge);
+    let item = amount + coupon + rd - tax - del - extra;
+    if (item <= 0) item = Math.max(0, amount - tax - del) || amount;
+    const e = earn.get(rid) ?? { earning: 0, cash: 0 };
+    e.earning += item - (item * rate) / 100;
+    if (String(o.payment_method) === 'cash_on_delivery') e.cash += amount;
+    earn.set(rid, e);
+  }
+  // withdrawn + pending from the wallet ledger (summed across any dup docs; keyed
+  // by restaurant or vendor id). Defaults to 0 when no ledger row exists.
+  const vendorToRest = new Map<number, number>();
+  for (const r of rests) { const v = Number(r.mysql_vendor_id ?? 0); if (v) vendorToRest.set(v, Number(r.mysql_id)); }
+  const wallets = await this['mongo'].findMany<Record<string, unknown>>('restaurant_wallets', {}, { limit: 5000 });
+  const wd = new Map<number, { withdrawn: number; pending: number }>();
+  for (const w of wallets) {
+    let rid = Number(w.mysql_restaurant_id ?? w.restaurant_id ?? 0);
+    if (!rid) rid = vendorToRest.get(Number(w.vendor_id ?? w.mysql_vendor_id ?? 0)) ?? 0;
+    if (!rid) continue;
+    const cur = wd.get(rid) ?? { withdrawn: 0, pending: 0 };
+    cur.withdrawn += _walletToN(w.total_withdrawn); cur.pending += _walletToN(w.pending_withdraw);
+    wd.set(rid, cur);
+  }
+  const items = rests.map((r) => {
+    const rid = Number(r.mysql_id);
+    const e = earn.get(rid) ?? { earning: 0, cash: 0 };
+    const w = wd.get(rid) ?? { withdrawn: 0, pending: 0 };
     return {
       id: rid,
-      name: r?.name ?? `Restaurant #${rid}`,
-      phone: r?.phone ?? null,
-      balance: _walletR2(_walletToN(w.balance)),
-      total_earning: _walletR2(_walletToN(w.total_earning)),
-      collected_cash: _walletR2(_walletToN(w.collected_cash)),
+      name: r.name ?? `Restaurant #${rid}`,
+      phone: r.phone ?? null,
+      balance: _walletR2(Math.max(0, e.earning - w.withdrawn - w.pending)),
+      total_earning: _walletR2(e.earning),
+      collected_cash: _walletR2(e.cash),
     };
-  }).filter((x) => x.id > 0).sort((a, b) => b.balance - a.balance);
+  }).filter((x) => x.total_earning > 0 || x.collected_cash > 0).sort((a, b) => b.balance - a.balance);
   return { items, total: items.length, total_balance: _walletR2(items.reduce((s, i) => s + i.balance, 0)), holders: items.filter((i) => i.balance > 0).length };
 };
 

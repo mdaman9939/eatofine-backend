@@ -86,17 +86,12 @@ try {
   }
   console.log(`${REMOVE ? 'Reverted' : 'Funded'} ${nC} customer wallets ${REMOVE ? '' : `(+₹${AMT.customer} each)`}`);
 
-  // ── 2. RESTAURANT wallets (restaurant_wallets.balance + total_earning) ──────
-  const rests = await db.collection('restaurants').find({}, { projection: { mysql_id: 1, mysql_vendor_id: 1, vendor_id: 1 } }).limit(2000).toArray();
-  let nR = 0;
-  for (const r of rests) {
-    const rid = Number(r.mysql_id); if (!rid) continue;
-    const vid = Number(r.mysql_vendor_id ?? r.vendor_id ?? 0) || null;
-    await applyWallet('restaurant_wallets', { mysql_restaurant_id: rid },
-      { _kind: 'restaurant', fields: { mysql_restaurant_id: rid, mysql_vendor_id: vid, vendor_id: vid } }, 'balance', true);
-    nR++;
-  }
-  console.log(`${REMOVE ? 'Reverted' : 'Funded'} ${nR} restaurant wallets ${REMOVE ? '' : `(+₹${AMT.restaurant} each)`}`);
+  // ── 2. RESTAURANT wallets — INTENTIONALLY SKIPPED ───────────────────────────
+  // The vendor app DERIVES the restaurant wallet from delivered orders (it ignores
+  // a stored balance unless a real settlement ledger exists). Writing a balance
+  // here only created a phantom amount the app never shows + duplicate docs, so
+  // restaurant balances are NOT seeded. (Cleanup: scripts/fix-wallet-data.mjs.)
+  console.log('Restaurant: skipped — wallet is order-derived in the app, not a stored balance.');
 
   // ── 3. DELIVERY-MAN wallets (delivery_man_wallets + tagged ledger credit) ───
   const dms = await db.collection('delivery_men').find({}, { projection: { mysql_id: 1 } }).limit(2000).toArray();
