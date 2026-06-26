@@ -604,25 +604,46 @@ export class DeliveryExtrasController {
   // ── Earnings / withdrawals ───────────────────────────────────────
   @Get('earning-report')
   async earningReport(@Req() req: AuthedRequest) {
-    if (!this.useMongo()) return { today: 0, this_week: 0, this_month: 0, all_time: 0 };
+    const r2 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
+    const empty = {
+      summary: { total_earnings: 0, total_earnings_percentage: 0, total_earnings_positive: true, total_expenses: 0, total_expenses_percentage: 0, total_expenses_positive: true, net_profit: 0, net_profit_percentage: 0, net_profit_positive: true, breakdown: { delivery_charge: 0, dm_tips: 0, incentives: '0', admin_commission: 0 } },
+      trends: { categories: [] as string[], earning_series: [] as number[], expense_series: [] as number[] },
+      transactions: { total_size: 0, limit: 0, offset: 0, data: [] as Array<Record<string, unknown>> },
+    };
+    if (!this.useMongo()) return empty;
     const actorId = Number(req.actor!.id);
-    const rows = await this.mongo.findMany<Record<string, unknown>>(
-      'orders',
-      { mysql_delivery_man_id: actorId, order_status: 'delivered' },
-    );
+    // EarningReportModel expects { summary, trends, transactions }. Earnings are
+    // the rider's delivery fee + tips on DELIVERED orders, plus approved incentives.
+    const orders = await this.mongo.findMany<Record<string, unknown>>(
+      'orders', { mysql_delivery_man_id: actorId, order_status: 'delivered' }, { sort: { mysql_id: -1 }, limit: 500 });
     const now = Date.now(), dayMs = 86_400_000;
-    let today = 0, week = 0, month = 0, all = 0;
-    for (const o of rows) {
-      const ts = o.created_at ? new Date(o.created_at as string).getTime() : 0;
-      if (!Number.isFinite(ts) || ts === 0) continue;
-      const earn = Number(o.delivery_charge ?? 0) + Number(o.dm_tips ?? 0);
-      all += earn;
-      const age = now - ts;
-      if (age <= dayMs) today += earn;
-      if (age <= 7 * dayMs) week += earn;
-      if (age <= 30 * dayMs) month += earn;
+    let totalDelivery = 0, totalTips = 0;
+    const data: Array<Record<string, unknown>> = [];
+    const dayBuckets = new Array(7).fill(0);
+    for (const o of orders) {
+      const dc = Number(o.delivery_charge ?? 0), tip = Number(o.dm_tips ?? 0);
+      totalDelivery += dc; totalTips += tip;
+      const tsRaw = (o.delivered ?? o.created_at) as string | number | Date | undefined;
+      const ts = tsRaw ? new Date(tsRaw).getTime() : now;
+      const dateStr = new Date(ts).toISOString().slice(0, 10);
+      data.push({ order_id: String(o.mysql_id), date: dateStr, transaction_id: `TXN${o.mysql_id}`, transaction_date: dateStr, delivery_charge: r2(dc), incentive: 0, tips: r2(tip), commission_paid: 0, net_profit: r2(dc + tip) });
+      const idx = 6 - Math.min(6, Math.floor((now - ts) / dayMs));
+      if (idx >= 0 && idx < 7) dayBuckets[idx] += dc + tip;
     }
-    return { today, this_week: week, this_month: month, all_time: all };
+    const claims = await this.mongo.findMany<{ amount?: number }>('dm_reward_claims', { dm_id: actorId, status: 'approved' });
+    const incentiveTotal = claims.reduce((s, c) => s + Number(c.amount ?? 0), 0);
+    const totalEarnings = r2(totalDelivery + totalTips + incentiveTotal);
+    const categories = Array.from({ length: 7 }, (_, i) => new Date(now - (6 - i) * dayMs).toLocaleDateString('en-IN', { weekday: 'short' }));
+    return {
+      summary: {
+        total_earnings: totalEarnings, total_earnings_percentage: 0, total_earnings_positive: true,
+        total_expenses: 0, total_expenses_percentage: 0, total_expenses_positive: true,
+        net_profit: totalEarnings, net_profit_percentage: 0, net_profit_positive: true,
+        breakdown: { delivery_charge: r2(totalDelivery), dm_tips: r2(totalTips), incentives: String(r2(incentiveTotal)), admin_commission: 0 },
+      },
+      trends: { categories, earning_series: dayBuckets.map(r2), expense_series: new Array(7).fill(0) },
+      transactions: { total_size: data.length, limit: data.length, offset: 0, data },
+    };
   }
 
   @Get('get-disbursement-report')

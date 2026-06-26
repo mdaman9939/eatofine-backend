@@ -621,10 +621,34 @@ export declare class DeliveryExtrasController {
         ok: boolean;
     };
     earningReport(req: AuthedRequest): Promise<{
-        today: number;
-        this_week: number;
-        this_month: number;
-        all_time: number;
+        summary: {
+            total_earnings: number;
+            total_earnings_percentage: number;
+            total_earnings_positive: boolean;
+            total_expenses: number;
+            total_expenses_percentage: number;
+            total_expenses_positive: boolean;
+            net_profit: number;
+            net_profit_percentage: number;
+            net_profit_positive: boolean;
+            breakdown: {
+                delivery_charge: number;
+                dm_tips: number;
+                incentives: string;
+                admin_commission: number;
+            };
+        };
+        trends: {
+            categories: string[];
+            earning_series: number[];
+            expense_series: any[];
+        };
+        transactions: {
+            total_size: number;
+            limit: number;
+            offset: number;
+            data: Record<string, unknown>[];
+        };
     }>;
     disbursementReport(): {
         data: never[];
