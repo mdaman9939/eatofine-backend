@@ -604,6 +604,27 @@ let OrderService = class OrderService {
                 ])
                 : [];
             const countMap = new Map(countRows.map((r) => [Number(r._id), r.count]));
+            const restIds = Array.from(new Set(orders.map((o) => Number(o.mysql_restaurant_id)).filter((n) => Number.isFinite(n) && n > 0)));
+            const restaurants = restIds.length
+                ? await this.mongo.findMany('restaurants', { mysql_id: { $in: restIds } })
+                : [];
+            const vendIds = Array.from(new Set(restaurants.filter((r) => !r.logo && r.mysql_vendor_id).map((r) => Number(r.mysql_vendor_id))));
+            const vendImg = new Map();
+            if (vendIds.length) {
+                const vendors = await this.mongo.findMany('vendors', { mysql_id: { $in: vendIds } });
+                for (const v of vendors)
+                    vendImg.set(Number(v.mysql_id), v.image ?? null);
+            }
+            const restMap = new Map(restaurants.map((r) => {
+                const fallback = !r.logo && r.mysql_vendor_id ? vendImg.get(Number(r.mysql_vendor_id)) ?? null : null;
+                return [Number(r.mysql_id), {
+                        id: Number(r.mysql_id),
+                        name: r.name ?? null,
+                        logo: r.logo ?? null,
+                        logo_full_url: (0, storage_url_1.storageFullUrl)('restaurant', r.logo ?? null) ?? (0, storage_url_1.storageFullUrl)('profile', fallback),
+                        zone_id: r.mysql_zone_id != null ? Number(r.mysql_zone_id) : null,
+                    }];
+            }));
             return {
                 total_size: orders.length,
                 limit: 10,
@@ -618,6 +639,7 @@ let OrderService = class OrderService {
                         order_amount: Number(o.order_amount ?? 0),
                         payment_method: o.payment_method,
                         restaurant_id: o.mysql_restaurant_id ?? null,
+                        restaurant: restMap.get(Number(o.mysql_restaurant_id)) ?? null,
                         created_at: o.created_at ?? o.created_at_legacy ?? null,
                         details_count: count,
                         cutlery: !!o.cutlery,

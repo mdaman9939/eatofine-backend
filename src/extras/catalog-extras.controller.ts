@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query, Param, HttpCode, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Post, Query, Param, HttpCode, Req, UseGuards } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { PrismaService } from '../prisma/prisma.service';
 import { MongoDataService } from '../mongo/mongo-data.service';
@@ -555,16 +555,29 @@ export class CatalogExtrasController {
   @RequireAuth('customer')
   async submitProductReview(@Req() req: AuthedRequest, @Body() body: Record<string, unknown> = {}) {
     if (!this.useMongo()) return { message: 'review submitted' };
-    const foodId = Number(body.food_id ?? body.product_id ?? 0);
     const rating = Math.max(1, Math.min(5, Math.round(Number(body.rating ?? 0))));
-    if (!foodId || !rating) return { errors: [{ code: 'input', message: 'food_id and rating are required' }] };
-    const food = await this.mongo.findByMysqlId<{ mysql_id: number; mysql_restaurant_id?: number | null }>('foods', foodId);
-    if (!food) return { errors: [{ code: 'food', message: 'not found' }] };
-    const restId = Number(food.mysql_restaurant_id ?? 0);
     // The app sometimes sends order_id as the string "null" → Number() = NaN.
     // Only keep a real, finite order id.
     const oidRaw = Number(body.order_id);
     const orderId = Number.isFinite(oidRaw) && oidRaw > 0 ? oidRaw : null;
+    let foodId = Number(body.food_id ?? body.product_id ?? 0);
+    // Older order food snapshots stored only { name, price } (no id), so the app
+    // reads foodDetails.id = null and posts a blank food_id. Recover it from the
+    // order's line item (order_details) via order_id, so the review attaches to
+    // the right food instead of silently no-op'ing.
+    if ((!foodId || !Number.isFinite(foodId)) && orderId) {
+      const od = await this.mongo.findOne<{ food_id?: number; mysql_food_id?: number }>('order_details', { order_id: orderId });
+      foodId = Number(od?.food_id ?? od?.mysql_food_id ?? 0);
+    }
+    // Throw a REAL error status on genuine failure — the app treats any HTTP 200
+    // as success ("Submitted"), so returning 200 with an errors array silently
+    // masked the failure and the review never stored.
+    if (!foodId || !Number.isFinite(foodId)) {
+      throw new BadRequestException({ errors: [{ code: 'food_id', message: 'food_id (or a valid order_id) is required' }] });
+    }
+    const food = await this.mongo.findByMysqlId<{ mysql_id: number; mysql_restaurant_id?: number | null }>('foods', foodId);
+    if (!food) throw new BadRequestException({ errors: [{ code: 'food', message: 'food not found' }] });
+    const restId = Number(food.mysql_restaurant_id ?? 0);
     const userId = Number(req.actor!.id) || (body.user_id ? Number(body.user_id) : null);
     const now = new Date();
     const nextId = await this.mongo.nextMysqlId('reviews');

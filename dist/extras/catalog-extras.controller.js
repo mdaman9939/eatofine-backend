@@ -471,16 +471,21 @@ let CatalogExtrasController = class CatalogExtrasController {
     async submitProductReview(req, body = {}) {
         if (!this.useMongo())
             return { message: 'review submitted' };
-        const foodId = Number(body.food_id ?? body.product_id ?? 0);
         const rating = Math.max(1, Math.min(5, Math.round(Number(body.rating ?? 0))));
-        if (!foodId || !rating)
-            return { errors: [{ code: 'input', message: 'food_id and rating are required' }] };
-        const food = await this.mongo.findByMysqlId('foods', foodId);
-        if (!food)
-            return { errors: [{ code: 'food', message: 'not found' }] };
-        const restId = Number(food.mysql_restaurant_id ?? 0);
         const oidRaw = Number(body.order_id);
         const orderId = Number.isFinite(oidRaw) && oidRaw > 0 ? oidRaw : null;
+        let foodId = Number(body.food_id ?? body.product_id ?? 0);
+        if ((!foodId || !Number.isFinite(foodId)) && orderId) {
+            const od = await this.mongo.findOne('order_details', { order_id: orderId });
+            foodId = Number(od?.food_id ?? od?.mysql_food_id ?? 0);
+        }
+        if (!foodId || !Number.isFinite(foodId)) {
+            throw new common_1.BadRequestException({ errors: [{ code: 'food_id', message: 'food_id (or a valid order_id) is required' }] });
+        }
+        const food = await this.mongo.findByMysqlId('foods', foodId);
+        if (!food)
+            throw new common_1.BadRequestException({ errors: [{ code: 'food', message: 'food not found' }] });
+        const restId = Number(food.mysql_restaurant_id ?? 0);
         const userId = Number(req.actor.id) || (body.user_id ? Number(body.user_id) : null);
         const now = new Date();
         const nextId = await this.mongo.nextMysqlId('reviews');

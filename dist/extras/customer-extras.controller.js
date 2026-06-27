@@ -681,6 +681,15 @@ let CustomerExtrasController = class CustomerExtrasController {
                 $or: [{ order_id: Number(orderId) }, { mysql_order_id: Number(orderId) }],
             }),
         ]);
+        const myReviews = await this.mongo.findMany('reviews', {
+            $or: [{ order_id: Number(orderId) }, { mysql_order_id: Number(orderId) }],
+        });
+        const reviewByFood = new Map();
+        for (const rv of myReviews) {
+            const f = Number(rv.food_id ?? rv.mysql_food_id ?? 0);
+            if (f)
+                reviewByFood.set(f, { rating: Number(rv.rating ?? 0), comment: String(rv.comment ?? '') });
+        }
         const customerName = user ? [user.f_name, user.l_name].filter(Boolean).join(' ').trim() || null : null;
         const restaurantPayload = restaurant ? {
             id: Number(restaurant.mysql_id),
@@ -698,24 +707,31 @@ let CustomerExtrasController = class CustomerExtrasController {
             l_name: deliveryMan.l_name ?? null,
             phone: deliveryMan.phone ?? null,
         } : null;
-        return items.map((it) => ({
-            ...(it.legacy ?? {}),
-            ...it,
-            id: Number(it.mysql_id),
-            food_id: it.mysql_food_id != null ? Number(it.mysql_food_id) : null,
-            order_id: it.mysql_order_id != null ? Number(it.mysql_order_id) : null,
-            price: toNum(it.price),
-            tax_amount: toNum(it.tax_amount),
-            total_add_on_price: toNum(it.total_add_on_price),
-            item_campaign_id: it.mysql_item_campaign_id != null ? Number(it.mysql_item_campaign_id) : null,
-            discount_on_food: it.discount_on_food != null ? toNum(it.discount_on_food) : null,
-            customer_name: customerName,
-            customer_phone: user?.phone ?? null,
-            customer_email: user?.email ?? null,
-            delivery_address: order?.delivery_address ?? null,
-            restaurant: restaurantPayload,
-            delivery_man: dmPayload,
-        }));
+        return items.map((it) => {
+            const fid = Number(it.mysql_food_id ?? it.food_id ?? 0);
+            const myReview = fid ? reviewByFood.get(fid) : undefined;
+            return {
+                ...(it.legacy ?? {}),
+                ...it,
+                id: Number(it.mysql_id),
+                food_id: it.mysql_food_id != null ? Number(it.mysql_food_id) : null,
+                order_id: it.mysql_order_id != null ? Number(it.mysql_order_id) : null,
+                price: toNum(it.price),
+                tax_amount: toNum(it.tax_amount),
+                total_add_on_price: toNum(it.total_add_on_price),
+                item_campaign_id: it.mysql_item_campaign_id != null ? Number(it.mysql_item_campaign_id) : null,
+                discount_on_food: it.discount_on_food != null ? toNum(it.discount_on_food) : null,
+                customer_name: customerName,
+                customer_phone: user?.phone ?? null,
+                customer_email: user?.email ?? null,
+                delivery_address: order?.delivery_address ?? null,
+                restaurant: restaurantPayload,
+                delivery_man: dmPayload,
+                is_reviewed: !!myReview,
+                my_rating: myReview?.rating ?? 0,
+                my_comment: myReview?.comment ?? '',
+            };
+        });
     }
     async cancelOrder(req, body) {
         const id = body.order_id;

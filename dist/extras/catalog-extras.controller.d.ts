@@ -197,13 +197,6 @@ export declare class CatalogExtrasController {
     }[]>;
     submitProductReview(req: AuthedRequest, body?: Record<string, unknown>): Promise<{
         message: string;
-        errors?: undefined;
-    } | {
-        errors: {
-            code: string;
-            message: string;
-        }[];
-        message?: undefined;
     }>;
     private recomputeRating;
     recommendedMostReviewed(): Promise<{

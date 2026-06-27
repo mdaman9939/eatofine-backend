@@ -151,6 +151,13 @@ export declare class OrderService {
             order_amount: number;
             payment_method: string | undefined;
             restaurant_id: number | null;
+            restaurant: {
+                id: number;
+                name: string | null;
+                logo: string | null;
+                logo_full_url: string | null;
+                zone_id: number | null;
+            } | null;
             created_at: string | Date | null;
             details_count: number;
             cutlery: boolean;

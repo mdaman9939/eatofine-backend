@@ -844,6 +844,30 @@ export class OrderService {
           )
         : [];
       const countMap = new Map(countRows.map((r) => [Number(r._id), r.count]));
+      // Attach each order's restaurant (name + logo) so the Orders → History
+      // cards show the restaurant image instead of an empty placeholder. The
+      // list previously returned only restaurant_id, so order.restaurant was null.
+      const restIds = Array.from(new Set(orders.map((o) => Number(o.mysql_restaurant_id)).filter((n) => Number.isFinite(n) && n > 0)));
+      const restaurants = restIds.length
+        ? await this.mongo.findMany<{ mysql_id: number; name?: string | null; logo?: string | null; mysql_vendor_id?: number | null; mysql_zone_id?: number | null }>('restaurants', { mysql_id: { $in: restIds } })
+        : [];
+      const vendIds = Array.from(new Set(restaurants.filter((r) => !r.logo && r.mysql_vendor_id).map((r) => Number(r.mysql_vendor_id))));
+      const vendImg = new Map<number, string | null>();
+      if (vendIds.length) {
+        const vendors = await this.mongo.findMany<{ mysql_id: number; image?: string | null }>('vendors', { mysql_id: { $in: vendIds } });
+        for (const v of vendors) vendImg.set(Number(v.mysql_id), v.image ?? null);
+      }
+      const restMap = new Map(restaurants.map((r) => {
+        const fallback = !r.logo && r.mysql_vendor_id ? vendImg.get(Number(r.mysql_vendor_id)) ?? null : null;
+        return [Number(r.mysql_id), {
+          id: Number(r.mysql_id),
+          name: r.name ?? null,
+          logo: r.logo ?? null,
+          logo_full_url: storageFullUrl('restaurant', r.logo ?? null) ?? storageFullUrl('profile', fallback),
+          // Real zone so the app's "Buy Again" zone check works (it reads order.restaurant.zone_id).
+          zone_id: r.mysql_zone_id != null ? Number(r.mysql_zone_id) : null,
+        }];
+      }));
       return {
         total_size: orders.length,
         limit: 10,
@@ -858,6 +882,7 @@ export class OrderService {
             order_amount: Number(o.order_amount ?? 0),
             payment_method: o.payment_method,
             restaurant_id: o.mysql_restaurant_id ?? null,
+            restaurant: restMap.get(Number(o.mysql_restaurant_id)) ?? null,
             created_at: (o as { created_at?: Date | string | null }).created_at ?? o.created_at_legacy ?? null,
             details_count: count,
             cutlery: !!(o as unknown as { cutlery?: unknown }).cutlery,

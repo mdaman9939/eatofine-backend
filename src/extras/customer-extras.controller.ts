@@ -916,6 +916,18 @@ export class CustomerExtrasController {
       }),
     ]);
 
+    // The customer's own reviews for this order, keyed by food, so the Rate &
+    // Review screen can pre-fill the stars + comment for items already reviewed
+    // (and show them as "Submitted") instead of a blank form.
+    const myReviews = await this.mongo.findMany<{ food_id?: number; mysql_food_id?: number; rating?: number; comment?: string }>('reviews', {
+      $or: [{ order_id: Number(orderId) }, { mysql_order_id: Number(orderId) }],
+    });
+    const reviewByFood = new Map<number, { rating: number; comment: string }>();
+    for (const rv of myReviews) {
+      const f = Number(rv.food_id ?? rv.mysql_food_id ?? 0);
+      if (f) reviewByFood.set(f, { rating: Number(rv.rating ?? 0), comment: String(rv.comment ?? '') });
+    }
+
     const customerName = user ? [user.f_name, user.l_name].filter(Boolean).join(' ').trim() || null : null;
     const restaurantPayload = restaurant ? {
       id: Number(restaurant.mysql_id),
@@ -934,7 +946,10 @@ export class CustomerExtrasController {
       phone: deliveryMan.phone ?? null,
     } : null;
 
-    return items.map((it) => ({
+    return items.map((it) => {
+      const fid = Number(it.mysql_food_id ?? (it as { food_id?: number }).food_id ?? 0);
+      const myReview = fid ? reviewByFood.get(fid) : undefined;
+      return {
       ...(it.legacy ?? {}),
       ...it,
       id: Number(it.mysql_id),
@@ -954,7 +969,12 @@ export class CustomerExtrasController {
       delivery_address: order?.delivery_address ?? null,
       restaurant: restaurantPayload,
       delivery_man: dmPayload,
-    }));
+      // Existing review for this line (if the customer already rated it).
+      is_reviewed: !!myReview,
+      my_rating: myReview?.rating ?? 0,
+      my_comment: myReview?.comment ?? '',
+      };
+    });
   }
 
   @HttpCode(200)

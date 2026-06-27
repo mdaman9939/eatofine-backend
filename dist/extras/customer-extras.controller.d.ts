@@ -475,6 +475,9 @@ export declare class CustomerExtrasController {
             l_name: string | null;
             phone: string | null;
         } | null;
+        is_reviewed: boolean;
+        my_rating: number;
+        my_comment: string;
         mysql_id: number;
         mysql_order_id?: number | null;
         mysql_food_id?: number | null;
