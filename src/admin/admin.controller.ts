@@ -764,6 +764,8 @@ export class AdminController {
     @Query('zone_id') zoneId?: string,
     @Query('restaurant_id') restaurantId?: string,
     @Query('campaign') campaign?: string,
+    @Query('order_type') orderType?: string,
+    @Query('order_status') orderStatus?: string,
   ) {
     // campaign: '1'/'true' → only campaign orders, '0'/'false' → only regular
     // orders, absent → all orders (unchanged behaviour).
@@ -780,6 +782,8 @@ export class AdminController {
       zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
       restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
       campaign: campaignFlag,
+      orderType: orderType || undefined,
+      orderStatus: orderStatus || undefined,
     });
   }
 

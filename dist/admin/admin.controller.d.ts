@@ -1577,25 +1577,40 @@ export declare class AdminController {
             delivery: number;
         }[];
     }>;
-    orderReport(days?: string, from?: string, to?: string, zoneId?: string, restaurantId?: string, campaign?: string): Promise<{
+    orderReport(days?: string, from?: string, to?: string, zoneId?: string, restaurantId?: string, campaign?: string, orderType?: string, orderStatus?: string): Promise<{
         total: number;
         rows: {
             order_id: number;
+            order_type: string;
             restaurant: string | null;
             customer_name: string | null;
             total_item_amount: number;
-            item_discount: number;
             coupon_discount: number;
-            referral_discount: number;
+            admin_discount: number;
+            total_discount: number;
             discounted_amount: number;
-            tax: number;
+            gst_on_item: number;
+            additional_charge: number;
+            gst_on_additional: number;
             delivery_charge: number;
-            service_charge: number;
+            delivery_gst: number;
+            tips: number;
+            situational_charges: number;
+            situational_gst: number;
+            net_payable: number;
             order_amount: number;
-            amount_received_by: string;
             payment_method: string;
             payment_status: string;
             order_status: string;
+            refund_status: string;
+            delivered: boolean;
+            canceled: boolean;
+            refunded: boolean;
+            amount_received_by: string;
+            item_discount: number;
+            referral_discount: number;
+            tax: number;
+            service_charge: number;
             created_at: {} | null;
         }[];
         status_counts: Record<string, number>;

@@ -432,7 +432,7 @@ let AdminController = class AdminController {
             restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
         });
     }
-    orderReport(days, from, to, zoneId, restaurantId, campaign) {
+    orderReport(days, from, to, zoneId, restaurantId, campaign, orderType, orderStatus) {
         const campaignFlag = campaign === '1' || campaign === 'true'
             ? true
             : campaign === '0' || campaign === 'false'
@@ -445,6 +445,8 @@ let AdminController = class AdminController {
             zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
             restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
             campaign: campaignFlag,
+            orderType: orderType || undefined,
+            orderStatus: orderStatus || undefined,
         });
     }
     adminEarningDetailed() {
@@ -1836,8 +1838,10 @@ __decorate([
     __param(3, (0, common_1.Query)('zone_id')),
     __param(4, (0, common_1.Query)('restaurant_id')),
     __param(5, (0, common_1.Query)('campaign')),
+    __param(6, (0, common_1.Query)('order_type')),
+    __param(7, (0, common_1.Query)('order_status')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, String, String, String, String, String]),
+    __metadata("design:paramtypes", [String, String, String, String, String, String, String, String]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "orderReport", null);
 __decorate([

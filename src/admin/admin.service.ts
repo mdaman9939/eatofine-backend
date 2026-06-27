@@ -4752,7 +4752,7 @@ export class AdminService {
   /** Per-order Order Report (StackFood's "Regular Order Report"). Like the
    *  transaction report but covers ALL orders (any status) and adds order-status
    *  stat counts for the cards. */
-  async orderReport(opts: ReportFilterOpts & { days?: number; campaign?: boolean } = {}) {
+  async orderReport(opts: ReportFilterOpts & { days?: number; campaign?: boolean; orderType?: string; orderStatus?: string } = {}) {
     if (!this.useMongo()) return { total: 0, rows: [], status_counts: {} as Record<string, number> };
     const match: Record<string, unknown> = {};
     if (opts.from || opts.to) {
@@ -4763,6 +4763,8 @@ export class AdminService {
     }
     if (opts.zoneId) match.mysql_zone_id = Number(opts.zoneId);
     if (opts.restaurantId) match.mysql_restaurant_id = Number(opts.restaurantId);
+    if (opts.orderType) match.order_type = String(opts.orderType);
+    if (opts.orderStatus) match.order_status = String(opts.orderStatus);
 
     // Campaign vs regular split. A "campaign order" is one whose line items
     // came from an item campaign (order_details.item_campaign_id > 0). When
@@ -4793,6 +4795,8 @@ export class AdminService {
     const num = (v: unknown) => (v == null ? 0 : Number(v) || 0);
     const r2 = (n: number) => Math.round(n * 100) / 100;
     const status_counts: Record<string, number> = {};
+    const serviceRate = 18; // platform service GST (9% + 9%); additional charge & delivery are stored GST-inclusive
+    const extractGst = (gross: number) => r2((gross * serviceRate) / (100 + serviceRate));
 
     const rows = orders.map((o) => {
       const orderAmount = num(o.order_amount);
@@ -4800,30 +4804,57 @@ export class AdminService {
       const delivery = num(o.delivery_charge);
       const coupon = num(o.coupon_discount_amount);
       const restDiscount = num(o.restaurant_discount_amount);
-      const extraPackaging = num(o.additional_charge);
-      let itemAmount = r2(orderAmount + coupon + restDiscount - tax - delivery - extraPackaging);
+      const adminDiscount = num(o.admin_discount_amount);
+      const additionalCharge = num(o.additional_charge);
+      let itemAmount = r2(orderAmount + coupon + restDiscount - tax - delivery - additionalCharge);
       if (itemAmount <= 0) itemAmount = r2(Math.max(0, orderAmount - tax - delivery)) || orderAmount;
+      // GST split: additional charge + delivery are GST-inclusive → extract their
+      // GST; the item (food) GST is whatever remains of the order's total tax.
+      const gstOnAdditional = extractGst(additionalCharge);
+      const deliveryGst = extractGst(delivery);
+      const gstOnItem = Math.max(0, r2(tax - deliveryGst));
+      const tips = num(o.dm_tips);
+      const situationalCharges = 0; // surge / late-night / festival — not separately tracked yet
+      const situationalGst = 0;
+      const totalDiscount = r2(coupon + restDiscount + adminDiscount);
       const user = userMap.get(Number(o.mysql_user_id ?? 0));
       const cod = String(o.payment_method) === 'cash_on_delivery';
       const status = String(o.order_status ?? 'pending');
+      const refundStatus = String(o.refund_status ?? '');
       status_counts[status] = (status_counts[status] ?? 0) + 1;
       return {
         order_id: Number(o.mysql_id),
+        order_type: String(o.order_type ?? 'delivery'),
         restaurant: restMap.get(Number(o.mysql_restaurant_id ?? 0))?.name ?? null,
         customer_name: user ? `${user.f_name ?? ''} ${user.l_name ?? ''}`.trim() || null : null,
         total_item_amount: itemAmount,
-        item_discount: 0,
         coupon_discount: coupon,
-        referral_discount: 0,
+        admin_discount: adminDiscount,
+        total_discount: totalDiscount,
         discounted_amount: r2(itemAmount - coupon - restDiscount),
-        tax,
+        gst_on_item: gstOnItem,
+        additional_charge: additionalCharge,
+        gst_on_additional: gstOnAdditional,
         delivery_charge: delivery,
-        service_charge: 0,
+        delivery_gst: deliveryGst,
+        tips,
+        situational_charges: situationalCharges,
+        situational_gst: situationalGst,
+        net_payable: orderAmount,
         order_amount: orderAmount,
-        amount_received_by: status === 'delivered' ? (cod ? 'Delivery man' : 'Admin') : 'Not Received Yet',
         payment_method: String(o.payment_method ?? 'cash_on_delivery'),
         payment_status: String(o.payment_status ?? 'unpaid'),
         order_status: status,
+        refund_status: refundStatus,
+        delivered: status === 'delivered',
+        canceled: status === 'canceled' || status === 'cancelled',
+        refunded: status === 'refunded' || refundStatus === 'refunded' || refundStatus === 'completed' || refundStatus === 'processed',
+        amount_received_by: status === 'delivered' ? (cod ? 'Delivery man' : 'Admin') : 'Not Received Yet',
+        // legacy fields kept for compatibility with any other consumer
+        item_discount: 0,
+        referral_discount: 0,
+        tax,
+        service_charge: additionalCharge,
         created_at: o.created_at ?? null,
       };
     });
