@@ -289,6 +289,12 @@ export class OrderService {
       // If no slab covers the distance, fall back to the restaurant flat fee.
       let deliveryCharge = 0;
       let deliveryGst = 0;
+      // Situational portion of the delivery fee — the surge uplift + the named
+      // weekend/festival/late-night surcharges. It's already INSIDE deliveryCharge
+      // (the slab engine's subtotal); we break it out here so it can be stored on
+      // the order and reported as its own line (Transaction Report "Situational
+      // Charges" column). DM settlement still uses the full delivery_charge.
+      let situationalCharge = 0;
       // Take Away and Dine In are collected/eaten at the restaurant — no delivery
       // leg, so they carry no delivery charge. Only Home Delivery is charged.
       if (body.order_type !== 'take_away' && body.order_type !== 'dine_in') {
@@ -306,6 +312,16 @@ export class OrderService {
           } else if (dc.matched_slab) {
             deliveryCharge = Number((dc as { subtotal?: number }).subtotal ?? 0);
             deliveryGst = Number(dc.gst_amount ?? 0);
+            // Break out the situational portion: surge uplift on the base + every
+            // named surcharge (weekend/festival/late-night). vehicle_extra is a
+            // distance thing, so it stays in the base delivery fee.
+            const surgeMul = Number(dc.surge_multiplier ?? 1) || 1;
+            const baseAfterSurge = Number((dc as { base_after_surge?: number }).base_after_surge ?? 0);
+            const surgeUplift = surgeMul > 1 ? baseAfterSurge - baseAfterSurge / surgeMul : 0;
+            const namedSurcharge = Array.isArray(dc.surcharges)
+              ? (dc.surcharges as Array<{ amount?: number }>).reduce((a, b) => a + (Number(b.amount) || 0), 0) : 0;
+            situationalCharge = Math.round((surgeUplift + namedSurcharge) * 100) / 100;
+            if (!Number.isFinite(situationalCharge) || situationalCharge < 0) situationalCharge = 0;
           } else {
             // No active slab for this distance — fall back to the flat fee.
             deliveryCharge = Number(restaurant.minimum_shipping_charge ?? 0);
@@ -475,6 +491,9 @@ export class OrderService {
         // this snapshot, never the (mutable) live food_gst_rate setting.
         food_gst_rate: effectiveFoodGstRate,
         delivery_charge: deliveryCharge,
+        // Situational (surge + weekend/festival/late-night) portion of the
+        // delivery fee, broken out for reporting (it's part of delivery_charge).
+        situational_charge: situationalCharge,
         coupon_discount_amount: couponDiscount,
         coupon_code: couponCode,
         discount_owner: couponCode ? couponOwner : null,

@@ -4508,6 +4508,137 @@ export class AdminService {
     return { total: rows.length, rows };
   }
 
+  /** Detailed per-order TRANSACTION REPORT (client spec): every fee, discount,
+   *  GST split, tip, income/commission/TDS line per order, for ALL order types &
+   *  statuses. Filters: date range/period, zone, restaurant, order type, category
+   *  (all | campaign), order status. GST-per-component is computed from the
+   *  platform food_gst_rate; commission from restaurant.comission; TDS from
+   *  tds_settings. (Money/order-state breakdown for the admin's Transaction page.) */
+  async transactionReport(opts: {
+    from?: string; to?: string; days?: number; zoneId?: number; restaurantId?: number;
+    orderType?: string; category?: string; orderStatus?: string;
+  } = {}) {
+    if (!this.useMongo()) return { total: 0, rows: [] };
+    const match: Record<string, unknown> = {};
+    // Date range on creation so canceled/refunded orders are included too.
+    if (opts.from || opts.to) {
+      const range: Record<string, unknown> = {};
+      if (opts.from) range.$gte = new Date(opts.from);
+      if (opts.to) range.$lte = new Date(`${opts.to}T23:59:59.999Z`);
+      match.created_at = range;
+    } else if (opts.days) {
+      match.created_at = { $gte: new Date(Date.now() - opts.days * 86_400_000) };
+    }
+    if (opts.zoneId) match.mysql_zone_id = Number(opts.zoneId);
+    if (opts.restaurantId) match.mysql_restaurant_id = Number(opts.restaurantId);
+    if (opts.orderType && opts.orderType !== 'all') {
+      // "delivery" and "home_delivery" are the same thing in this data.
+      match.order_type = opts.orderType === 'delivery' || opts.orderType === 'home_delivery'
+        ? { $in: ['delivery', 'home_delivery'] }
+        : opts.orderType;
+    }
+    if (opts.orderStatus && opts.orderStatus !== 'all') match.order_status = opts.orderStatus;
+    if (opts.category === 'campaign') match.mysql_item_campaign_id = { $ne: null };
+
+    const orders = await this.mongo.findMany<Record<string, unknown>>('orders', match, { sort: { mysql_id: -1 }, limit: 1000 });
+    const restIds = Array.from(new Set(orders.map((o) => Number(o.mysql_restaurant_id ?? 0)).filter((n) => n > 0)));
+    const userIds = Array.from(new Set(orders.map((o) => Number(o.mysql_user_id ?? 0)).filter((n) => n > 0)));
+    const [rests, users] = await Promise.all([
+      restIds.length ? this.mongo.findMany<{ mysql_id: number; name?: string; comission?: number }>('restaurants', { mysql_id: { $in: restIds } }) : Promise.resolve([] as Array<{ mysql_id: number; name?: string; comission?: number }>),
+      userIds.length ? this.mongo.findMany<{ mysql_id: number; f_name?: string; l_name?: string }>('users', { mysql_id: { $in: userIds } }) : Promise.resolve([] as Array<{ mysql_id: number; f_name?: string; l_name?: string }>),
+    ]);
+    const restMap = new Map(rests.map((r) => [Number(r.mysql_id), r]));
+    const userMap = new Map(users.map((u) => [Number(u.mysql_id), u]));
+
+    // Platform rates.
+    const gstDoc = await this.mongo.findOne<{ value?: string; key_value?: string }>('business_settings', { key: 'food_gst_rate' });
+    const gstRate = (() => { const n = parseFloat(String(gstDoc?.value ?? gstDoc?.key_value ?? '5')); return Number.isFinite(n) && n >= 0 ? n : 5; })();
+    const commGstRate = 18; // GST on the platform's commission/PPO fee.
+    const tdsDoc = await this.mongo.findOne<{ default_rate?: number; status?: number | boolean }>('tds_settings', {});
+    const tdsRate = tdsDoc && (tdsDoc.status === 1 || tdsDoc.status === true) ? (Number(tdsDoc.default_rate) || 0) : 0;
+
+    const num = (v: unknown) => (v == null ? 0 : Number(v) || 0);
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    const canceledStatuses = ['canceled', 'cancelled', 'auto_cancelled', 'failed'];
+
+    const rows = orders.map((o) => {
+      const orderAmount = num(o.order_amount);
+      const totalTax = num(o.total_tax_amount);
+      const delivery = num(o.delivery_charge);
+      const coupon = num(o.coupon_discount_amount);
+      const restDiscount = num(o.restaurant_discount_amount);
+      const adminDiscount = num(o.admin_discount_amount);
+      const additionalCharge = num(o.additional_charge) + num(o.extra_packaging_amount); // platform/package/convenience etc.
+      // Situational charge (surge + weekend/festival/late-night) is stored on the
+      // order and is PART of delivery_charge — so the base delivery fee shown is
+      // delivery_charge minus the situational portion (no double counting).
+      const situational = num(o.situational_charge ?? o.surge_amount ?? o.surcharge_amount);
+      const baseDelivery = r2(Math.max(0, delivery - situational));
+      const tips = num(o.dm_tips);
+      // Reverse the item subtotal from order_amount (delivery already includes
+      // situational, so it is not subtracted again here).
+      let itemAmount = r2(orderAmount + coupon + restDiscount + adminDiscount - totalTax - delivery - num(o.additional_charge) - num(o.extra_packaging_amount));
+      if (itemAmount <= 0) itemAmount = r2(Math.max(0, orderAmount - totalTax - delivery)) || orderAmount;
+
+      const restDiscountCoupon = r2(restDiscount + coupon); // restaurant-borne discount (incl. coupon)
+      const totalDiscount = r2(restDiscount + coupon + adminDiscount);
+      const netItemValue = r2(itemAmount - totalDiscount);
+      // GST broken down per component, computed from the platform GST rate.
+      const gstOnItem = r2((Math.max(0, netItemValue) * gstRate) / 100);
+      const gstOnAdditional = r2((additionalCharge * gstRate) / 100);
+      const gstOnDelivery = r2((baseDelivery * gstRate) / 100);
+      const gstOnSituational = r2((situational * gstRate) / 100);
+
+      const rest = restMap.get(Number(o.mysql_restaurant_id ?? 0));
+      const commissionRate = num(rest?.comission) || 10;
+      const commission = r2((Math.max(0, netItemValue) * commissionRate) / 100);
+      const commissionGst = r2((commission * commGstRate) / 100);
+      const adminFee = r2(commission + commissionGst); // PPO/Commission + GST
+      // Restaurant income = item cost − restaurant discount − admin fee.
+      const restaurantIncome = r2(itemAmount - restDiscountCoupon - adminFee);
+      const tds = r2((Math.max(0, restaurantIncome) * tdsRate) / 100);
+      const restaurantNetIncome = r2(restaurantIncome - tds);
+      const adminIncomeFromRestaurant = adminFee;
+      const adminIncomeFromUser = r2(additionalCharge + situational + baseDelivery - adminDiscount);
+
+      const status = String(o.order_status ?? '');
+      const user = userMap.get(Number(o.mysql_user_id ?? 0));
+      const pm = String(o.payment_method ?? 'cash_on_delivery');
+      const payMode = pm === 'cash_on_delivery' ? 'COD' : pm === 'wallet' ? 'Wallet' : pm === 'digital_payment' ? 'Online' : pm.replace(/_/g, ' ');
+      const ot = String(o.order_type ?? 'delivery');
+      return {
+        order_id: Number(o.mysql_id),
+        order_type: ot === 'home_delivery' ? 'delivery' : ot,
+        restaurant: rest?.name ?? null,
+        customer_name: user ? `${user.f_name ?? ''} ${user.l_name ?? ''}`.trim() || null : (String(o.contact_person_name ?? '') || null),
+        total_item_cost: itemAmount,
+        restaurant_discount_coupon: restDiscountCoupon,
+        admin_discount: adminDiscount,
+        total_discount: totalDiscount,
+        net_item_value: netItemValue,
+        gst_on_item: gstOnItem,
+        additional_charge: additionalCharge,
+        gst_on_additional: gstOnAdditional,
+        delivery_fee: baseDelivery,
+        gst_on_delivery: gstOnDelivery,
+        deliverymen_tip: tips,
+        situational_charges: situational,
+        gst_on_situational: gstOnSituational,
+        net_payable_by_user: orderAmount,
+        payment_mode: payMode,
+        restaurant_income: restaurantIncome,
+        tds,
+        restaurant_net_income: restaurantNetIncome,
+        admin_income_from_restaurant: adminIncomeFromRestaurant,
+        admin_income_from_user: adminIncomeFromUser,
+        order_delivered: status === 'delivered' ? 'Yes' : 'No',
+        order_canceled: canceledStatuses.includes(status) ? 'Yes' : 'No',
+        order_refunded: status === 'refunded' || String(o.payment_status) === 'refunded' ? 'Yes' : 'No',
+      };
+    });
+    return { total: rows.length, rows };
+  }
+
   /** Per-order expense list (StackFood's "Expense Lists"). Every discount the
    *  platform funded — coupon, product discount — becomes one expense row. */
   async expenseDetails(opts: ReportFilterOpts = {}) {

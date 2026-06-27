@@ -3982,6 +3982,119 @@ let AdminService = class AdminService {
         });
         return { total: rows.length, rows };
     }
+    async transactionReport(opts = {}) {
+        if (!this.useMongo())
+            return { total: 0, rows: [] };
+        const match = {};
+        if (opts.from || opts.to) {
+            const range = {};
+            if (opts.from)
+                range.$gte = new Date(opts.from);
+            if (opts.to)
+                range.$lte = new Date(`${opts.to}T23:59:59.999Z`);
+            match.created_at = range;
+        }
+        else if (opts.days) {
+            match.created_at = { $gte: new Date(Date.now() - opts.days * 86_400_000) };
+        }
+        if (opts.zoneId)
+            match.mysql_zone_id = Number(opts.zoneId);
+        if (opts.restaurantId)
+            match.mysql_restaurant_id = Number(opts.restaurantId);
+        if (opts.orderType && opts.orderType !== 'all') {
+            match.order_type = opts.orderType === 'delivery' || opts.orderType === 'home_delivery'
+                ? { $in: ['delivery', 'home_delivery'] }
+                : opts.orderType;
+        }
+        if (opts.orderStatus && opts.orderStatus !== 'all')
+            match.order_status = opts.orderStatus;
+        if (opts.category === 'campaign')
+            match.mysql_item_campaign_id = { $ne: null };
+        const orders = await this.mongo.findMany('orders', match, { sort: { mysql_id: -1 }, limit: 1000 });
+        const restIds = Array.from(new Set(orders.map((o) => Number(o.mysql_restaurant_id ?? 0)).filter((n) => n > 0)));
+        const userIds = Array.from(new Set(orders.map((o) => Number(o.mysql_user_id ?? 0)).filter((n) => n > 0)));
+        const [rests, users] = await Promise.all([
+            restIds.length ? this.mongo.findMany('restaurants', { mysql_id: { $in: restIds } }) : Promise.resolve([]),
+            userIds.length ? this.mongo.findMany('users', { mysql_id: { $in: userIds } }) : Promise.resolve([]),
+        ]);
+        const restMap = new Map(rests.map((r) => [Number(r.mysql_id), r]));
+        const userMap = new Map(users.map((u) => [Number(u.mysql_id), u]));
+        const gstDoc = await this.mongo.findOne('business_settings', { key: 'food_gst_rate' });
+        const gstRate = (() => { const n = parseFloat(String(gstDoc?.value ?? gstDoc?.key_value ?? '5')); return Number.isFinite(n) && n >= 0 ? n : 5; })();
+        const commGstRate = 18;
+        const tdsDoc = await this.mongo.findOne('tds_settings', {});
+        const tdsRate = tdsDoc && (tdsDoc.status === 1 || tdsDoc.status === true) ? (Number(tdsDoc.default_rate) || 0) : 0;
+        const num = (v) => (v == null ? 0 : Number(v) || 0);
+        const r2 = (n) => Math.round(n * 100) / 100;
+        const canceledStatuses = ['canceled', 'cancelled', 'auto_cancelled', 'failed'];
+        const rows = orders.map((o) => {
+            const orderAmount = num(o.order_amount);
+            const totalTax = num(o.total_tax_amount);
+            const delivery = num(o.delivery_charge);
+            const coupon = num(o.coupon_discount_amount);
+            const restDiscount = num(o.restaurant_discount_amount);
+            const adminDiscount = num(o.admin_discount_amount);
+            const additionalCharge = num(o.additional_charge) + num(o.extra_packaging_amount);
+            const situational = num(o.situational_charge ?? o.surge_amount ?? o.surcharge_amount);
+            const baseDelivery = r2(Math.max(0, delivery - situational));
+            const tips = num(o.dm_tips);
+            let itemAmount = r2(orderAmount + coupon + restDiscount + adminDiscount - totalTax - delivery - num(o.additional_charge) - num(o.extra_packaging_amount));
+            if (itemAmount <= 0)
+                itemAmount = r2(Math.max(0, orderAmount - totalTax - delivery)) || orderAmount;
+            const restDiscountCoupon = r2(restDiscount + coupon);
+            const totalDiscount = r2(restDiscount + coupon + adminDiscount);
+            const netItemValue = r2(itemAmount - totalDiscount);
+            const gstOnItem = r2((Math.max(0, netItemValue) * gstRate) / 100);
+            const gstOnAdditional = r2((additionalCharge * gstRate) / 100);
+            const gstOnDelivery = r2((baseDelivery * gstRate) / 100);
+            const gstOnSituational = r2((situational * gstRate) / 100);
+            const rest = restMap.get(Number(o.mysql_restaurant_id ?? 0));
+            const commissionRate = num(rest?.comission) || 10;
+            const commission = r2((Math.max(0, netItemValue) * commissionRate) / 100);
+            const commissionGst = r2((commission * commGstRate) / 100);
+            const adminFee = r2(commission + commissionGst);
+            const restaurantIncome = r2(itemAmount - restDiscountCoupon - adminFee);
+            const tds = r2((Math.max(0, restaurantIncome) * tdsRate) / 100);
+            const restaurantNetIncome = r2(restaurantIncome - tds);
+            const adminIncomeFromRestaurant = adminFee;
+            const adminIncomeFromUser = r2(additionalCharge + situational + baseDelivery - adminDiscount);
+            const status = String(o.order_status ?? '');
+            const user = userMap.get(Number(o.mysql_user_id ?? 0));
+            const pm = String(o.payment_method ?? 'cash_on_delivery');
+            const payMode = pm === 'cash_on_delivery' ? 'COD' : pm === 'wallet' ? 'Wallet' : pm === 'digital_payment' ? 'Online' : pm.replace(/_/g, ' ');
+            const ot = String(o.order_type ?? 'delivery');
+            return {
+                order_id: Number(o.mysql_id),
+                order_type: ot === 'home_delivery' ? 'delivery' : ot,
+                restaurant: rest?.name ?? null,
+                customer_name: user ? `${user.f_name ?? ''} ${user.l_name ?? ''}`.trim() || null : (String(o.contact_person_name ?? '') || null),
+                total_item_cost: itemAmount,
+                restaurant_discount_coupon: restDiscountCoupon,
+                admin_discount: adminDiscount,
+                total_discount: totalDiscount,
+                net_item_value: netItemValue,
+                gst_on_item: gstOnItem,
+                additional_charge: additionalCharge,
+                gst_on_additional: gstOnAdditional,
+                delivery_fee: baseDelivery,
+                gst_on_delivery: gstOnDelivery,
+                deliverymen_tip: tips,
+                situational_charges: situational,
+                gst_on_situational: gstOnSituational,
+                net_payable_by_user: orderAmount,
+                payment_mode: payMode,
+                restaurant_income: restaurantIncome,
+                tds,
+                restaurant_net_income: restaurantNetIncome,
+                admin_income_from_restaurant: adminIncomeFromRestaurant,
+                admin_income_from_user: adminIncomeFromUser,
+                order_delivered: status === 'delivered' ? 'Yes' : 'No',
+                order_canceled: canceledStatuses.includes(status) ? 'Yes' : 'No',
+                order_refunded: status === 'refunded' || String(o.payment_status) === 'refunded' ? 'Yes' : 'No',
+            };
+        });
+        return { total: rows.length, rows };
+    }
     async expenseDetails(opts = {}) {
         if (!this.useMongo())
             return { total: 0, rows: [] };

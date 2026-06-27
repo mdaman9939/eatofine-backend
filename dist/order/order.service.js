@@ -157,6 +157,7 @@ let OrderService = class OrderService {
             const couponOwner = couponResult.couponOwner;
             let deliveryCharge = 0;
             let deliveryGst = 0;
+            let situationalCharge = 0;
             if (body.order_type !== 'take_away' && body.order_type !== 'dine_in') {
                 let distanceKm = body.distance != null && Number.isFinite(Number(body.distance)) ? Math.max(0, Number(body.distance)) : NaN;
                 if (Number.isNaN(distanceKm)) {
@@ -172,6 +173,14 @@ let OrderService = class OrderService {
                     else if (dc.matched_slab) {
                         deliveryCharge = Number(dc.subtotal ?? 0);
                         deliveryGst = Number(dc.gst_amount ?? 0);
+                        const surgeMul = Number(dc.surge_multiplier ?? 1) || 1;
+                        const baseAfterSurge = Number(dc.base_after_surge ?? 0);
+                        const surgeUplift = surgeMul > 1 ? baseAfterSurge - baseAfterSurge / surgeMul : 0;
+                        const namedSurcharge = Array.isArray(dc.surcharges)
+                            ? dc.surcharges.reduce((a, b) => a + (Number(b.amount) || 0), 0) : 0;
+                        situationalCharge = Math.round((surgeUplift + namedSurcharge) * 100) / 100;
+                        if (!Number.isFinite(situationalCharge) || situationalCharge < 0)
+                            situationalCharge = 0;
                     }
                     else {
                         deliveryCharge = Number(restaurant.minimum_shipping_charge ?? 0);
@@ -303,6 +312,7 @@ let OrderService = class OrderService {
                 total_tax_amount: Math.round(totalTax * 100) / 100,
                 food_gst_rate: effectiveFoodGstRate,
                 delivery_charge: deliveryCharge,
+                situational_charge: situationalCharge,
                 coupon_discount_amount: couponDiscount,
                 coupon_code: couponCode,
                 discount_owner: couponCode ? couponOwner : null,

@@ -859,6 +859,29 @@ export class AdminController {
     });
   }
 
+  @Get('reports/transaction-report')
+  transactionReport(
+    @Query('days') days?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('zone_id') zoneId?: string,
+    @Query('restaurant_id') restaurantId?: string,
+    @Query('order_type') orderType?: string,
+    @Query('category') category?: string,
+    @Query('order_status') orderStatus?: string,
+  ) {
+    return this.admin.transactionReport({
+      days: from || to ? undefined : toInt(days, 30),
+      from: from || undefined,
+      to: to || undefined,
+      zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
+      restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
+      orderType: orderType || undefined,
+      category: category || undefined,
+      orderStatus: orderStatus || undefined,
+    });
+  }
+
   @Get('reports/restaurant-earnings')
   restaurantEarnings(
     @Query('limit') limit?: string,

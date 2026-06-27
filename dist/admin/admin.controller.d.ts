@@ -1769,6 +1769,38 @@ export declare class AdminController {
             payment_status: string;
         }[];
     }>;
+    transactionReport(days?: string, from?: string, to?: string, zoneId?: string, restaurantId?: string, orderType?: string, category?: string, orderStatus?: string): Promise<{
+        total: number;
+        rows: {
+            order_id: number;
+            order_type: string;
+            restaurant: string | null;
+            customer_name: string | null;
+            total_item_cost: number;
+            restaurant_discount_coupon: number;
+            admin_discount: number;
+            total_discount: number;
+            net_item_value: number;
+            gst_on_item: number;
+            additional_charge: number;
+            gst_on_additional: number;
+            delivery_fee: number;
+            gst_on_delivery: number;
+            deliverymen_tip: number;
+            situational_charges: number;
+            gst_on_situational: number;
+            net_payable_by_user: number;
+            payment_mode: string;
+            restaurant_income: number;
+            tds: number;
+            restaurant_net_income: number;
+            admin_income_from_restaurant: number;
+            admin_income_from_user: number;
+            order_delivered: string;
+            order_canceled: string;
+            order_refunded: string;
+        }[];
+    }>;
     restaurantEarnings(limit?: string, from?: string, to?: string, zoneId?: string, restaurantId?: string): Promise<{
         top_earners: {
             restaurant_id: number;
