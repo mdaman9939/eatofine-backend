@@ -4806,16 +4806,19 @@ export class AdminService {
       const restDiscount = num(o.restaurant_discount_amount);
       const adminDiscount = num(o.admin_discount_amount);
       const additionalCharge = num(o.additional_charge);
-      let itemAmount = r2(orderAmount + coupon + restDiscount - tax - delivery - additionalCharge);
+      const situationalCharges = num(o.situational_charge); // surge / late-night / festival / weekend
+      // Item value is the residual once tax, delivery and the (GST-inclusive)
+      // additional + situational charges are taken out — so the breakdown always
+      // sums back to order_amount (net payable), regardless of which charges exist.
+      let itemAmount = r2(orderAmount + coupon + restDiscount - tax - delivery - additionalCharge - situationalCharges);
       if (itemAmount <= 0) itemAmount = r2(Math.max(0, orderAmount - tax - delivery)) || orderAmount;
-      // GST split: additional charge + delivery are GST-inclusive → extract their
-      // GST; the item (food) GST is whatever remains of the order's total tax.
+      // GST split: additional / situational / delivery are GST-inclusive → extract
+      // their GST; the item (food) GST is whatever remains of the order's total tax.
       const gstOnAdditional = extractGst(additionalCharge);
+      const situationalGst = extractGst(situationalCharges);
       const deliveryGst = extractGst(delivery);
       const gstOnItem = Math.max(0, r2(tax - deliveryGst));
       const tips = num(o.dm_tips);
-      const situationalCharges = 0; // surge / late-night / festival — not separately tracked yet
-      const situationalGst = 0;
       const totalDiscount = r2(coupon + restDiscount + adminDiscount);
       const user = userMap.get(Number(o.mysql_user_id ?? 0));
       const cod = String(o.payment_method) === 'cash_on_delivery';
