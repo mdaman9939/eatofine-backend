@@ -4864,6 +4864,68 @@ export class AdminService {
     return { total: rows.length, rows, status_counts };
   }
 
+  /** Order-wise ADMIN EARNING report. One row per order showing what the platform
+   *  earns from it: commission/PPO from the restaurant, delivery fee, additional
+   *  (platform) charge, situational (surge) charge, and the total. Filters:
+   *  period (days) / from / to / zone / order_type. Excludes failed + canceled. */
+  async adminEarningOrders(opts: ReportFilterOpts & { days?: number; orderType?: string } = {}) {
+    if (!this.useMongo()) return { total: 0, rows: [] };
+    const match: Record<string, unknown> = { order_status: { $nin: ['failed', 'canceled', 'cancelled'] } };
+    if (opts.from || opts.to) {
+      const range: Record<string, unknown> = {};
+      if (opts.from) range.$gte = new Date(opts.from);
+      if (opts.to) range.$lte = new Date(`${opts.to}T23:59:59.999Z`);
+      match.created_at = range;
+    } else if (opts.days) {
+      match.created_at = { $gte: new Date(Date.now() - opts.days * 86_400_000) };
+    }
+    if (opts.zoneId) match.mysql_zone_id = Number(opts.zoneId);
+    if (opts.restaurantId) match.mysql_restaurant_id = Number(opts.restaurantId);
+    if (opts.orderType) match.order_type = String(opts.orderType);
+
+    const orders = await this.mongo.findMany<Record<string, unknown>>('orders', match, { sort: { mysql_id: -1 }, limit: 1000 });
+    const restIds = Array.from(new Set(orders.map((o) => Number(o.mysql_restaurant_id ?? 0)).filter((n) => n > 0)));
+    const userIds = Array.from(new Set(orders.map((o) => Number(o.mysql_user_id ?? 0)).filter((n) => n > 0)));
+    const [rests, users] = await Promise.all([
+      restIds.length ? this.mongo.findMany<{ mysql_id: number; name?: string; comission?: number }>('restaurants', { mysql_id: { $in: restIds } }) : Promise.resolve([] as Array<{ mysql_id: number; name?: string; comission?: number }>),
+      userIds.length ? this.mongo.findMany<{ mysql_id: number; f_name?: string; l_name?: string }>('users', { mysql_id: { $in: userIds } }) : Promise.resolve([] as Array<{ mysql_id: number; f_name?: string; l_name?: string }>),
+    ]);
+    const restMap = new Map(rests.map((r) => [Number(r.mysql_id), r]));
+    const userMap = new Map(users.map((u) => [Number(u.mysql_id), u]));
+    const num = (v: unknown) => (v == null ? 0 : Number(v) || 0);
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+
+    const rows = orders.map((o) => {
+      const orderAmount = num(o.order_amount);
+      const tax = num(o.total_tax_amount);
+      const delivery = num(o.delivery_charge);
+      const coupon = num(o.coupon_discount_amount);
+      const restDiscount = num(o.restaurant_discount_amount);
+      const additional = num(o.additional_charge);
+      const situational = num(o.situational_charge);
+      // Item (food) value = residual of the order breakdown (same basis as the Order Report).
+      let itemAmount = r2(orderAmount + coupon + restDiscount - tax - delivery - additional - situational);
+      if (itemAmount <= 0) itemAmount = r2(Math.max(0, orderAmount - tax - delivery)) || orderAmount;
+      const rest = restMap.get(Number(o.mysql_restaurant_id ?? 0));
+      const commissionRate = num(rest?.comission) || 10; // PPO / commission %
+      const earningRestaurant = r2((itemAmount * commissionRate) / 100);
+      const user = userMap.get(Number(o.mysql_user_id ?? 0));
+      const total = r2(earningRestaurant + delivery + additional + situational);
+      return {
+        order_id: Number(o.mysql_id),
+        customer_name: user ? `${user.f_name ?? ''} ${user.l_name ?? ''}`.trim() || null : null,
+        restaurant: rest?.name ?? null,
+        order_type: String(o.order_type ?? 'delivery'),
+        earning_restaurant: earningRestaurant,
+        earning_delivery: delivery,
+        earning_additional: additional,
+        earning_situational: situational,
+        total_earning: total,
+      };
+    });
+    return { total: rows.length, rows };
+  }
+
   /** Per-restaurant report (StackFood's "Restaurant Report Table"): food count,
    *  order count, order amount, discount, admin commission, VAT, rating. */
   async restaurantReport(opts: ReportFilterOpts = {}) {

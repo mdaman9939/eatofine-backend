@@ -1969,6 +1969,23 @@ export declare class AdminService {
         }[];
         status_counts: Record<string, number>;
     }>;
+    adminEarningOrders(opts?: ReportFilterOpts & {
+        days?: number;
+        orderType?: string;
+    }): Promise<{
+        total: number;
+        rows: {
+            order_id: number;
+            customer_name: string | null;
+            restaurant: string | null;
+            order_type: string;
+            earning_restaurant: number;
+            earning_delivery: number;
+            earning_additional: number;
+            earning_situational: number;
+            total_earning: number;
+        }[];
+    }>;
     restaurantReport(opts?: ReportFilterOpts): Promise<{
         total: number;
         rows: {

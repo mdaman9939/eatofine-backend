@@ -1644,6 +1644,20 @@ export declare class AdminController {
             expenses: Record<string, unknown>[];
         };
     }>;
+    adminEarningOrders(days?: string, from?: string, to?: string, zoneId?: string, restaurantId?: string, orderType?: string): Promise<{
+        total: number;
+        rows: {
+            order_id: number;
+            customer_name: string | null;
+            restaurant: string | null;
+            order_type: string;
+            earning_restaurant: number;
+            earning_delivery: number;
+            earning_additional: number;
+            earning_situational: number;
+            total_earning: number;
+        }[];
+    }>;
     customerOverviewReport(): Promise<{
         total: number;
         rows: {
