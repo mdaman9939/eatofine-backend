@@ -462,6 +462,16 @@ let AdminController = class AdminController {
             orderType: orderType || undefined,
         });
     }
+    adminExpenseOrders(days, from, to, zoneId, restaurantId, orderType) {
+        return this.admin.adminExpenseOrders({
+            days: toInt(days, 30),
+            from: from || undefined,
+            to: to || undefined,
+            zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
+            restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
+            orderType: orderType || undefined,
+        });
+    }
     customerOverviewReport() {
         return this.admin.customerOverviewReport();
     }
@@ -1872,6 +1882,18 @@ __decorate([
     __metadata("design:paramtypes", [String, String, String, String, String, String]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "adminEarningOrders", null);
+__decorate([
+    (0, common_1.Get)('reports/admin-expense-orders'),
+    __param(0, (0, common_1.Query)('days')),
+    __param(1, (0, common_1.Query)('from')),
+    __param(2, (0, common_1.Query)('to')),
+    __param(3, (0, common_1.Query)('zone_id')),
+    __param(4, (0, common_1.Query)('restaurant_id')),
+    __param(5, (0, common_1.Query)('order_type')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, String, String, String, String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "adminExpenseOrders", null);
 __decorate([
     (0, common_1.Get)('reports/customer-report'),
     __metadata("design:type", Function),

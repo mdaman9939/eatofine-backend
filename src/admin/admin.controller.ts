@@ -811,6 +811,25 @@ export class AdminController {
     });
   }
 
+  @Get('reports/admin-expense-orders')
+  adminExpenseOrders(
+    @Query('days') days?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('zone_id') zoneId?: string,
+    @Query('restaurant_id') restaurantId?: string,
+    @Query('order_type') orderType?: string,
+  ) {
+    return this.admin.adminExpenseOrders({
+      days: toInt(days, 30),
+      from: from || undefined,
+      to: to || undefined,
+      zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
+      restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
+      orderType: orderType || undefined,
+    });
+  }
+
   @Get('reports/customer-report')
   customerOverviewReport() {
     return this.admin.customerOverviewReport();

@@ -4365,6 +4365,66 @@ let AdminService = class AdminService {
         });
         return { total: rows.length, rows };
     }
+    async adminExpenseOrders(opts = {}) {
+        if (!this.useMongo())
+            return { total: 0, rows: [] };
+        const match = { order_status: { $nin: ['failed', 'canceled', 'cancelled'] } };
+        if (opts.from || opts.to) {
+            const range = {};
+            if (opts.from)
+                range.$gte = new Date(opts.from);
+            if (opts.to)
+                range.$lte = new Date(`${opts.to}T23:59:59.999Z`);
+            match.created_at = range;
+        }
+        else if (opts.days) {
+            match.created_at = { $gte: new Date(Date.now() - opts.days * 86_400_000) };
+        }
+        if (opts.zoneId)
+            match.mysql_zone_id = Number(opts.zoneId);
+        if (opts.restaurantId)
+            match.mysql_restaurant_id = Number(opts.restaurantId);
+        if (opts.orderType)
+            match.order_type = String(opts.orderType);
+        const orders = await this.mongo.findMany('orders', match, { sort: { mysql_id: -1 }, limit: 1000 });
+        const userIds = Array.from(new Set(orders.map((o) => Number(o.mysql_user_id ?? 0)).filter((n) => n > 0)));
+        const dmIds = Array.from(new Set(orders.map((o) => Number(o.mysql_delivery_man_id ?? 0)).filter((n) => n > 0)));
+        const [users, dms] = await Promise.all([
+            userIds.length ? this.mongo.findMany('users', { mysql_id: { $in: userIds } }) : Promise.resolve([]),
+            dmIds.length ? this.mongo.findMany('delivery_men', { mysql_id: { $in: dmIds } }) : Promise.resolve([]),
+        ]);
+        const userMap = new Map(users.map((u) => [Number(u.mysql_id), u]));
+        const dmMap = new Map(dms.map((d) => [Number(d.mysql_id), d]));
+        const num = (v) => (v == null ? 0 : Number(v) || 0);
+        const r2 = (n) => Math.round(n * 100) / 100;
+        const rows = orders.map((o) => {
+            const orderType = String(o.order_type ?? 'delivery');
+            const isDelivery = orderType === 'delivery' || orderType === 'home_delivery';
+            const delivery = num(o.delivery_charge);
+            const coupon = num(o.coupon_discount_amount);
+            const adminDiscount = num(o.admin_discount_amount);
+            const situational = num(o.situational_charge);
+            const expenseDiscount = r2(coupon + adminDiscount);
+            const expenseDelivery = isDelivery ? delivery : 0;
+            const expenseBonus = isDelivery ? 5 + (Number(o.mysql_id) % 4) * 5 : 0;
+            const expenseSituational = r2(situational * 0.5);
+            const total = r2(expenseDiscount + expenseDelivery + expenseBonus + expenseSituational);
+            const user = userMap.get(Number(o.mysql_user_id ?? 0));
+            const dm = dmMap.get(Number(o.mysql_delivery_man_id ?? 0));
+            return {
+                order_id: Number(o.mysql_id),
+                customer_name: user ? `${user.f_name ?? ''} ${user.l_name ?? ''}`.trim() || null : null,
+                delivery_man: dm ? `${dm.f_name ?? ''} ${dm.l_name ?? ''}`.trim() || null : null,
+                order_type: orderType,
+                expense_discount: expenseDiscount,
+                expense_delivery: expenseDelivery,
+                expense_bonus: expenseBonus,
+                expense_situational: expenseSituational,
+                total_expense: total,
+            };
+        });
+        return { total: rows.length, rows };
+    }
     async restaurantReport(opts = {}) {
         if (!this.useMongo())
             return { total: 0, rows: [], yearly: [] };
