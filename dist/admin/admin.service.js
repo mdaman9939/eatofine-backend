@@ -4095,6 +4095,84 @@ let AdminService = class AdminService {
         });
         return { total: rows.length, rows };
     }
+    async gstReport(opts = {}) {
+        const emptySummary = { total_orders: 0, food: 0, ppo: 0, additional: 0, delivery: 0, situational: 0, total: 0 };
+        if (!this.useMongo())
+            return { total: 0, food_gst_rate: 5, summary: emptySummary, rows: [] };
+        const match = {};
+        if (opts.from || opts.to) {
+            const range = {};
+            if (opts.from)
+                range.$gte = new Date(opts.from);
+            if (opts.to)
+                range.$lte = new Date(`${opts.to}T23:59:59.999Z`);
+            match.created_at = range;
+        }
+        else if (opts.days) {
+            match.created_at = { $gte: new Date(Date.now() - opts.days * 86_400_000) };
+        }
+        if (opts.zoneId)
+            match.mysql_zone_id = Number(opts.zoneId);
+        if (opts.restaurantId)
+            match.mysql_restaurant_id = Number(opts.restaurantId);
+        const orders = await this.mongo.findMany('orders', match, { sort: { mysql_id: -1 }, limit: 2000 });
+        const restIds = Array.from(new Set(orders.map((o) => Number(o.mysql_restaurant_id ?? 0)).filter((n) => n > 0)));
+        const rests = restIds.length
+            ? await this.mongo.findMany('restaurants', { mysql_id: { $in: restIds } })
+            : [];
+        const restMap = new Map(rests.map((r) => [Number(r.mysql_id), r]));
+        const gstDoc = await this.mongo.findOne('business_settings', { key: 'food_gst_rate' });
+        const foodGstRate = (() => { const n = parseFloat(String(gstDoc?.value ?? gstDoc?.key_value ?? '5')); return Number.isFinite(n) && n >= 0 ? n : 5; })();
+        const SERVICE_GST = 18;
+        const num = (v) => (v == null ? 0 : Number(v) || 0);
+        const r2 = (n) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
+        const summary = { ...emptySummary };
+        const rows = orders.map((o, i) => {
+            const orderAmount = num(o.order_amount);
+            const totalTax = num(o.total_tax_amount);
+            const delivery = num(o.delivery_charge);
+            const coupon = num(o.coupon_discount_amount);
+            const restDiscount = num(o.restaurant_discount_amount);
+            const adminDiscount = num(o.admin_discount_amount);
+            const additional = num(o.additional_charge) + num(o.extra_packaging_amount);
+            const situational = num(o.situational_charge ?? o.surge_amount ?? o.surcharge_amount);
+            const baseDelivery = r2(Math.max(0, delivery - situational));
+            const items = Array.isArray(o.items) ? o.items : [];
+            let itemAmount = r2(orderAmount + coupon + restDiscount + adminDiscount - totalTax - delivery - additional);
+            if (itemAmount <= 0)
+                itemAmount = r2(Math.max(0, orderAmount - totalTax - delivery));
+            const netItemValue = r2(Math.max(0, itemAmount - (restDiscount + coupon + adminDiscount)));
+            const gstFood = items.length ? r2(items.reduce((s, it) => s + num(it.tax_amount), 0)) : r2((netItemValue * foodGstRate) / 100);
+            const gstDelivery = r2((baseDelivery * SERVICE_GST) / 100);
+            const gstSituational = r2((situational * SERVICE_GST) / 100);
+            const gstAdditional = r2((additional * SERVICE_GST) / (100 + SERVICE_GST));
+            const commissionRate = num(restMap.get(Number(o.mysql_restaurant_id ?? 0))?.comission) || 10;
+            const commission = r2((netItemValue * commissionRate) / 100);
+            const gstPpo = r2((commission * SERVICE_GST) / 100);
+            const total = r2(gstFood + gstPpo + gstAdditional + gstDelivery + gstSituational);
+            summary.food = r2(summary.food + gstFood);
+            summary.ppo = r2(summary.ppo + gstPpo);
+            summary.additional = r2(summary.additional + gstAdditional);
+            summary.delivery = r2(summary.delivery + gstDelivery);
+            summary.situational = r2(summary.situational + gstSituational);
+            summary.total = r2(summary.total + total);
+            const d = o.created_at ? new Date(o.created_at) : null;
+            return {
+                sr_no: i + 1,
+                order_id: Number(o.mysql_id),
+                order_date: d ? d.toISOString().slice(0, 10) : null,
+                store: restMap.get(Number(o.mysql_restaurant_id ?? 0))?.name ?? null,
+                gst_on_food: gstFood,
+                gst_on_ppo: gstPpo,
+                gst_on_additional: gstAdditional,
+                gst_on_delivery: gstDelivery,
+                gst_on_situational: gstSituational,
+                total_gst: total,
+            };
+        });
+        summary.total_orders = rows.length;
+        return { total: rows.length, food_gst_rate: foodGstRate, summary, rows };
+    }
     async expenseDetails(opts = {}) {
         if (!this.useMongo())
             return { total: 0, rows: [] };

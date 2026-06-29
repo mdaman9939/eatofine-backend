@@ -1887,6 +1887,37 @@ export declare class AdminService {
             order_refunded: string;
         }[];
     }>;
+    gstReport(opts?: {
+        from?: string;
+        to?: string;
+        days?: number;
+        zoneId?: number;
+        restaurantId?: number;
+    }): Promise<{
+        total: number;
+        food_gst_rate: number;
+        summary: {
+            total_orders: number;
+            food: number;
+            ppo: number;
+            additional: number;
+            delivery: number;
+            situational: number;
+            total: number;
+        };
+        rows: {
+            sr_no: number;
+            order_id: number;
+            order_date: string | null;
+            store: string | null;
+            gst_on_food: number;
+            gst_on_ppo: number;
+            gst_on_additional: number;
+            gst_on_delivery: number;
+            gst_on_situational: number;
+            total_gst: number;
+        }[];
+    }>;
     expenseDetails(opts?: ReportFilterOpts): Promise<{
         total: number;
         rows: never[];
