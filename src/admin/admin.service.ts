@@ -6506,13 +6506,15 @@ AdminService.prototype.listDisbursements = async function (this: AdminService, o
     // Resolve restaurant name via the vendor → restaurant link.
     const vendorIds = Array.from(new Set(rows.map((r) => readFk(r, 'vendor_id')).filter((x): x is number => x !== null)));
     const restByVendor = new Map<number, string>();
+    const zoneIdByVendor = new Map<number, number>();
     if (vendorIds.length) {
-      const rests = await this['mongo'].findMany<{ mysql_vendor_id?: number; name?: string }>(
+      const rests = await this['mongo'].findMany<{ mysql_vendor_id?: number; name?: string; mysql_zone_id?: number }>(
         'restaurants', { mysql_vendor_id: { $in: vendorIds } },
-        { projection: { mysql_vendor_id: 1, name: 1 } as Record<string, 0 | 1> },
+        { projection: { mysql_vendor_id: 1, name: 1, mysql_zone_id: 1 } as Record<string, 0 | 1> },
       );
       for (const rr of rests) {
         if (rr.mysql_vendor_id != null && rr.name) restByVendor.set(Number(rr.mysql_vendor_id), rr.name);
+        if (rr.mysql_vendor_id != null && rr.mysql_zone_id != null) zoneIdByVendor.set(Number(rr.mysql_vendor_id), Number(rr.mysql_zone_id));
       }
     }
     // Rider "payable" = balance − cash-in-hand (exactly what the Mark-paid funds
@@ -6530,6 +6532,29 @@ AdminService.prototype.listDisbursements = async function (this: AdminService, o
         if (did > 0) payableByDm.set(did, Math.round(Math.max(0, (Number(w.balance ?? 0)) - (Number(w.collected_cash ?? 0))) * 100) / 100);
       }
     }
+    // Zone per disbursement — restaurant rows via vendor→restaurant.zone, DM rows
+    // via delivery_man.zone. Powers the Disbursement Report zone filter.
+    const zoneIdByDm = new Map<number, number>();
+    if (dmIdsForWallet.length) {
+      const dms = await this['mongo'].findMany<{ mysql_id?: number; mysql_zone_id?: number }>(
+        'delivery_men', { mysql_id: { $in: dmIdsForWallet } },
+        { projection: { mysql_id: 1, mysql_zone_id: 1 } as Record<string, 0 | 1> },
+      );
+      for (const dd of dms) {
+        if (dd.mysql_id != null && dd.mysql_zone_id != null) zoneIdByDm.set(Number(dd.mysql_id), Number(dd.mysql_zone_id));
+      }
+    }
+    const zoneIds = Array.from(new Set([...zoneIdByVendor.values(), ...zoneIdByDm.values()]));
+    const zoneNameById = new Map<number, string>();
+    if (zoneIds.length) {
+      const zns = await this['mongo'].findMany<{ mysql_id?: number; name?: string }>(
+        'zones', { mysql_id: { $in: zoneIds } },
+        { projection: { mysql_id: 1, name: 1 } as Record<string, 0 | 1> },
+      );
+      for (const z of zns) {
+        if (z.mysql_id != null && z.name) zoneNameById.set(Number(z.mysql_id), z.name);
+      }
+    }
     return paginate(
       rows.map((r) => {
         const vendorId = readFk(r, 'vendor_id');
@@ -6537,6 +6562,9 @@ AdminService.prototype.listDisbursements = async function (this: AdminService, o
         const isDm = dmId !== null;
         const amount = r.total_amount !== undefined && r.total_amount !== null ? Number(r.total_amount) : 0;
         const status = String(r.status ?? 'pending');
+        const zoneId = isDm
+          ? (dmId !== null ? (zoneIdByDm.get(dmId) ?? null) : null)
+          : (vendorId !== null ? (zoneIdByVendor.get(vendorId) ?? null) : null);
         // Payment-initiated / paid dates. New transitions stamp these exactly;
         // for older rows we fall back to updated/created so the status' implied
         // milestones still show a date instead of a blank.
@@ -6558,6 +6586,8 @@ AdminService.prototype.listDisbursements = async function (this: AdminService, o
             // Restaurant name first; fall back to the owner/vendor name.
             : (vendorId !== null ? (restByVendor.get(vendorId) ?? vendorNames.get(vendorId) ?? null) : null),
           type: isDm ? 'deliveryman' : 'restaurant',
+          zone_id: zoneId,
+          zone_name: zoneId !== null ? (zoneNameById.get(zoneId) ?? null) : null,
           payment_method: (r.payment_method as string) ?? 'cash',
           initiated_at: initiatedAt,
           paid_at: paidAt,
