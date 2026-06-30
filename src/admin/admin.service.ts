@@ -5329,49 +5329,69 @@ export class AdminService {
   /** Restaurant Earning Report — Recent Transactions (StackFood-style):
    *  per-order restaurant earnings (net take), commission expenses, and
    *  subscription transactions. */
+  // Per-order Earning + Expense report (client-specified "Restaurant Earning and
+  // Expense Report" layout): two parallel rows per delivered+paid order.
+  //   Earning  → Sr | Order Id | Zone | Restaurant | Customer | Date | Total Item Value | Net to restaurant
+  //   Expense  → Sr | Order Id | Zone | Restaurant | Customer | Date | Admin Fee | Spent on Discount | Total Expense
   async restaurantEarningDetailed(opts: ReportFilterOpts = {}) {
-    const empty = { transactions: { earnings: [], expenses: [], subscription: [] } };
+    const emptyTotals = { orders: 0, item_value: 0, total_earning: 0, admin_fee: 0, discount: 0, total_expense: 0 };
+    const empty = { earnings: [], expenses: [], totals: emptyTotals };
     if (!this.useMongo()) return empty;
     const num = (v: unknown) => (v == null ? 0 : Number(v) || 0);
     const r2 = (n: number) => Math.round(n * 100) / 100;
 
-    const orders = await this.mongo.findMany<Record<string, unknown>>('orders', orderReportMatch(opts), { sort: { mysql_id: -1 }, limit: 1000 });
+    const orders = await this.mongo.findMany<Record<string, unknown>>('orders', orderReportMatch(opts), { sort: { mysql_id: -1 }, limit: 2000 });
+
+    // Resolve restaurant (name + commission), zone name, and customer name in
+    // bulk so the per-order loop stays a single pass with no N+1 lookups.
     const restIds = Array.from(new Set(orders.map((o) => Number(o.mysql_restaurant_id ?? 0)).filter((n) => n > 0)));
     const rests = restIds.length ? await this.mongo.findMany<{ mysql_id: number; name?: string; comission?: number }>('restaurants', { mysql_id: { $in: restIds } }) : [];
     const restMap = new Map(rests.map((r) => [Number(r.mysql_id), r]));
 
+    const zoneIds = Array.from(new Set(orders.map((o) => Number(o.mysql_zone_id ?? 0)).filter((n) => n > 0)));
+    const zones = zoneIds.length ? await this.mongo.findMany<{ mysql_id: number; name?: string }>('zones', { mysql_id: { $in: zoneIds } }) : [];
+    const zoneMap = new Map(zones.map((z) => [Number(z.mysql_id), z.name ?? null]));
+
+    const userIds = Array.from(new Set(orders.map((o) => Number(o.mysql_user_id ?? 0)).filter((n) => n > 0)));
+    const users = userIds.length ? await this.mongo.findMany<{ mysql_id: number; f_name?: string | null; l_name?: string | null }>('users', { mysql_id: { $in: userIds } }) : [];
+    const userMap = new Map(users.map((u) => [Number(u.mysql_id), `${u.f_name ?? ''} ${u.l_name ?? ''}`.trim()]));
+
     const earnings: Array<Record<string, unknown>> = [];
     const expenses: Array<Record<string, unknown>> = [];
+    const totals = { ...emptyTotals };
+
+    let sr = 0;
     for (const o of orders) {
       const orderAmount = num(o.order_amount), tax = num(o.total_tax_amount), delivery = num(o.delivery_charge);
       const coupon = num(o.coupon_discount_amount), restDiscount = num(o.restaurant_discount_amount), extra = num(o.additional_charge);
       let itemAmount = r2(orderAmount + coupon + restDiscount - tax - delivery - extra);
       if (itemAmount <= 0) itemAmount = r2(Math.max(0, orderAmount - tax - delivery)) || orderAmount;
       const rest = restMap.get(Number(o.mysql_restaurant_id ?? 0));
-      const commission = r2((itemAmount * (num(rest?.comission) || 10)) / 100);
-      const restaurantTake = r2(itemAmount - commission);
+      const commission = r2((itemAmount * (num(rest?.comission) || 10)) / 100); // Admin Fee
+      const restaurantTake = r2(itemAmount - commission);                        // Net to restaurant
+      const discount = r2(restDiscount);                                         // Spent on Discount (restaurant-funded)
+      const totalExpense = r2(commission + discount);
+
       const oid = Number(o.mysql_id);
-      if (restaurantTake > 0) earnings.push({ txn_id: `TXN ${oid}`, date: o.created_at ?? null, source: rest?.name ?? null, source_type: 'Restaurant', earning_source: `#ORD ${oid}`, amount: restaurantTake });
-      if (commission > 0) expenses.push({ txn_id: `TXN ${oid}`, date: o.created_at ?? null, source: rest?.name ?? null, source_type: 'Restaurant', expense_type: 'Commission Paid', earning_source: `#ORD ${oid}`, amount: commission });
+      const zoneId = Number(o.mysql_zone_id ?? 0);
+      const zoneName = zoneMap.get(zoneId) ?? (zoneId > 0 ? `Zone #${zoneId}` : null);
+      const customer = userMap.get(Number(o.mysql_user_id ?? 0)) || (o.contact_person_name as string | undefined) || 'Guest';
+      const date = (o.delivered ?? o.created_at) ?? null;
+
+      sr += 1;
+      const common = { sr, order_id: oid, zone: zoneName, restaurant: rest?.name ?? null, customer, date };
+      earnings.push({ ...common, item_value: itemAmount, total_earning: restaurantTake });
+      expenses.push({ ...common, admin_fee: commission, discount, total_expense: totalExpense });
+
+      totals.orders += 1;
+      totals.item_value = r2(totals.item_value + itemAmount);
+      totals.total_earning = r2(totals.total_earning + restaurantTake);
+      totals.admin_fee = r2(totals.admin_fee + commission);
+      totals.discount = r2(totals.discount + discount);
+      totals.total_expense = r2(totals.total_expense + totalExpense);
     }
 
-    const subs = await this.mongo.findMany<Record<string, unknown>>('subscriptions', {}, { sort: { mysql_id: -1 }, limit: 500 });
-    const subVendorIds = Array.from(new Set(subs.map((s) => Number(s.vendor_id ?? 0)).filter((n) => n > 0)));
-    const subRests = subVendorIds.length ? await this.mongo.findMany<{ name?: string; mysql_vendor_id?: number }>('restaurants', { mysql_vendor_id: { $in: subVendorIds } }) : [];
-    const subRestByVendor = new Map(subRests.map((r) => [Number(r.mysql_vendor_id ?? 0), r.name ?? null]));
-    const subscription = subs.map((s) => {
-      const status = String(s.status ?? '');
-      const isRenew = num(s.is_trial) === 0 && (status === 'active' || num(s.canceled) === 0);
-      return {
-        txn_id: (s.transaction_id as string) ?? `SUB ${Number(s.mysql_id)}`,
-        date: s.started_at ?? s.created_at ?? null,
-        restaurant: subRestByVendor.get(Number(s.vendor_id ?? 0)) ?? null,
-        transaction_type: isRenew ? 'Renew Subscription' : 'New Subscription',
-        amount: num(s.amount),
-      };
-    });
-
-    return { transactions: { earnings: earnings.slice(0, 300), expenses: expenses.slice(0, 300), subscription } };
+    return { earnings, expenses, totals };
   }
 
   async restaurantEarnings(limit = 10, opts: ReportFilterOpts = {}) {
