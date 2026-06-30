@@ -1020,6 +1020,30 @@ export class AdminController {
     });
   }
 
+  // Detailed Deliveryman Earning report — Earning Summary + per-order earnings
+  // + per-claim bonus/incentive, filterable by period/zone/delivery-man.
+  @Get('reports/deliveryman-earning-detail')
+  deliverymanEarningDetail(
+    @Query('days') days?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('zone_id') zoneId?: string,
+    @Query('delivery_man_id') deliveryManId?: string,
+    @Query('limit') limit?: string,
+  ) {
+    // Period preset (7d/30d/…) → a concrete `from` date when none is given, so
+    // the window actually filters both orders and incentive claims.
+    let fromEff = from || undefined;
+    const d = toInt(days, 0);
+    if (!fromEff && d > 0) fromEff = new Date(Date.now() - d * 86_400_000).toISOString().slice(0, 10);
+    return this.admin.deliverymanEarningDetail({
+      from: fromEff,
+      to: to || undefined,
+      zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
+      deliveryManId: deliveryManId ? parseInt(deliveryManId, 10) : undefined,
+    }, toInt(limit, 300));
+  }
+
   @Get('reports/top-deliverymen')
   deliverymanEarningReport(
     @Query('limit') limit?: string,

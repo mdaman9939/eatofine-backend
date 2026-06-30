@@ -5652,6 +5652,7 @@ declare module './admin.service' {
     adminEarningReport(days: number, opts?: ReportFilterOpts): Promise<unknown>;
     customerReport(limit: number, opts?: ReportFilterOpts): Promise<unknown>;
     deliverymanEarningReport(limit: number, opts?: ReportFilterOpts): Promise<unknown>;
+    deliverymanEarningDetail(opts?: ReportFilterOpts, limit?: number): Promise<unknown>;
   }
 }
 
@@ -5702,7 +5703,7 @@ function personLabel(r: Record<string, unknown>): string {
   return name || (r.name as string) || (r.phone as string) || (r.email as string) || '—';
 }
 
-export interface ReportFilterOpts { from?: string; to?: string; zoneId?: number; restaurantId?: number }
+export interface ReportFilterOpts { from?: string; to?: string; zoneId?: number; restaurantId?: number; deliveryManId?: number }
 
 /** Mongo $match for delivered+paid orders, optionally constrained by a date
  *  range / zone / restaurant — shared by every order-aggregating report. */
@@ -5716,6 +5717,7 @@ function orderReportMatch(opts: ReportFilterOpts = {}): Record<string, unknown> 
   }
   if (opts.zoneId) match.mysql_zone_id = Number(opts.zoneId);
   if (opts.restaurantId) match.mysql_restaurant_id = Number(opts.restaurantId);
+  if (opts.deliveryManId) match.mysql_delivery_man_id = Number(opts.deliveryManId);
   return match;
 }
 
@@ -8633,6 +8635,110 @@ AdminService.prototype.deliverymanEarningReport = async function (this: AdminSer
         total_bonus: 0,
       };
     }),
+  };
+};
+
+/**
+ * Detailed Deliveryman Earning report (client-requested format):
+ *   • summary    — 6 KPIs: deliveries, delivery fee, tips, situational, bonus/incentive, total
+ *   • earnings   — per delivered order: order id, DM, date, delivery fee, tips, situational, total
+ *   • bonus_incentive — per APPROVED dm_incentive claim: DM, date, note, amount
+ * Filtered by period/from/to + zone + delivery-man. Delivery fee here is the
+ * BASE fee (delivery_charge − situational), since delivery_charge already
+ * bundles the situational surcharge (same convention as the Order Report).
+ */
+AdminService.prototype.deliverymanEarningDetail = async function (this: AdminService, opts = {}, limit = 300) {
+  const empty = {
+    summary: { deliveries: 0, delivery_fee: 0, tips: 0, situational: 0, bonus_incentive: 0, bonus_incentive_count: 0, total_earning: 0 },
+    earnings: [] as unknown[],
+    bonus_incentive: [] as unknown[],
+  };
+  if (!this['useMongo']()) return empty;
+
+  const num = (v: unknown) => (v == null ? 0 : Number(v) || 0);
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+
+  // Delivered + paid orders that have a delivery man, within the filter window.
+  const match = { ...orderReportMatch(opts), mysql_delivery_man_id: { $ne: null } };
+  const orders = await this['mongo'].findMany<Record<string, unknown>>('orders', match, { sort: { mysql_id: -1 }, limit });
+
+  // Approved incentive/bonus claims (the records behind the Bonus/Incentive tab).
+  const incFilter: Record<string, unknown> = { status: 'approved' };
+  if (opts.deliveryManId) incFilter.dm_id = Number(opts.deliveryManId);
+  if (opts.from || opts.to) {
+    const range: Record<string, unknown> = {};
+    if (opts.from) range.$gte = new Date(opts.from);
+    if (opts.to) range.$lte = new Date(`${opts.to}T23:59:59.999Z`);
+    incFilter.created_at = range;
+  }
+  const incentives = await this['mongo'].findMany<{ mysql_id: number; dm_id?: number; claim_amount?: number; reason?: string | null; created_at?: Date | null }>(
+    'dm_incentives', incFilter, { sort: { mysql_id: -1 }, limit: 500 },
+  );
+
+  // DM name + zone for every rider referenced (orders + incentives).
+  const allDmIds = Array.from(new Set([
+    ...orders.map((o) => Number(o.mysql_delivery_man_id ?? 0)),
+    ...incentives.map((i) => Number(i.dm_id ?? 0)),
+  ].filter((n) => n > 0)));
+  const dms = allDmIds.length
+    ? await this['mongo'].findMany<{ mysql_id: number; f_name?: string; l_name?: string; mysql_zone_id?: number }>('delivery_men', { mysql_id: { $in: allDmIds } })
+    : [];
+  const nameByDm = new Map(dms.map((d) => [Number(d.mysql_id), `${d.f_name ?? ''} ${d.l_name ?? ''}`.trim() || `DM #${d.mysql_id}`]));
+  const zoneByDm = new Map(dms.map((d) => [Number(d.mysql_id), d.mysql_zone_id ?? null]));
+
+  // Per-order earnings rows.
+  const earnings = orders.map((o, i) => {
+    const dmId = Number(o.mysql_delivery_man_id ?? 0);
+    const delivery = num(o.delivery_charge);
+    const situational = num(o.situational_charge ?? o.surge_amount ?? o.surcharge_amount);
+    const baseDelivery = r2(Math.max(0, delivery - situational));
+    const tips = r2(num(o.dm_tips));
+    return {
+      sr: i + 1,
+      order_id: Number(o.mysql_id),
+      dm_id: dmId || null,
+      dm_name: dmId ? (nameByDm.get(dmId) ?? `DM #${dmId}`) : '—',
+      date: (o.delivered as Date | null | undefined) ?? (o.created_at as Date | null | undefined) ?? null,
+      delivery_fee: baseDelivery,
+      tips,
+      situational: r2(situational),
+      total: r2(baseDelivery + situational + tips),
+    };
+  });
+
+  // Bonus/incentive rows — constrain by the DM's zone when a zone is selected.
+  const bonusRows = incentives
+    .filter((inc) => {
+      if (!opts.zoneId) return true;
+      const z = inc.dm_id != null ? zoneByDm.get(Number(inc.dm_id)) : null;
+      return z != null && Number(z) === Number(opts.zoneId);
+    })
+    .map((inc, i) => ({
+      sr: i + 1,
+      dm_id: inc.dm_id ?? null,
+      dm_name: inc.dm_id ? (nameByDm.get(Number(inc.dm_id)) ?? `DM #${inc.dm_id}`) : '—',
+      date: inc.created_at ?? null,
+      note: inc.reason ?? '—',
+      amount: r2(num(inc.claim_amount)),
+    }));
+
+  const deliveryFeeTotal = r2(earnings.reduce((s, e) => s + e.delivery_fee, 0));
+  const tipsTotal = r2(earnings.reduce((s, e) => s + e.tips, 0));
+  const situationalTotal = r2(earnings.reduce((s, e) => s + e.situational, 0));
+  const bonusIncentiveTotal = r2(bonusRows.reduce((s, b) => s + b.amount, 0));
+
+  return {
+    summary: {
+      deliveries: earnings.length,
+      delivery_fee: deliveryFeeTotal,
+      tips: tipsTotal,
+      situational: situationalTotal,
+      bonus_incentive: bonusIncentiveTotal,
+      bonus_incentive_count: bonusRows.length,
+      total_earning: r2(deliveryFeeTotal + tipsTotal + situationalTotal + bonusIncentiveTotal),
+    },
+    earnings,
+    bonus_incentive: bonusRows,
   };
 };
 
