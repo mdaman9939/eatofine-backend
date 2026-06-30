@@ -1880,6 +1880,8 @@ export declare class AdminService {
             restaurant_income: number;
             tds: number;
             restaurant_net_income: number;
+            commission: number;
+            commission_gst: number;
             admin_income_from_restaurant: number;
             admin_income_from_user: number;
             order_delivered: string;

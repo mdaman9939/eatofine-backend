@@ -4086,6 +4086,8 @@ let AdminService = class AdminService {
                 restaurant_income: restaurantIncome,
                 tds,
                 restaurant_net_income: restaurantNetIncome,
+                commission,
+                commission_gst: commissionGst,
                 admin_income_from_restaurant: adminIncomeFromRestaurant,
                 admin_income_from_user: adminIncomeFromUser,
                 order_delivered: status === 'delivered' ? 'Yes' : 'No',
