@@ -941,6 +941,12 @@ export class AdminController {
     });
   }
 
+  /** Set ONE commission rate for ALL restaurants + the new-registration default. */
+  @Post('restaurants/set-commission-all')
+  setCommissionAll(@Body() body: { rate?: number | string }) {
+    return this.admin.setAllRestaurantsCommission(Number(body?.rate ?? 0));
+  }
+
   @Get('reports/restaurant-earnings')
   restaurantEarnings(
     @Query('limit') limit?: string,

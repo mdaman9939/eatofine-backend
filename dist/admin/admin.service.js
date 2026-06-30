@@ -4812,6 +4812,23 @@ let AdminService = class AdminService {
         }
         return { earnings, expenses, totals };
     }
+    async setAllRestaurantsCommission(rate) {
+        if (!this.useMongo())
+            return { ok: false, rate: 0, restaurants: 0 };
+        const r = Math.round(Math.max(0, Math.min(100, Number(rate) || 0)) * 100) / 100;
+        await this.mongo.updateMany('restaurants', {}, { comission: r, updated_at: new Date() });
+        const now = new Date();
+        const existing = await this.mongo.findOne('business_settings', { key: 'admin_commission' });
+        if (existing) {
+            await this.mongo.updateOne('business_settings', { key: 'admin_commission' }, { value: String(r), key_value: String(r), updated_at: now });
+        }
+        else {
+            const mysql_id = await this.mongo.nextMysqlId('business_settings');
+            await this.mongo.insertOne('business_settings', { mysql_id, key: 'admin_commission', value: String(r), key_value: String(r), created_at: now, updated_at: now });
+        }
+        const restaurants = await this.mongo.count('restaurants', {});
+        return { ok: true, rate: r, restaurants };
+    }
     async restaurantEarnings(limit = 10, opts = {}) {
         if (this.useMongo()) {
             const num = (v) => (v == null ? 0 : Number(v) || 0);

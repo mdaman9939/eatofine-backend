@@ -2153,6 +2153,11 @@ export declare class AdminService {
             total_expense: number;
         };
     }>;
+    setAllRestaurantsCommission(rate: number): Promise<{
+        ok: boolean;
+        rate: number;
+        restaurants: number;
+    }>;
     restaurantEarnings(limit?: number, opts?: ReportFilterOpts): Promise<{
         top_earners: {
             restaurant_id: number;

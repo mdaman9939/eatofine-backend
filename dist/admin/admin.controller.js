@@ -532,6 +532,9 @@ let AdminController = class AdminController {
             restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
         });
     }
+    setCommissionAll(body) {
+        return this.admin.setAllRestaurantsCommission(Number(body?.rate ?? 0));
+    }
     restaurantEarnings(limit, from, to, zoneId, restaurantId) {
         return this.admin.restaurantEarnings(toInt(limit, 10), {
             from: from || undefined,
@@ -1996,6 +1999,13 @@ __decorate([
     __metadata("design:paramtypes", [String, String, String, String, String]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "gstReport", null);
+__decorate([
+    (0, common_1.Post)('restaurants/set-commission-all'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "setCommissionAll", null);
 __decorate([
     (0, common_1.Get)('reports/restaurant-earnings'),
     __param(0, (0, common_1.Query)('limit')),

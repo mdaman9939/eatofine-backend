@@ -1871,6 +1871,13 @@ export declare class AdminController {
             total_gst: number;
         }[];
     }>;
+    setCommissionAll(body: {
+        rate?: number | string;
+    }): Promise<{
+        ok: boolean;
+        rate: number;
+        restaurants: number;
+    }>;
     restaurantEarnings(limit?: string, from?: string, to?: string, zoneId?: string, restaurantId?: string): Promise<{
         top_earners: {
             restaurant_id: number;
