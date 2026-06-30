@@ -99,6 +99,9 @@ let RefundService = class RefundService {
             if (record)
                 artefacts.credit_note_id = record.mysql_id;
         }
+        if (effects.generate_invoice) {
+            await (0, credit_note_util_1.ensureOrderInvoice)(this.mongo, orderId);
+        }
         const orderDoc = await this.mongo.findByMysqlId('orders', orderId);
         if (effects.restaurant_wallet.direction !== 'none' && effects.restaurant_wallet.amount > 0) {
             const restId = orderDoc?.mysql_restaurant_id ?? null;
@@ -140,6 +143,53 @@ let RefundService = class RefundService {
         };
         await this.mongo.insertOne('refund_decisions', decision);
         return { ok: true, decision_id: decisionId, artefacts, effects, scenario };
+    }
+    async applyCustomerCancellation(orderId, scenarioKey) {
+        const scenario = (0, refund_policy_1.getScenario)(scenarioKey);
+        if (!scenario)
+            return { refund_status: 'not_required', refund_amount: 0, scenario: scenarioKey };
+        const order = await this.mongo.findByMysqlId('orders', orderId);
+        if (!order)
+            return { refund_status: 'not_required', refund_amount: 0, scenario: scenarioKey };
+        const money = await this.moneyOf(order);
+        const effects = scenario.decide(money);
+        const ledgerIds = [];
+        let refundStatus = 'not_required';
+        let refundId;
+        const paid = String(order.payment_status ?? '') === 'paid';
+        if (effects.refund_to_user && effects.refund_amount > 0 && paid) {
+            const userId = order.mysql_user_id ?? null;
+            refundId = await this.mongo.nextMysqlId('refunds');
+            await this.mongo.insertOne('refunds', {
+                mysql_id: refundId, order_id: orderId, user_id: userId,
+                customer_reason: scenario.label, refund_amount: effects.refund_amount,
+                refund_method: 'wallet', refund_status: 'completed',
+                admin_note: `Auto refund (user cancel) — ${scenario.key}`, created_at: new Date(),
+            });
+            await this.creditCustomerWallet(userId, effects.refund_amount, `Refund for order #${orderId} — ${scenario.label}`, orderId);
+            refundStatus = 'completed';
+        }
+        if (effects.restaurant_wallet.direction === 'credit' && effects.restaurant_wallet.amount > 0) {
+            const id = await this.writeLedger({ actor_type: 'restaurant', actor_id: order.mysql_restaurant_id ?? null, order_id: orderId, direction: 'credit', amount: effects.restaurant_wallet.amount, note: effects.restaurant_wallet.note, scenario: scenario.key });
+            ledgerIds.push(id);
+            await this.moveActorWallet('restaurant', order.mysql_restaurant_id ?? null, 'credit', effects.restaurant_wallet.amount);
+        }
+        if (effects.deliveryman_wallet.direction === 'credit' && effects.deliveryman_wallet.amount > 0) {
+            const id = await this.writeLedger({ actor_type: 'deliveryman', actor_id: order.mysql_delivery_man_id ?? null, order_id: orderId, direction: 'credit', amount: effects.deliveryman_wallet.amount, note: effects.deliveryman_wallet.note, scenario: scenario.key });
+            ledgerIds.push(id);
+            await this.moveActorWallet('deliveryman', order.mysql_delivery_man_id ?? null, 'credit', effects.deliveryman_wallet.amount);
+        }
+        if (effects.generate_invoice) {
+            await (0, credit_note_util_1.ensureOrderInvoice)(this.mongo, orderId);
+        }
+        const decisionId = await this.mongo.nextMysqlId('refund_decisions');
+        await this.mongo.insertOne('refund_decisions', {
+            mysql_id: decisionId, order_id: orderId, scenario: scenario.key, scenario_label: scenario.label,
+            cancelled_by: 'user', status: 'applied', review_kind: 'user_cancel',
+            effects, artefacts: { wallet_ledger_ids: ledgerIds, refund_id: refundId ?? null },
+            applied_at: new Date(), created_at: new Date(),
+        });
+        return { refund_status: refundStatus, refund_amount: effects.refund_amount, scenario: scenario.key };
     }
     async proposePartnerPenalty(orderId, scenarioKey, initiatedBy, reasonText) {
         const scenario = (0, refund_policy_1.getScenario)(scenarioKey);
@@ -286,6 +336,7 @@ let RefundService = class RefundService {
         const grandTotal = Number(o.order_amount ?? 0);
         const additional = Number(o.additional_charge ?? 0);
         const packaging = Number(o.extra_packaging_amount ?? 0);
+        const situational = Number(o.situational_charge ?? 0);
         const details = await this.mongo.findMany('order_details', { order_id: o.mysql_id });
         const foodFromDetails = round2(details.reduce((s, d) => s + Number(d.price ?? 0) * Number(d.quantity ?? 0), 0));
         const itemTotal = foodFromDetails > 0
@@ -300,7 +351,9 @@ let RefundService = class RefundService {
             delivery_charge: round2(deliveryCharge),
             packaging_amount: round2(packaging),
             additional_charge: round2(additional),
+            situational_charge: round2(situational),
             admin_commission: commission,
+            admin_commission_gst: round2(commission * 0.18),
             grand_total: round2(grandTotal),
         };
     }

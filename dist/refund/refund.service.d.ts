@@ -49,6 +49,11 @@ export declare class RefundService {
             cancelled_by: import("./refund-policy").CancelledBy;
         };
     }>;
+    applyCustomerCancellation(orderId: number, scenarioKey: ScenarioKey): Promise<{
+        refund_status: string;
+        refund_amount: number;
+        scenario: ScenarioKey;
+    }>;
     proposePartnerPenalty(orderId: number, scenarioKey: ScenarioKey, initiatedBy: string, reasonText?: string): Promise<{
         ok: false;
         reason: string;

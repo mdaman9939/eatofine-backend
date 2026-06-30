@@ -1651,10 +1651,10 @@ export declare class AdminController {
             customer_name: string | null;
             restaurant: string | null;
             order_type: string;
-            earning_restaurant: number;
-            earning_delivery: number;
+            commission: number;
+            commission_gst: number;
             earning_additional: number;
-            earning_situational: number;
+            admin_discount: number;
             total_earning: number;
         }[];
     }>;
@@ -1880,16 +1880,16 @@ export declare class AdminController {
         }[];
     }>;
     restaurantEarningDetailed(from?: string, to?: string, zoneId?: string, restaurantId?: string): Promise<{
-        transactions: {
-            earnings: Record<string, unknown>[];
-            expenses: Record<string, unknown>[];
-            subscription: {
-                txn_id: string;
-                date: {} | null;
-                restaurant: string | null;
-                transaction_type: string;
-                amount: number;
-            }[];
+        earnings: Record<string, unknown>[];
+        expenses: Record<string, unknown>[];
+        totals: {
+            orders: number;
+            item_value: number;
+            total_earning: number;
+            admin_fee: number;
+            discount: number;
+            tds: number;
+            total_expense: number;
         };
     }>;
     adminEarningReport(days?: string, from?: string, to?: string, zoneId?: string, restaurantId?: string): Promise<unknown>;
@@ -1903,6 +1903,7 @@ export declare class AdminController {
             revenue: number;
         }[];
     }>;
+    deliverymanEarningDetail(days?: string, from?: string, to?: string, zoneId?: string, deliveryManId?: string, limit?: string): Promise<unknown>;
     deliverymanEarningReport(limit?: string, from?: string, to?: string, zoneId?: string, restaurantId?: string): Promise<unknown>;
     addOns(limit?: string, offset?: string, q?: string, restaurantId?: string): Promise<unknown>;
     createAddOn(body: Parameters<AdminService['createAddOn']>[0]): Promise<unknown>;

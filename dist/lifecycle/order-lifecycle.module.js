@@ -11,12 +11,14 @@ const common_1 = require("@nestjs/common");
 const order_lifecycle_service_1 = require("./order-lifecycle.service");
 const order_autocancel_cron_1 = require("./order-autocancel.cron");
 const order_lifecycle_controller_1 = require("./order-lifecycle.controller");
+const refund_module_1 = require("../refund/refund.module");
 let OrderLifecycleModule = class OrderLifecycleModule {
 };
 exports.OrderLifecycleModule = OrderLifecycleModule;
 exports.OrderLifecycleModule = OrderLifecycleModule = __decorate([
     (0, common_1.Global)(),
     (0, common_1.Module)({
+        imports: [refund_module_1.RefundModule],
         controllers: [order_lifecycle_controller_1.OrderLifecycleController],
         providers: [order_lifecycle_service_1.OrderLifecycleService, order_autocancel_cron_1.OrderAutoCancelCron],
         exports: [order_lifecycle_service_1.OrderLifecycleService],

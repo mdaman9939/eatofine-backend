@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.SCENARIOS = void 0;
 exports.listScenarios = listScenarios;
 exports.scenarioForRestaurantReject = scenarioForRestaurantReject;
+exports.scenarioForUserCancel = scenarioForUserCancel;
 exports.getScenario = getScenario;
 exports.applicableScenarios = applicableScenarios;
 const r2 = (n) => Math.round(n * 100) / 100;
@@ -133,7 +134,7 @@ exports.SCENARIOS = {
         label: 'Admin (after delivery) — wrong/damaged/packaging/veg-nonveg (restaurant fault)',
         allowsStage: (s) => s.is_delivered,
         decide: (m) => {
-            const penaltyAmt = r2(m.additional_charge + m.packaging_amount + m.delivery_charge + m.tax);
+            const penaltyAmt = r2(m.additional_charge + m.situational_charge + m.delivery_charge + m.packaging_amount);
             const restNet = r2((m.item_total - m.admin_commission) - (m.item_total + penaltyAmt));
             return {
                 refund_amount: r2(m.grand_total),
@@ -143,7 +144,7 @@ exports.SCENARIOS = {
                 penalty: {
                     target: 'restaurant',
                     amount: penaltyAmt,
-                    components: ['Platform charge', 'Packaging fee', 'Delivery fee', 'GST'],
+                    components: ['Additional charge', 'Situational charges', 'Delivery fee', 'Other fees'],
                 },
                 restaurant_wallet: netted(restNet, `Normal cycle credit reversed + penalty ₹${penaltyAmt}`),
                 deliveryman_wallet: { direction: 'credit', amount: r2(m.delivery_charge), note: 'Normal cycle — DM delivered as instructed' },
@@ -158,7 +159,7 @@ exports.SCENARIOS = {
         label: 'Admin (before delivery) — wrong/damaged/packaging/veg-nonveg (restaurant fault)',
         allowsStage: (s) => !s.is_delivered,
         decide: (m) => {
-            const penaltyAmt = r2(m.admin_commission + m.additional_charge + m.packaging_amount + m.delivery_charge + m.tax);
+            const penaltyAmt = r2(m.admin_commission + m.admin_commission_gst + m.additional_charge + m.situational_charge + m.delivery_charge + m.packaging_amount);
             return {
                 refund_amount: r2(m.grand_total),
                 refund_to_user: true,
@@ -167,7 +168,7 @@ exports.SCENARIOS = {
                 penalty: {
                     target: 'restaurant',
                     amount: penaltyAmt,
-                    components: ['PPO charge', 'Platform charge', 'Packaging fee', 'Delivery fee', 'GST'],
+                    components: ['PPO charge', 'GST on commission', 'Additional charge', 'Situational charges', 'Delivery fee', 'Other fees'],
                 },
                 restaurant_wallet: { direction: 'debit', amount: penaltyAmt, note: `Penalty ₹${penaltyAmt} for restaurant fault before delivery` },
                 deliveryman_wallet: { direction: 'credit', amount: r2(m.delivery_charge), note: 'Normal cycle — DM was already on the way' },
@@ -236,7 +237,7 @@ exports.SCENARIOS = {
         label: 'Restaurant rejected after accepting (no DM assigned)',
         allowsStage: (s) => (s.status === 'confirmed' || s.status === 'processing') && !s.has_delivery_man,
         decide: (m) => {
-            const penaltyAmt = r2(m.admin_commission + m.additional_charge + m.tax);
+            const penaltyAmt = r2(m.admin_commission + m.admin_commission_gst);
             return {
                 refund_amount: r2(m.grand_total),
                 refund_to_user: true,
@@ -245,7 +246,7 @@ exports.SCENARIOS = {
                 penalty: {
                     target: 'restaurant',
                     amount: penaltyAmt,
-                    components: ['Admin charge (PPO/Commission)', 'GST'],
+                    components: ['Admin charge (PPO/Commission)', 'GST on commission'],
                 },
                 restaurant_wallet: { direction: 'debit', amount: penaltyAmt, note: `Penalty ₹${penaltyAmt} for rejecting after accepting` },
                 deliveryman_wallet: { direction: 'none', amount: 0, note: 'no DM was involved' },
@@ -260,7 +261,7 @@ exports.SCENARIOS = {
         label: 'Restaurant rejected after accepting (DM already assigned)',
         allowsStage: (s) => s.has_delivery_man && !s.is_delivered && (s.status === 'confirmed' || s.status === 'processing' || s.status === 'handover'),
         decide: (m) => {
-            const penaltyAmt = r2(m.admin_commission + m.additional_charge + m.delivery_charge + m.tax);
+            const penaltyAmt = r2(m.admin_commission + m.additional_charge + m.situational_charge + m.delivery_charge + m.packaging_amount);
             return {
                 refund_amount: r2(m.grand_total),
                 refund_to_user: true,
@@ -269,7 +270,7 @@ exports.SCENARIOS = {
                 penalty: {
                     target: 'restaurant',
                     amount: penaltyAmt,
-                    components: ['Admin charge (PPO/Commission)', 'Delivery charges', 'GST'],
+                    components: ['Admin charge (PPO/Commission)', 'Additional charge', 'Situational charges', 'Delivery fee', 'Other fees'],
                 },
                 restaurant_wallet: { direction: 'debit', amount: penaltyAmt, note: `Penalty ₹${penaltyAmt} including DM dispatch cost` },
                 deliveryman_wallet: { direction: 'credit', amount: r2(m.delivery_charge), note: 'Compensated for dispatch — restaurant pays' },
@@ -288,6 +289,13 @@ function scenarioForRestaurantReject(preStatus, hasDeliveryMan) {
     if (notAccepted)
         return 'RESTAURANT_REJECT_BEFORE_ACCEPT';
     return hasDeliveryMan ? 'RESTAURANT_REJECT_AFTER_ACCEPT_WITH_DM' : 'RESTAURANT_REJECT_AFTER_ACCEPT_NO_DM';
+}
+function scenarioForUserCancel(preStatus, hasDeliveryMan) {
+    const s = String(preStatus || '').toLowerCase();
+    const notAccepted = s === 'pending' || s === 'failed' || s === '';
+    if (notAccepted)
+        return 'USER_BEFORE_ACCEPT';
+    return hasDeliveryMan ? 'USER_AFTER_ACCEPT_WITH_DM' : 'USER_AFTER_ACCEPT_NO_DM';
 }
 function getScenario(key) {
     return exports.SCENARIOS[key] ?? null;

@@ -23,6 +23,10 @@ export type CreditNoteDoc = {
     created_at?: Date | null;
     updated_at?: Date | null;
 };
+export declare function ensureOrderInvoice(mongo: MongoDataService, orderId: number): Promise<{
+    obr: string;
+    etu: string;
+} | null>;
 export declare function issueCreditNote(mongo: MongoDataService, input: {
     orderId: number;
     refundId?: number | null;

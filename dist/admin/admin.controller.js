@@ -572,6 +572,18 @@ let AdminController = class AdminController {
             restaurantId: restaurantId ? parseInt(restaurantId, 10) : undefined,
         });
     }
+    deliverymanEarningDetail(days, from, to, zoneId, deliveryManId, limit) {
+        let fromEff = from || undefined;
+        const d = toInt(days, 0);
+        if (!fromEff && d > 0)
+            fromEff = new Date(Date.now() - d * 86_400_000).toISOString().slice(0, 10);
+        return this.admin.deliverymanEarningDetail({
+            from: fromEff,
+            to: to || undefined,
+            zoneId: zoneId ? parseInt(zoneId, 10) : undefined,
+            deliveryManId: deliveryManId ? parseInt(deliveryManId, 10) : undefined,
+        }, toInt(limit, 300));
+    }
     deliverymanEarningReport(limit, from, to, zoneId, restaurantId) {
         return this.admin.deliverymanEarningReport(toInt(limit, 10), {
             from: from || undefined,
@@ -2038,6 +2050,18 @@ __decorate([
     __metadata("design:paramtypes", [String, String, String, String, String]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "topFoods", null);
+__decorate([
+    (0, common_1.Get)('reports/deliveryman-earning-detail'),
+    __param(0, (0, common_1.Query)('days')),
+    __param(1, (0, common_1.Query)('from')),
+    __param(2, (0, common_1.Query)('to')),
+    __param(3, (0, common_1.Query)('zone_id')),
+    __param(4, (0, common_1.Query)('delivery_man_id')),
+    __param(5, (0, common_1.Query)('limit')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, String, String, String, String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "deliverymanEarningDetail", null);
 __decorate([
     (0, common_1.Get)('reports/top-deliverymen'),
     __param(0, (0, common_1.Query)('limit')),

@@ -4599,7 +4599,10 @@ export class AdminService {
       const tds = r2((Math.max(0, restaurantIncome) * tdsRate) / 100);
       const restaurantNetIncome = r2(restaurantIncome - tds);
       const adminIncomeFromRestaurant = adminFee;
-      const adminIncomeFromUser = r2(additionalCharge + situational + baseDelivery - adminDiscount);
+      // Admin keeps ONLY the additional charges (platform / packaging / convenience).
+      // The delivery fee + situational/surge are the DELIVERY MAN's earning (settled
+      // to the rider's wallet) — a pass-through for the platform, so NOT admin income.
+      const adminIncomeFromUser = r2(additionalCharge - adminDiscount);
 
       const status = String(o.order_status ?? '');
       const user = userMap.get(Number(o.mysql_user_id ?? 0));
@@ -4991,24 +4994,28 @@ export class AdminService {
       const coupon = num(o.coupon_discount_amount);
       const restDiscount = num(o.restaurant_discount_amount);
       const additional = num(o.additional_charge);
-      const situational = num(o.situational_charge);
+      const adminDiscount = num(o.admin_discount_amount);
       // Item (food) value = residual of the order breakdown (same basis as the Order Report).
-      let itemAmount = r2(orderAmount + coupon + restDiscount - tax - delivery - additional - situational);
+      let itemAmount = r2(orderAmount + coupon + restDiscount - tax - delivery - additional - num(o.situational_charge));
       if (itemAmount <= 0) itemAmount = r2(Math.max(0, orderAmount - tax - delivery)) || orderAmount;
       const rest = restMap.get(Number(o.mysql_restaurant_id ?? 0));
       const commissionRate = num(rest?.comission) || 10; // PPO / commission %
-      const earningRestaurant = r2((itemAmount * commissionRate) / 100);
+      // Admin income ONLY: PPO/commission + 18% GST on it + platform/additional
+      // charges, minus any admin-funded discount. Delivery fee + situational/surge
+      // are the DELIVERY MAN's earning (settled to the rider) — NOT admin income.
+      const commission = r2((itemAmount * commissionRate) / 100);
+      const commissionGst = r2(commission * 0.18);
+      const total = r2(commission + commissionGst + additional - adminDiscount);
       const user = userMap.get(Number(o.mysql_user_id ?? 0));
-      const total = r2(earningRestaurant + delivery + additional + situational);
       return {
         order_id: Number(o.mysql_id),
         customer_name: user ? `${user.f_name ?? ''} ${user.l_name ?? ''}`.trim() || null : null,
         restaurant: rest?.name ?? null,
         order_type: String(o.order_type ?? 'delivery'),
-        earning_restaurant: earningRestaurant,
-        earning_delivery: delivery,
+        commission,
+        commission_gst: commissionGst,
         earning_additional: additional,
-        earning_situational: situational,
+        admin_discount: adminDiscount,
         total_earning: total,
       };
     });
@@ -5279,9 +5286,10 @@ export class AdminService {
       if (itemAmount <= 0) itemAmount = r2(Math.max(0, orderAmount - tax - delivery)) || orderAmount;
       const rest = restMap.get(Number(o.mysql_restaurant_id ?? 0));
       const commission = r2((itemAmount * (num(rest?.comission) || 10)) / 100);
-      orderCommission += commission; additionalCharge += extra; deliveryCharge += delivery; couponExp += coupon; prodDiscExp += restDiscount;
+      const adminFee = r2(commission + commission * 0.18); // PPO/commission + 18% GST (admin's commission income)
+      orderCommission += adminFee; additionalCharge += extra; deliveryCharge += delivery; couponExp += coupon; prodDiscExp += restDiscount;
       const oid = Number(o.mysql_id);
-      if (commission > 0) earningTxns.push({ txn_id: `TXN ${oid}`, date: o.created_at ?? null, source: rest?.name ?? null, source_type: 'Restaurant', earning_source: `#ORD ${oid}`, amount: commission });
+      if (adminFee > 0) earningTxns.push({ txn_id: `TXN ${oid}`, date: o.created_at ?? null, source: rest?.name ?? null, source_type: 'Restaurant', earning_source: `#ORD ${oid}`, amount: adminFee });
       if (coupon > 0) expenseTxns.push({ txn_id: `TXN ${oid}`, date: o.created_at ?? null, source: rest?.name ?? null, source_type: 'Coupon', earning_source: `#ORD ${oid}`, amount: coupon });
     }
 
@@ -5309,7 +5317,7 @@ export class AdminService {
     return {
       summary: { total_earnings: totalEarnings, total_expenses: totalExpenses, net_profit: netProfit },
       earnings_breakdown: [
-        { label: 'Order Commission', amount: orderCommission, pct: pct(orderCommission, totalEarnings) },
+        { label: 'Commission (PPO + 18% GST)', amount: orderCommission, pct: pct(orderCommission, totalEarnings) },
         { label: 'Subscription Packages', amount: r2(subscriptionEarning), pct: pct(subscriptionEarning, totalEarnings) },
         { label: 'Additional Charge', amount: additionalCharge, pct: pct(additionalCharge, totalEarnings) },
         { label: 'Delivery Fee Commission', amount: deliveryFeeCommission, pct: 0 },
@@ -5334,7 +5342,7 @@ export class AdminService {
   //   Earning  → Sr | Order Id | Zone | Restaurant | Customer | Date | Total Item Value | Net to restaurant
   //   Expense  → Sr | Order Id | Zone | Restaurant | Customer | Date | Admin Fee | Spent on Discount | Total Expense
   async restaurantEarningDetailed(opts: ReportFilterOpts = {}) {
-    const emptyTotals = { orders: 0, item_value: 0, total_earning: 0, admin_fee: 0, discount: 0, total_expense: 0 };
+    const emptyTotals = { orders: 0, item_value: 0, total_earning: 0, admin_fee: 0, discount: 0, tds: 0, total_expense: 0 };
     const empty = { earnings: [], expenses: [], totals: emptyTotals };
     if (!this.useMongo()) return empty;
     const num = (v: unknown) => (v == null ? 0 : Number(v) || 0);
@@ -5356,6 +5364,11 @@ export class AdminService {
     const users = userIds.length ? await this.mongo.findMany<{ mysql_id: number; f_name?: string | null; l_name?: string | null }>('users', { mysql_id: { $in: userIds } }) : [];
     const userMap = new Map(users.map((u) => [Number(u.mysql_id), `${u.f_name ?? ''} ${u.l_name ?? ''}`.trim()]));
 
+    // Platform TDS rate (deducted from restaurant income) — same source the
+    // Transaction Report uses, so both restaurant reports tie out exactly.
+    const tdsDoc = await this.mongo.findOne<{ default_rate?: number; status?: number | boolean }>('tds_settings', {});
+    const tdsRate = tdsDoc && (tdsDoc.status === 1 || tdsDoc.status === true) ? (Number(tdsDoc.default_rate) || 0) : 0;
+
     const earnings: Array<Record<string, unknown>> = [];
     const expenses: Array<Record<string, unknown>> = [];
     const totals = { ...emptyTotals };
@@ -5363,14 +5376,24 @@ export class AdminService {
     let sr = 0;
     for (const o of orders) {
       const orderAmount = num(o.order_amount), tax = num(o.total_tax_amount), delivery = num(o.delivery_charge);
-      const coupon = num(o.coupon_discount_amount), restDiscount = num(o.restaurant_discount_amount), extra = num(o.additional_charge);
-      let itemAmount = r2(orderAmount + coupon + restDiscount - tax - delivery - extra);
+      const coupon = num(o.coupon_discount_amount), restDiscount = num(o.restaurant_discount_amount), adminDiscount = num(o.admin_discount_amount);
+      const extra = num(o.additional_charge) + num(o.extra_packaging_amount) + num(o.situational_charge);
+      let itemAmount = r2(orderAmount + coupon + restDiscount + adminDiscount - tax - delivery - extra);
       if (itemAmount <= 0) itemAmount = r2(Math.max(0, orderAmount - tax - delivery)) || orderAmount;
       const rest = restMap.get(Number(o.mysql_restaurant_id ?? 0));
-      const commission = r2((itemAmount * (num(rest?.comission) || 10)) / 100); // Admin Fee
-      const restaurantTake = r2(itemAmount - commission);                        // Net to restaurant
-      const discount = r2(restDiscount);                                         // Spent on Discount (restaurant-funded)
-      const totalExpense = r2(commission + discount);
+      const commPct = num(rest?.comission) || 10;
+      // Restaurant Net Income = food value − (its coupon/discount) − Admin Fee
+      // (PPO/commission + 18% GST) − TDS. Food GST, delivery, additional &
+      // situational are NOT the restaurant's (govt / DM / admin respectively).
+      const restDiscountCoupon = r2(restDiscount + coupon);
+      const netItemValue = r2(Math.max(0, itemAmount - restDiscountCoupon - adminDiscount));
+      const commission = r2((netItemValue * commPct) / 100);
+      const commissionGst = r2(commission * 0.18);
+      const adminFee = r2(commission + commissionGst);                     // Admin Fee (PPO + GST)
+      const restaurantIncome = r2(itemAmount - restDiscountCoupon - adminFee);
+      const tds = r2((Math.max(0, restaurantIncome) * tdsRate) / 100);
+      const restaurantNet = r2(restaurantIncome - tds);                    // Net to restaurant (after TDS)
+      const totalExpense = r2(adminFee + restDiscountCoupon + tds);
 
       const oid = Number(o.mysql_id);
       const zoneId = Number(o.mysql_zone_id ?? 0);
@@ -5380,14 +5403,15 @@ export class AdminService {
 
       sr += 1;
       const common = { sr, order_id: oid, zone: zoneName, restaurant: rest?.name ?? null, customer, date };
-      earnings.push({ ...common, item_value: itemAmount, total_earning: restaurantTake });
-      expenses.push({ ...common, admin_fee: commission, discount, total_expense: totalExpense });
+      earnings.push({ ...common, item_value: itemAmount, total_earning: restaurantNet });
+      expenses.push({ ...common, admin_fee: adminFee, discount: restDiscountCoupon, tds, total_expense: totalExpense });
 
       totals.orders += 1;
       totals.item_value = r2(totals.item_value + itemAmount);
-      totals.total_earning = r2(totals.total_earning + restaurantTake);
-      totals.admin_fee = r2(totals.admin_fee + commission);
-      totals.discount = r2(totals.discount + discount);
+      totals.total_earning = r2(totals.total_earning + restaurantNet);
+      totals.admin_fee = r2(totals.admin_fee + adminFee);
+      totals.discount = r2(totals.discount + restDiscountCoupon);
+      totals.tds = r2(totals.tds + tds);
       totals.total_expense = r2(totals.total_expense + totalExpense);
     }
 
@@ -5396,49 +5420,48 @@ export class AdminService {
 
   async restaurantEarnings(limit = 10, opts: ReportFilterOpts = {}) {
     if (this.useMongo()) {
-      const rows = await this.mongo.aggregate<{
-        _id: number;
-        revenue: number;
-        orders: number;
-        restaurant?: { mysql_id: number; name: string | null; comission: number | null } | null;
-      }>('orders', [
-        { $match: orderReportMatch(opts) },
-        {
-          $group: {
-            _id: '$mysql_restaurant_id',
-            revenue: { $sum: '$order_amount' },
-            orders: { $sum: 1 },
-          },
-        },
-        { $sort: { revenue: -1 } },
-        { $limit: limit },
-        {
-          $lookup: {
-            from: 'restaurants',
-            localField: '_id',
-            foreignField: 'mysql_id',
-            as: 'restaurant',
-          },
-        },
-        { $unwind: { path: '$restaurant', preserveNullAndEmptyArrays: true } },
-      ]);
-      return {
-        top_earners: rows.map((g) => {
-          const revenue = Number(g.revenue ?? 0);
-          const commission =
-            g.restaurant && g.restaurant.comission !== null && g.restaurant.comission !== undefined
-              ? Number(g.restaurant.comission)
-              : 0;
-          return {
-            restaurant_id: Number(g._id),
-            name: g.restaurant?.name ?? null,
-            orders: Number(g.orders ?? 0),
-            revenue,
-            admin_commission: revenue * (commission / 100),
-            restaurant_take: revenue * (1 - commission / 100),
-          };
-        }),
-      };
+      // Per-order JS computation (NOT a $sum over order_amount) so each
+      // restaurant's "revenue" is its FOOD value only and the take nets out the
+      // admin fee (commission + 18% GST) + TDS — same basis as the Transaction
+      // Report. Decimal128-safe via num(). Delivery / additional / situational
+      // are NOT the restaurant's, so they're excluded from its revenue.
+      const num = (v: unknown) => (v == null ? 0 : Number(v) || 0);
+      const r2 = (n: number) => Math.round(n * 100) / 100;
+      const orders = await this.mongo.findMany<Record<string, unknown>>('orders', orderReportMatch(opts), { limit: 5000 });
+      const restIds = Array.from(new Set(orders.map((o) => Number(o.mysql_restaurant_id ?? 0)).filter((n) => n > 0)));
+      const rests = restIds.length ? await this.mongo.findMany<{ mysql_id: number; name?: string; comission?: number }>('restaurants', { mysql_id: { $in: restIds } }) : [];
+      const restMap = new Map(rests.map((r) => [Number(r.mysql_id), r]));
+      const tdsDoc = await this.mongo.findOne<{ default_rate?: number; status?: number | boolean }>('tds_settings', {});
+      const tdsRate = tdsDoc && (tdsDoc.status === 1 || tdsDoc.status === true) ? (Number(tdsDoc.default_rate) || 0) : 0;
+
+      const agg = new Map<number, { orders: number; revenue: number; admin_commission: number; restaurant_take: number }>();
+      for (const o of orders) {
+        const rid = Number(o.mysql_restaurant_id ?? 0);
+        if (!rid) continue;
+        const orderAmount = num(o.order_amount), tax = num(o.total_tax_amount), delivery = num(o.delivery_charge);
+        const coupon = num(o.coupon_discount_amount), restDiscount = num(o.restaurant_discount_amount), adminDiscount = num(o.admin_discount_amount);
+        const extra = num(o.additional_charge) + num(o.extra_packaging_amount) + num(o.situational_charge);
+        let itemAmount = r2(orderAmount + coupon + restDiscount + adminDiscount - tax - delivery - extra);
+        if (itemAmount <= 0) itemAmount = r2(Math.max(0, orderAmount - tax - delivery)) || orderAmount;
+        const commPct = num(restMap.get(rid)?.comission) || 10;
+        const restDiscountCoupon = r2(restDiscount + coupon);
+        const netItemValue = r2(Math.max(0, itemAmount - restDiscountCoupon - adminDiscount));
+        const commission = r2((netItemValue * commPct) / 100);
+        const adminFee = r2(commission + commission * 0.18);                 // PPO + 18% GST
+        const restaurantIncome = r2(itemAmount - restDiscountCoupon - adminFee);
+        const tds = r2((Math.max(0, restaurantIncome) * tdsRate) / 100);
+        const cur = agg.get(rid) ?? { orders: 0, revenue: 0, admin_commission: 0, restaurant_take: 0 };
+        cur.orders += 1;
+        cur.revenue = r2(cur.revenue + itemAmount);                          // restaurant food sales
+        cur.admin_commission = r2(cur.admin_commission + adminFee);          // admin's take from this restaurant
+        cur.restaurant_take = r2(cur.restaurant_take + (restaurantIncome - tds)); // net after admin fee + TDS
+        agg.set(rid, cur);
+      }
+      const top_earners = Array.from(agg.entries())
+        .map(([rid, v]) => ({ restaurant_id: rid, name: restMap.get(rid)?.name ?? null, orders: v.orders, revenue: v.revenue, admin_commission: v.admin_commission, restaurant_take: v.restaurant_take }))
+        .sort((a, b) => b.revenue - a.revenue)
+        .slice(0, limit);
+      return { top_earners };
     }
     const groups = await this.prisma.orders.groupBy({
       by: ['restaurant_id'],
@@ -8369,59 +8392,46 @@ AdminService.prototype.adminEarningReport = async function (this: AdminService, 
     const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const hasFilter = !!(opts && (opts.from || opts.to || opts.zoneId || opts.restaurantId));
     const match = hasFilter ? orderReportMatch(opts) : { order_status: 'delivered', payment_status: 'paid', delivered: { $gte: cutoff } };
-    const rows = await this['mongo'].aggregate<{
-      _id: number;
-      gross: number;
-      tax: number;
-      delivery: number;
-      orders: number;
-      restaurant?: { mysql_id: number; comission: number | null } | null;
-    }>('orders', [
-      { $match: match },
-      {
-        $group: {
-          _id: '$mysql_restaurant_id',
-          gross: { $sum: '$order_amount' },
-          tax: { $sum: '$total_tax_amount' },
-          delivery: { $sum: '$delivery_charge' },
-          orders: { $sum: 1 },
-        },
-      },
-      {
-        $lookup: {
-          from: 'restaurants',
-          localField: '_id',
-          foreignField: 'mysql_id',
-          as: 'restaurant',
-        },
-      },
-      { $unwind: { path: '$restaurant', preserveNullAndEmptyArrays: true } },
-    ]);
-    let gross = 0;
-    let tax = 0;
-    let deliveryCharges = 0;
-    let adminCommission = 0;
-    let deliveredOrders = 0;
-    for (const r of rows) {
-      const g = Number(r.gross ?? 0);
-      gross += g;
-      tax += Number(r.tax ?? 0);
-      deliveryCharges += Number(r.delivery ?? 0);
-      deliveredOrders += Number(r.orders ?? 0);
-      const comm =
-        r.restaurant && r.restaurant.comission !== null && r.restaurant.comission !== undefined
-          ? Number(r.restaurant.comission)
-          : 0;
-      adminCommission += g * (comm / 100);
+    // Per-order JS computation (Decimal128-safe via num) on the same basis as the
+    // Transaction Report: admin_commission = Σ(PPO commission + 18% GST) on the NET
+    // ITEM value; restaurant_take = Σ(net item − admin fee − its discount − TDS).
+    // Delivery / additional / situational are NOT split here (they're the DM's /
+    // admin-additional / govt) — gross_sales stays informational.
+    const num = (v: unknown) => (v == null ? 0 : Number(v) || 0);
+    const r2x = (n: number) => Math.round(n * 100) / 100;
+    const ordersList = await this['mongo'].findMany<Record<string, unknown>>('orders', match, { limit: 5000 });
+    const restIds = Array.from(new Set(ordersList.map((o) => Number(o.mysql_restaurant_id ?? 0)).filter((n) => n > 0)));
+    const rests = restIds.length ? await this['mongo'].findMany<{ mysql_id: number; comission?: number }>('restaurants', { mysql_id: { $in: restIds } }) : [];
+    const restMap = new Map(rests.map((r) => [Number(r.mysql_id), r]));
+    const tdsDoc = await this['mongo'].findOne<{ default_rate?: number; status?: number | boolean }>('tds_settings', {});
+    const tdsRate = tdsDoc && (tdsDoc.status === 1 || tdsDoc.status === true) ? (Number(tdsDoc.default_rate) || 0) : 0;
+
+    let gross = 0, tax = 0, deliveryCharges = 0, adminCommission = 0, restaurantTake = 0, deliveredOrders = 0;
+    for (const o of ordersList) {
+      const orderAmount = num(o.order_amount), t = num(o.total_tax_amount), delivery = num(o.delivery_charge);
+      gross += orderAmount; tax += t; deliveryCharges += delivery; deliveredOrders += 1;
+      const coupon = num(o.coupon_discount_amount), restDiscount = num(o.restaurant_discount_amount), adminDiscount = num(o.admin_discount_amount);
+      const extra = num(o.additional_charge) + num(o.extra_packaging_amount) + num(o.situational_charge);
+      let itemAmount = r2x(orderAmount + coupon + restDiscount + adminDiscount - t - delivery - extra);
+      if (itemAmount <= 0) itemAmount = r2x(Math.max(0, orderAmount - t - delivery)) || orderAmount;
+      const commPct = num(restMap.get(Number(o.mysql_restaurant_id ?? 0))?.comission) || 10;
+      const restDiscountCoupon = r2x(restDiscount + coupon);
+      const netItemValue = r2x(Math.max(0, itemAmount - restDiscountCoupon - adminDiscount));
+      const commission = r2x((netItemValue * commPct) / 100);
+      const adminFee = r2x(commission + commission * 0.18);
+      const restaurantIncome = r2x(itemAmount - restDiscountCoupon - adminFee);
+      const tds = r2x((Math.max(0, restaurantIncome) * tdsRate) / 100);
+      adminCommission = r2x(adminCommission + adminFee);
+      restaurantTake = r2x(restaurantTake + (restaurantIncome - tds));
     }
     return {
       days,
       delivered_orders: deliveredOrders,
-      gross_sales: gross,
-      total_tax: tax,
-      total_delivery_charges: deliveryCharges,
+      gross_sales: r2x(gross),
+      total_tax: r2x(tax),
+      total_delivery_charges: r2x(deliveryCharges),
       admin_commission: adminCommission,
-      restaurant_take: gross - adminCommission,
+      restaurant_take: restaurantTake,
     };
   }
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);

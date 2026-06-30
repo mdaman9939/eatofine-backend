@@ -4057,7 +4057,7 @@ let AdminService = class AdminService {
             const tds = r2((Math.max(0, restaurantIncome) * tdsRate) / 100);
             const restaurantNetIncome = r2(restaurantIncome - tds);
             const adminIncomeFromRestaurant = adminFee;
-            const adminIncomeFromUser = r2(additionalCharge + situational + baseDelivery - adminDiscount);
+            const adminIncomeFromUser = r2(additionalCharge - adminDiscount);
             const status = String(o.order_status ?? '');
             const user = userMap.get(Number(o.mysql_user_id ?? 0));
             const pm = String(o.payment_method ?? 'cash_on_delivery');
@@ -4420,24 +4420,25 @@ let AdminService = class AdminService {
             const coupon = num(o.coupon_discount_amount);
             const restDiscount = num(o.restaurant_discount_amount);
             const additional = num(o.additional_charge);
-            const situational = num(o.situational_charge);
-            let itemAmount = r2(orderAmount + coupon + restDiscount - tax - delivery - additional - situational);
+            const adminDiscount = num(o.admin_discount_amount);
+            let itemAmount = r2(orderAmount + coupon + restDiscount - tax - delivery - additional - num(o.situational_charge));
             if (itemAmount <= 0)
                 itemAmount = r2(Math.max(0, orderAmount - tax - delivery)) || orderAmount;
             const rest = restMap.get(Number(o.mysql_restaurant_id ?? 0));
             const commissionRate = num(rest?.comission) || 10;
-            const earningRestaurant = r2((itemAmount * commissionRate) / 100);
+            const commission = r2((itemAmount * commissionRate) / 100);
+            const commissionGst = r2(commission * 0.18);
+            const total = r2(commission + commissionGst + additional - adminDiscount);
             const user = userMap.get(Number(o.mysql_user_id ?? 0));
-            const total = r2(earningRestaurant + delivery + additional + situational);
             return {
                 order_id: Number(o.mysql_id),
                 customer_name: user ? `${user.f_name ?? ''} ${user.l_name ?? ''}`.trim() || null : null,
                 restaurant: rest?.name ?? null,
                 order_type: String(o.order_type ?? 'delivery'),
-                earning_restaurant: earningRestaurant,
-                earning_delivery: delivery,
+                commission,
+                commission_gst: commissionGst,
                 earning_additional: additional,
-                earning_situational: situational,
+                admin_discount: adminDiscount,
                 total_earning: total,
             };
         });
@@ -4694,14 +4695,15 @@ let AdminService = class AdminService {
                 itemAmount = r2(Math.max(0, orderAmount - tax - delivery)) || orderAmount;
             const rest = restMap.get(Number(o.mysql_restaurant_id ?? 0));
             const commission = r2((itemAmount * (num(rest?.comission) || 10)) / 100);
-            orderCommission += commission;
+            const adminFee = r2(commission + commission * 0.18);
+            orderCommission += adminFee;
             additionalCharge += extra;
             deliveryCharge += delivery;
             couponExp += coupon;
             prodDiscExp += restDiscount;
             const oid = Number(o.mysql_id);
-            if (commission > 0)
-                earningTxns.push({ txn_id: `TXN ${oid}`, date: o.created_at ?? null, source: rest?.name ?? null, source_type: 'Restaurant', earning_source: `#ORD ${oid}`, amount: commission });
+            if (adminFee > 0)
+                earningTxns.push({ txn_id: `TXN ${oid}`, date: o.created_at ?? null, source: rest?.name ?? null, source_type: 'Restaurant', earning_source: `#ORD ${oid}`, amount: adminFee });
             if (coupon > 0)
                 expenseTxns.push({ txn_id: `TXN ${oid}`, date: o.created_at ?? null, source: rest?.name ?? null, source_type: 'Coupon', earning_source: `#ORD ${oid}`, amount: coupon });
         }
@@ -4729,7 +4731,7 @@ let AdminService = class AdminService {
         return {
             summary: { total_earnings: totalEarnings, total_expenses: totalExpenses, net_profit: netProfit },
             earnings_breakdown: [
-                { label: 'Order Commission', amount: orderCommission, pct: pct(orderCommission, totalEarnings) },
+                { label: 'Commission (PPO + 18% GST)', amount: orderCommission, pct: pct(orderCommission, totalEarnings) },
                 { label: 'Subscription Packages', amount: r2(subscriptionEarning), pct: pct(subscriptionEarning, totalEarnings) },
                 { label: 'Additional Charge', amount: additionalCharge, pct: pct(additionalCharge, totalEarnings) },
                 { label: 'Delivery Fee Commission', amount: deliveryFeeCommission, pct: 0 },
@@ -4746,88 +4748,105 @@ let AdminService = class AdminService {
         };
     }
     async restaurantEarningDetailed(opts = {}) {
-        const empty = { transactions: { earnings: [], expenses: [], subscription: [] } };
+        const emptyTotals = { orders: 0, item_value: 0, total_earning: 0, admin_fee: 0, discount: 0, tds: 0, total_expense: 0 };
+        const empty = { earnings: [], expenses: [], totals: emptyTotals };
         if (!this.useMongo())
             return empty;
         const num = (v) => (v == null ? 0 : Number(v) || 0);
         const r2 = (n) => Math.round(n * 100) / 100;
-        const orders = await this.mongo.findMany('orders', orderReportMatch(opts), { sort: { mysql_id: -1 }, limit: 1000 });
+        const orders = await this.mongo.findMany('orders', orderReportMatch(opts), { sort: { mysql_id: -1 }, limit: 2000 });
         const restIds = Array.from(new Set(orders.map((o) => Number(o.mysql_restaurant_id ?? 0)).filter((n) => n > 0)));
         const rests = restIds.length ? await this.mongo.findMany('restaurants', { mysql_id: { $in: restIds } }) : [];
         const restMap = new Map(rests.map((r) => [Number(r.mysql_id), r]));
+        const zoneIds = Array.from(new Set(orders.map((o) => Number(o.mysql_zone_id ?? 0)).filter((n) => n > 0)));
+        const zones = zoneIds.length ? await this.mongo.findMany('zones', { mysql_id: { $in: zoneIds } }) : [];
+        const zoneMap = new Map(zones.map((z) => [Number(z.mysql_id), z.name ?? null]));
+        const userIds = Array.from(new Set(orders.map((o) => Number(o.mysql_user_id ?? 0)).filter((n) => n > 0)));
+        const users = userIds.length ? await this.mongo.findMany('users', { mysql_id: { $in: userIds } }) : [];
+        const userMap = new Map(users.map((u) => [Number(u.mysql_id), `${u.f_name ?? ''} ${u.l_name ?? ''}`.trim()]));
+        const tdsDoc = await this.mongo.findOne('tds_settings', {});
+        const tdsRate = tdsDoc && (tdsDoc.status === 1 || tdsDoc.status === true) ? (Number(tdsDoc.default_rate) || 0) : 0;
         const earnings = [];
         const expenses = [];
+        const totals = { ...emptyTotals };
+        let sr = 0;
         for (const o of orders) {
             const orderAmount = num(o.order_amount), tax = num(o.total_tax_amount), delivery = num(o.delivery_charge);
-            const coupon = num(o.coupon_discount_amount), restDiscount = num(o.restaurant_discount_amount), extra = num(o.additional_charge);
-            let itemAmount = r2(orderAmount + coupon + restDiscount - tax - delivery - extra);
+            const coupon = num(o.coupon_discount_amount), restDiscount = num(o.restaurant_discount_amount), adminDiscount = num(o.admin_discount_amount);
+            const extra = num(o.additional_charge) + num(o.extra_packaging_amount) + num(o.situational_charge);
+            let itemAmount = r2(orderAmount + coupon + restDiscount + adminDiscount - tax - delivery - extra);
             if (itemAmount <= 0)
                 itemAmount = r2(Math.max(0, orderAmount - tax - delivery)) || orderAmount;
             const rest = restMap.get(Number(o.mysql_restaurant_id ?? 0));
-            const commission = r2((itemAmount * (num(rest?.comission) || 10)) / 100);
-            const restaurantTake = r2(itemAmount - commission);
+            const commPct = num(rest?.comission) || 10;
+            const restDiscountCoupon = r2(restDiscount + coupon);
+            const netItemValue = r2(Math.max(0, itemAmount - restDiscountCoupon - adminDiscount));
+            const commission = r2((netItemValue * commPct) / 100);
+            const commissionGst = r2(commission * 0.18);
+            const adminFee = r2(commission + commissionGst);
+            const restaurantIncome = r2(itemAmount - restDiscountCoupon - adminFee);
+            const tds = r2((Math.max(0, restaurantIncome) * tdsRate) / 100);
+            const restaurantNet = r2(restaurantIncome - tds);
+            const totalExpense = r2(adminFee + restDiscountCoupon + tds);
             const oid = Number(o.mysql_id);
-            if (restaurantTake > 0)
-                earnings.push({ txn_id: `TXN ${oid}`, date: o.created_at ?? null, source: rest?.name ?? null, source_type: 'Restaurant', earning_source: `#ORD ${oid}`, amount: restaurantTake });
-            if (commission > 0)
-                expenses.push({ txn_id: `TXN ${oid}`, date: o.created_at ?? null, source: rest?.name ?? null, source_type: 'Restaurant', expense_type: 'Commission Paid', earning_source: `#ORD ${oid}`, amount: commission });
+            const zoneId = Number(o.mysql_zone_id ?? 0);
+            const zoneName = zoneMap.get(zoneId) ?? (zoneId > 0 ? `Zone #${zoneId}` : null);
+            const customer = userMap.get(Number(o.mysql_user_id ?? 0)) || o.contact_person_name || 'Guest';
+            const date = (o.delivered ?? o.created_at) ?? null;
+            sr += 1;
+            const common = { sr, order_id: oid, zone: zoneName, restaurant: rest?.name ?? null, customer, date };
+            earnings.push({ ...common, item_value: itemAmount, total_earning: restaurantNet });
+            expenses.push({ ...common, admin_fee: adminFee, discount: restDiscountCoupon, tds, total_expense: totalExpense });
+            totals.orders += 1;
+            totals.item_value = r2(totals.item_value + itemAmount);
+            totals.total_earning = r2(totals.total_earning + restaurantNet);
+            totals.admin_fee = r2(totals.admin_fee + adminFee);
+            totals.discount = r2(totals.discount + restDiscountCoupon);
+            totals.tds = r2(totals.tds + tds);
+            totals.total_expense = r2(totals.total_expense + totalExpense);
         }
-        const subs = await this.mongo.findMany('subscriptions', {}, { sort: { mysql_id: -1 }, limit: 500 });
-        const subVendorIds = Array.from(new Set(subs.map((s) => Number(s.vendor_id ?? 0)).filter((n) => n > 0)));
-        const subRests = subVendorIds.length ? await this.mongo.findMany('restaurants', { mysql_vendor_id: { $in: subVendorIds } }) : [];
-        const subRestByVendor = new Map(subRests.map((r) => [Number(r.mysql_vendor_id ?? 0), r.name ?? null]));
-        const subscription = subs.map((s) => {
-            const status = String(s.status ?? '');
-            const isRenew = num(s.is_trial) === 0 && (status === 'active' || num(s.canceled) === 0);
-            return {
-                txn_id: s.transaction_id ?? `SUB ${Number(s.mysql_id)}`,
-                date: s.started_at ?? s.created_at ?? null,
-                restaurant: subRestByVendor.get(Number(s.vendor_id ?? 0)) ?? null,
-                transaction_type: isRenew ? 'Renew Subscription' : 'New Subscription',
-                amount: num(s.amount),
-            };
-        });
-        return { transactions: { earnings: earnings.slice(0, 300), expenses: expenses.slice(0, 300), subscription } };
+        return { earnings, expenses, totals };
     }
     async restaurantEarnings(limit = 10, opts = {}) {
         if (this.useMongo()) {
-            const rows = await this.mongo.aggregate('orders', [
-                { $match: orderReportMatch(opts) },
-                {
-                    $group: {
-                        _id: '$mysql_restaurant_id',
-                        revenue: { $sum: '$order_amount' },
-                        orders: { $sum: 1 },
-                    },
-                },
-                { $sort: { revenue: -1 } },
-                { $limit: limit },
-                {
-                    $lookup: {
-                        from: 'restaurants',
-                        localField: '_id',
-                        foreignField: 'mysql_id',
-                        as: 'restaurant',
-                    },
-                },
-                { $unwind: { path: '$restaurant', preserveNullAndEmptyArrays: true } },
-            ]);
-            return {
-                top_earners: rows.map((g) => {
-                    const revenue = Number(g.revenue ?? 0);
-                    const commission = g.restaurant && g.restaurant.comission !== null && g.restaurant.comission !== undefined
-                        ? Number(g.restaurant.comission)
-                        : 0;
-                    return {
-                        restaurant_id: Number(g._id),
-                        name: g.restaurant?.name ?? null,
-                        orders: Number(g.orders ?? 0),
-                        revenue,
-                        admin_commission: revenue * (commission / 100),
-                        restaurant_take: revenue * (1 - commission / 100),
-                    };
-                }),
-            };
+            const num = (v) => (v == null ? 0 : Number(v) || 0);
+            const r2 = (n) => Math.round(n * 100) / 100;
+            const orders = await this.mongo.findMany('orders', orderReportMatch(opts), { limit: 5000 });
+            const restIds = Array.from(new Set(orders.map((o) => Number(o.mysql_restaurant_id ?? 0)).filter((n) => n > 0)));
+            const rests = restIds.length ? await this.mongo.findMany('restaurants', { mysql_id: { $in: restIds } }) : [];
+            const restMap = new Map(rests.map((r) => [Number(r.mysql_id), r]));
+            const tdsDoc = await this.mongo.findOne('tds_settings', {});
+            const tdsRate = tdsDoc && (tdsDoc.status === 1 || tdsDoc.status === true) ? (Number(tdsDoc.default_rate) || 0) : 0;
+            const agg = new Map();
+            for (const o of orders) {
+                const rid = Number(o.mysql_restaurant_id ?? 0);
+                if (!rid)
+                    continue;
+                const orderAmount = num(o.order_amount), tax = num(o.total_tax_amount), delivery = num(o.delivery_charge);
+                const coupon = num(o.coupon_discount_amount), restDiscount = num(o.restaurant_discount_amount), adminDiscount = num(o.admin_discount_amount);
+                const extra = num(o.additional_charge) + num(o.extra_packaging_amount) + num(o.situational_charge);
+                let itemAmount = r2(orderAmount + coupon + restDiscount + adminDiscount - tax - delivery - extra);
+                if (itemAmount <= 0)
+                    itemAmount = r2(Math.max(0, orderAmount - tax - delivery)) || orderAmount;
+                const commPct = num(restMap.get(rid)?.comission) || 10;
+                const restDiscountCoupon = r2(restDiscount + coupon);
+                const netItemValue = r2(Math.max(0, itemAmount - restDiscountCoupon - adminDiscount));
+                const commission = r2((netItemValue * commPct) / 100);
+                const adminFee = r2(commission + commission * 0.18);
+                const restaurantIncome = r2(itemAmount - restDiscountCoupon - adminFee);
+                const tds = r2((Math.max(0, restaurantIncome) * tdsRate) / 100);
+                const cur = agg.get(rid) ?? { orders: 0, revenue: 0, admin_commission: 0, restaurant_take: 0 };
+                cur.orders += 1;
+                cur.revenue = r2(cur.revenue + itemAmount);
+                cur.admin_commission = r2(cur.admin_commission + adminFee);
+                cur.restaurant_take = r2(cur.restaurant_take + (restaurantIncome - tds));
+                agg.set(rid, cur);
+            }
+            const top_earners = Array.from(agg.entries())
+                .map(([rid, v]) => ({ restaurant_id: rid, name: restMap.get(rid)?.name ?? null, orders: v.orders, revenue: v.revenue, admin_commission: v.admin_commission, restaurant_take: v.restaurant_take }))
+                .sort((a, b) => b.revenue - a.revenue)
+                .slice(0, limit);
+            return { top_earners };
         }
         const groups = await this.prisma.orders.groupBy({
             by: ['restaurant_id'],
@@ -4960,6 +4979,8 @@ function orderReportMatch(opts = {}) {
         match.mysql_zone_id = Number(opts.zoneId);
     if (opts.restaurantId)
         match.mysql_restaurant_id = Number(opts.restaurantId);
+    if (opts.deliveryManId)
+        match.mysql_delivery_man_id = Number(opts.deliveryManId);
     return match;
 }
 AdminService.prototype.listAddOns = async function (opts) {
@@ -5722,11 +5743,14 @@ AdminService.prototype.listDisbursements = async function (opts) {
         const dmNames = await nameMapFor(this['mongo'], 'delivery_men', rows.map((r) => readFk(r, 'delivery_man_id')), personLabel);
         const vendorIds = Array.from(new Set(rows.map((r) => readFk(r, 'vendor_id')).filter((x) => x !== null)));
         const restByVendor = new Map();
+        const zoneIdByVendor = new Map();
         if (vendorIds.length) {
-            const rests = await this['mongo'].findMany('restaurants', { mysql_vendor_id: { $in: vendorIds } }, { projection: { mysql_vendor_id: 1, name: 1 } });
+            const rests = await this['mongo'].findMany('restaurants', { mysql_vendor_id: { $in: vendorIds } }, { projection: { mysql_vendor_id: 1, name: 1, mysql_zone_id: 1 } });
             for (const rr of rests) {
                 if (rr.mysql_vendor_id != null && rr.name)
                     restByVendor.set(Number(rr.mysql_vendor_id), rr.name);
+                if (rr.mysql_vendor_id != null && rr.mysql_zone_id != null)
+                    zoneIdByVendor.set(Number(rr.mysql_vendor_id), Number(rr.mysql_zone_id));
             }
         }
         const dmIdsForWallet = Array.from(new Set(rows.map((r) => readFk(r, 'delivery_man_id')).filter((x) => x !== null)));
@@ -5739,12 +5763,32 @@ AdminService.prototype.listDisbursements = async function (opts) {
                     payableByDm.set(did, Math.round(Math.max(0, (Number(w.balance ?? 0)) - (Number(w.collected_cash ?? 0))) * 100) / 100);
             }
         }
+        const zoneIdByDm = new Map();
+        if (dmIdsForWallet.length) {
+            const dms = await this['mongo'].findMany('delivery_men', { mysql_id: { $in: dmIdsForWallet } }, { projection: { mysql_id: 1, mysql_zone_id: 1 } });
+            for (const dd of dms) {
+                if (dd.mysql_id != null && dd.mysql_zone_id != null)
+                    zoneIdByDm.set(Number(dd.mysql_id), Number(dd.mysql_zone_id));
+            }
+        }
+        const zoneIds = Array.from(new Set([...zoneIdByVendor.values(), ...zoneIdByDm.values()]));
+        const zoneNameById = new Map();
+        if (zoneIds.length) {
+            const zns = await this['mongo'].findMany('zones', { mysql_id: { $in: zoneIds } }, { projection: { mysql_id: 1, name: 1 } });
+            for (const z of zns) {
+                if (z.mysql_id != null && z.name)
+                    zoneNameById.set(Number(z.mysql_id), z.name);
+            }
+        }
         return paginate(rows.map((r) => {
             const vendorId = readFk(r, 'vendor_id');
             const dmId = readFk(r, 'delivery_man_id');
             const isDm = dmId !== null;
             const amount = r.total_amount !== undefined && r.total_amount !== null ? Number(r.total_amount) : 0;
             const status = String(r.status ?? 'pending');
+            const zoneId = isDm
+                ? (dmId !== null ? (zoneIdByDm.get(dmId) ?? null) : null)
+                : (vendorId !== null ? (zoneIdByVendor.get(vendorId) ?? null) : null);
             const fallback = r.updated_at ?? r.created_at ?? null;
             const initiatedAt = r.initiated_at
                 ?? (status === 'processing' || status === 'disbursed' ? fallback : null);
@@ -5761,6 +5805,8 @@ AdminService.prototype.listDisbursements = async function (opts) {
                     ? (dmNames.get(dmId) ?? null)
                     : (vendorId !== null ? (restByVendor.get(vendorId) ?? vendorNames.get(vendorId) ?? null) : null),
                 type: isDm ? 'deliveryman' : 'restaurant',
+                zone_id: zoneId,
+                zone_name: zoneId !== null ? (zoneNameById.get(zoneId) ?? null) : null,
                 payment_method: r.payment_method ?? 'cash',
                 initiated_at: initiatedAt,
                 paid_at: paidAt,
@@ -7423,51 +7469,44 @@ AdminService.prototype.adminEarningReport = async function (days, opts = {}) {
         const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
         const hasFilter = !!(opts && (opts.from || opts.to || opts.zoneId || opts.restaurantId));
         const match = hasFilter ? orderReportMatch(opts) : { order_status: 'delivered', payment_status: 'paid', delivered: { $gte: cutoff } };
-        const rows = await this['mongo'].aggregate('orders', [
-            { $match: match },
-            {
-                $group: {
-                    _id: '$mysql_restaurant_id',
-                    gross: { $sum: '$order_amount' },
-                    tax: { $sum: '$total_tax_amount' },
-                    delivery: { $sum: '$delivery_charge' },
-                    orders: { $sum: 1 },
-                },
-            },
-            {
-                $lookup: {
-                    from: 'restaurants',
-                    localField: '_id',
-                    foreignField: 'mysql_id',
-                    as: 'restaurant',
-                },
-            },
-            { $unwind: { path: '$restaurant', preserveNullAndEmptyArrays: true } },
-        ]);
-        let gross = 0;
-        let tax = 0;
-        let deliveryCharges = 0;
-        let adminCommission = 0;
-        let deliveredOrders = 0;
-        for (const r of rows) {
-            const g = Number(r.gross ?? 0);
-            gross += g;
-            tax += Number(r.tax ?? 0);
-            deliveryCharges += Number(r.delivery ?? 0);
-            deliveredOrders += Number(r.orders ?? 0);
-            const comm = r.restaurant && r.restaurant.comission !== null && r.restaurant.comission !== undefined
-                ? Number(r.restaurant.comission)
-                : 0;
-            adminCommission += g * (comm / 100);
+        const num = (v) => (v == null ? 0 : Number(v) || 0);
+        const r2x = (n) => Math.round(n * 100) / 100;
+        const ordersList = await this['mongo'].findMany('orders', match, { limit: 5000 });
+        const restIds = Array.from(new Set(ordersList.map((o) => Number(o.mysql_restaurant_id ?? 0)).filter((n) => n > 0)));
+        const rests = restIds.length ? await this['mongo'].findMany('restaurants', { mysql_id: { $in: restIds } }) : [];
+        const restMap = new Map(rests.map((r) => [Number(r.mysql_id), r]));
+        const tdsDoc = await this['mongo'].findOne('tds_settings', {});
+        const tdsRate = tdsDoc && (tdsDoc.status === 1 || tdsDoc.status === true) ? (Number(tdsDoc.default_rate) || 0) : 0;
+        let gross = 0, tax = 0, deliveryCharges = 0, adminCommission = 0, restaurantTake = 0, deliveredOrders = 0;
+        for (const o of ordersList) {
+            const orderAmount = num(o.order_amount), t = num(o.total_tax_amount), delivery = num(o.delivery_charge);
+            gross += orderAmount;
+            tax += t;
+            deliveryCharges += delivery;
+            deliveredOrders += 1;
+            const coupon = num(o.coupon_discount_amount), restDiscount = num(o.restaurant_discount_amount), adminDiscount = num(o.admin_discount_amount);
+            const extra = num(o.additional_charge) + num(o.extra_packaging_amount) + num(o.situational_charge);
+            let itemAmount = r2x(orderAmount + coupon + restDiscount + adminDiscount - t - delivery - extra);
+            if (itemAmount <= 0)
+                itemAmount = r2x(Math.max(0, orderAmount - t - delivery)) || orderAmount;
+            const commPct = num(restMap.get(Number(o.mysql_restaurant_id ?? 0))?.comission) || 10;
+            const restDiscountCoupon = r2x(restDiscount + coupon);
+            const netItemValue = r2x(Math.max(0, itemAmount - restDiscountCoupon - adminDiscount));
+            const commission = r2x((netItemValue * commPct) / 100);
+            const adminFee = r2x(commission + commission * 0.18);
+            const restaurantIncome = r2x(itemAmount - restDiscountCoupon - adminFee);
+            const tds = r2x((Math.max(0, restaurantIncome) * tdsRate) / 100);
+            adminCommission = r2x(adminCommission + adminFee);
+            restaurantTake = r2x(restaurantTake + (restaurantIncome - tds));
         }
         return {
             days,
             delivered_orders: deliveredOrders,
-            gross_sales: gross,
-            total_tax: tax,
-            total_delivery_charges: deliveryCharges,
+            gross_sales: r2x(gross),
+            total_tax: r2x(tax),
+            total_delivery_charges: r2x(deliveryCharges),
             admin_commission: adminCommission,
-            restaurant_take: gross - adminCommission,
+            restaurant_take: restaurantTake,
         };
     }
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
@@ -7661,6 +7700,90 @@ AdminService.prototype.deliverymanEarningReport = async function (limit, opts = 
                 total_bonus: 0,
             };
         }),
+    };
+};
+AdminService.prototype.deliverymanEarningDetail = async function (opts = {}, limit = 300) {
+    const empty = {
+        summary: { deliveries: 0, delivery_fee: 0, tips: 0, situational: 0, bonus_incentive: 0, bonus_incentive_count: 0, total_earning: 0 },
+        earnings: [],
+        bonus_incentive: [],
+    };
+    if (!this['useMongo']())
+        return empty;
+    const num = (v) => (v == null ? 0 : Number(v) || 0);
+    const r2 = (n) => Math.round(n * 100) / 100;
+    const match = { ...orderReportMatch(opts), mysql_delivery_man_id: { $ne: null } };
+    const orders = await this['mongo'].findMany('orders', match, { sort: { mysql_id: -1 }, limit });
+    const incFilter = { status: 'approved' };
+    if (opts.deliveryManId)
+        incFilter.dm_id = Number(opts.deliveryManId);
+    if (opts.from || opts.to) {
+        const range = {};
+        if (opts.from)
+            range.$gte = new Date(opts.from);
+        if (opts.to)
+            range.$lte = new Date(`${opts.to}T23:59:59.999Z`);
+        incFilter.created_at = range;
+    }
+    const incentives = await this['mongo'].findMany('dm_incentives', incFilter, { sort: { mysql_id: -1 }, limit: 500 });
+    const allDmIds = Array.from(new Set([
+        ...orders.map((o) => Number(o.mysql_delivery_man_id ?? 0)),
+        ...incentives.map((i) => Number(i.dm_id ?? 0)),
+    ].filter((n) => n > 0)));
+    const dms = allDmIds.length
+        ? await this['mongo'].findMany('delivery_men', { mysql_id: { $in: allDmIds } })
+        : [];
+    const nameByDm = new Map(dms.map((d) => [Number(d.mysql_id), `${d.f_name ?? ''} ${d.l_name ?? ''}`.trim() || `DM #${d.mysql_id}`]));
+    const zoneByDm = new Map(dms.map((d) => [Number(d.mysql_id), d.mysql_zone_id ?? null]));
+    const earnings = orders.map((o, i) => {
+        const dmId = Number(o.mysql_delivery_man_id ?? 0);
+        const delivery = num(o.delivery_charge);
+        const situational = num(o.situational_charge ?? o.surge_amount ?? o.surcharge_amount);
+        const baseDelivery = r2(Math.max(0, delivery - situational));
+        const tips = r2(num(o.dm_tips));
+        return {
+            sr: i + 1,
+            order_id: Number(o.mysql_id),
+            dm_id: dmId || null,
+            dm_name: dmId ? (nameByDm.get(dmId) ?? `DM #${dmId}`) : '—',
+            date: o.delivered ?? o.created_at ?? null,
+            delivery_fee: baseDelivery,
+            tips,
+            situational: r2(situational),
+            total: r2(baseDelivery + situational + tips),
+        };
+    });
+    const bonusRows = incentives
+        .filter((inc) => {
+        if (!opts.zoneId)
+            return true;
+        const z = inc.dm_id != null ? zoneByDm.get(Number(inc.dm_id)) : null;
+        return z != null && Number(z) === Number(opts.zoneId);
+    })
+        .map((inc, i) => ({
+        sr: i + 1,
+        dm_id: inc.dm_id ?? null,
+        dm_name: inc.dm_id ? (nameByDm.get(Number(inc.dm_id)) ?? `DM #${inc.dm_id}`) : '—',
+        date: inc.created_at ?? null,
+        note: inc.reason ?? '—',
+        amount: r2(num(inc.claim_amount)),
+    }));
+    const deliveryFeeTotal = r2(earnings.reduce((s, e) => s + e.delivery_fee, 0));
+    const tipsTotal = r2(earnings.reduce((s, e) => s + e.tips, 0));
+    const situationalTotal = r2(earnings.reduce((s, e) => s + e.situational, 0));
+    const bonusIncentiveTotal = r2(bonusRows.reduce((s, b) => s + b.amount, 0));
+    return {
+        summary: {
+            deliveries: earnings.length,
+            delivery_fee: deliveryFeeTotal,
+            tips: tipsTotal,
+            situational: situationalTotal,
+            bonus_incentive: bonusIncentiveTotal,
+            bonus_incentive_count: bonusRows.length,
+            total_earning: r2(deliveryFeeTotal + tipsTotal + situationalTotal + bonusIncentiveTotal),
+        },
+        earnings,
+        bonus_incentive: bonusRows,
     };
 };
 function parseJsonField(s) {

@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { MongoDataService } from '../mongo/mongo-data.service';
-import { issueCreditNote } from '../completion/credit-note.util';
+import { issueCreditNote, ensureOrderInvoice } from '../completion/credit-note.util';
 import {
   applicableScenarios,
   getScenario,
@@ -26,6 +26,7 @@ interface OrderDoc {
   delivery_charge?: number;
   additional_charge?: number;
   extra_packaging_amount?: number;
+  situational_charge?: number;
   delivered?: Date | null;
   canceled_by?: string | null;
 }
@@ -185,6 +186,15 @@ export class RefundService {
       if (record) artefacts.credit_note_id = record.mysql_id;
     }
 
+    // 3b. Tax invoice to the user (PDF "Invoice to User = Yes"). For scenarios
+    //     that also raise a credit note, issueCreditNote already stamped the
+    //     OBR/ETFU numbers — ensureOrderInvoice is idempotent, so this only adds
+    //     an invoice for the Yes-invoice / No-credit-note cases (e.g. user-
+    //     unreachable). Before-delivery fault rows have generate_invoice=false.
+    if (effects.generate_invoice) {
+      await ensureOrderInvoice(this.mongo, orderId);
+    }
+
     const orderDoc = await this.mongo.findByMysqlId<OrderDoc>('orders', orderId);
 
     // 4. Wallet ledger + actual balance move — restaurant
@@ -233,6 +243,73 @@ export class RefundService {
     await this.mongo.insertOne('refund_decisions', decision as unknown as Record<string, unknown>);
 
     return { ok: true, decision_id: decisionId, artefacts, effects, scenario };
+  }
+
+  /**
+   * Customer-initiated cancellation money (PDF rows 1–3). Applies the user-cancel
+   * scenario: FULL refund before the restaurant accepts (row 1); ZERO refund once
+   * accepted, with the restaurant (row 2) and — if a rider was assigned — the
+   * delivery man (row 3) credited their normal-cycle earnings. Called by
+   * OrderLifecycleService.cancelOrder for `by === 'customer'`. Returns the
+   * resulting refund_status (the lifecycle stamps it + owns order_status). Never
+   * issues a credit note — every user-cancel row is "Credit note N/A".
+   */
+  async applyCustomerCancellation(orderId: number, scenarioKey: ScenarioKey): Promise<{ refund_status: string; refund_amount: number; scenario: ScenarioKey }> {
+    const scenario = getScenario(scenarioKey);
+    if (!scenario) return { refund_status: 'not_required', refund_amount: 0, scenario: scenarioKey };
+    const order = await this.mongo.findByMysqlId<OrderDoc>('orders', orderId);
+    if (!order) return { refund_status: 'not_required', refund_amount: 0, scenario: scenarioKey };
+
+    const money = await this.moneyOf(order);
+    const effects = scenario.decide(money);
+    const ledgerIds: number[] = [];
+    let refundStatus = 'not_required';
+    let refundId: number | undefined;
+
+    // Customer refund — only when the scenario refunds AND the order was actually
+    // paid (COD has nothing to return; after-accept user cancels refund ₹0).
+    const paid = String(order.payment_status ?? '') === 'paid';
+    if (effects.refund_to_user && effects.refund_amount > 0 && paid) {
+      const userId = order.mysql_user_id ?? null;
+      refundId = await this.mongo.nextMysqlId('refunds');
+      await this.mongo.insertOne('refunds', {
+        mysql_id: refundId, order_id: orderId, user_id: userId,
+        customer_reason: scenario.label, refund_amount: effects.refund_amount,
+        refund_method: 'wallet', refund_status: 'completed',
+        admin_note: `Auto refund (user cancel) — ${scenario.key}`, created_at: new Date(),
+      });
+      await this.creditCustomerWallet(userId, effects.refund_amount, `Refund for order #${orderId} — ${scenario.label}`, orderId);
+      refundStatus = 'completed';
+    }
+
+    // Partner normal-cycle credits (restaurant item earnings + DM delivery fee).
+    if (effects.restaurant_wallet.direction === 'credit' && effects.restaurant_wallet.amount > 0) {
+      const id = await this.writeLedger({ actor_type: 'restaurant', actor_id: order.mysql_restaurant_id ?? null, order_id: orderId, direction: 'credit', amount: effects.restaurant_wallet.amount, note: effects.restaurant_wallet.note, scenario: scenario.key });
+      ledgerIds.push(id);
+      await this.moveActorWallet('restaurant', order.mysql_restaurant_id ?? null, 'credit', effects.restaurant_wallet.amount);
+    }
+    if (effects.deliveryman_wallet.direction === 'credit' && effects.deliveryman_wallet.amount > 0) {
+      const id = await this.writeLedger({ actor_type: 'deliveryman', actor_id: order.mysql_delivery_man_id ?? null, order_id: orderId, direction: 'credit', amount: effects.deliveryman_wallet.amount, note: effects.deliveryman_wallet.note, scenario: scenario.key });
+      ledgerIds.push(id);
+      await this.moveActorWallet('deliveryman', order.mysql_delivery_man_id ?? null, 'credit', effects.deliveryman_wallet.amount);
+    }
+
+    // Tax invoice to the user — rows 2 & 3 ("Invoice = Yes"); row 1 (before
+    // accept) has generate_invoice=false, so this is skipped there.
+    if (effects.generate_invoice) {
+      await ensureOrderInvoice(this.mongo, orderId);
+    }
+
+    // Audit row (so the user-cancel decision shows in history, like admin ones).
+    const decisionId = await this.mongo.nextMysqlId('refund_decisions');
+    await this.mongo.insertOne('refund_decisions', {
+      mysql_id: decisionId, order_id: orderId, scenario: scenario.key, scenario_label: scenario.label,
+      cancelled_by: 'user', status: 'applied', review_kind: 'user_cancel',
+      effects, artefacts: { wallet_ledger_ids: ledgerIds, refund_id: refundId ?? null },
+      applied_at: new Date(), created_at: new Date(),
+    });
+
+    return { refund_status: refundStatus, refund_amount: effects.refund_amount, scenario: scenario.key };
   }
 
   // ── Pending-review workflow (auto-triggered partner penalties) ───────────
@@ -415,6 +492,9 @@ export class RefundService {
     // settlement engine does.
     const additional = Number(o.additional_charge ?? 0);
     const packaging = Number(o.extra_packaging_amount ?? 0);
+    // Situational (surge / late-night / festival / weekend) portion of the
+    // delivery fee — stored broken out on the order; used in fault penalties.
+    const situational = Number(o.situational_charge ?? 0);
 
     // Item (food) value = sum of the line items, the same authoritative base the
     // settlement engine uses (settlement.service computeBreakdown). Fall back to
@@ -442,7 +522,11 @@ export class RefundService {
       delivery_charge: round2(deliveryCharge),
       packaging_amount: round2(packaging),
       additional_charge: round2(additional),
+      situational_charge: round2(situational),
       admin_commission: commission,
+      // 18% GST on the platform's commission (PPO charge) — the "PPO charge & GST"
+      // penalty component in the spec's restaurant-fault / reject-after-accept rows.
+      admin_commission_gst: round2(commission * 0.18),
       grand_total: round2(grandTotal),
     };
   }

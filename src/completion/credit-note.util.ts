@@ -72,6 +72,24 @@ async function ensureInvoiceNumber(
   return number;
 }
 
+/** Ensure the order carries its OBR + ETFU tax-invoice numbers (assign + persist
+ *  if never invoiced). Used when a cancellation scenario requires an invoice to
+ *  the user but raises NO credit note (e.g. zero-refund user-after-accept, or the
+ *  admin user-unreachable case). Idempotent — returns the existing numbers if the
+ *  order was already invoiced (on delivery or by a credit note). */
+export async function ensureOrderInvoice(
+  mongo: MongoDataService,
+  orderId: number,
+): Promise<{ obr: string; etu: string } | null> {
+  const order = await mongo.findByMysqlId<OrderForCn>('orders', Number(orderId));
+  if (!order) return null;
+  const invDate = new Date((order.delivered ?? order.created_at_legacy ?? order.created_at) ?? new Date());
+  const fy = fyCode(invDate);
+  const obr = await ensureInvoiceNumber(mongo, order, 'customer_invoice_number', 'OBR', fy);
+  const etu = await ensureInvoiceNumber(mongo, order, 'eatofine_invoice_number', 'ETFU', fy);
+  return { obr, etu };
+}
+
 /**
  * Raise (or return the existing) credit note for an order. Idempotent on
  * refund_id when supplied, else on order_id — so the two auto-trigger paths

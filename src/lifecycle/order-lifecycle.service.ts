@@ -1,7 +1,8 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { MongoDataService } from '../mongo/mongo-data.service';
-import { issueCreditNote } from '../completion/credit-note.util';
 import { FcmService } from '../notifications/fcm.service';
+import { RefundService } from '../refund/refund.service';
+import { scenarioForUserCancel } from '../refund/refund-policy';
 import {
   CANCEL_MESSAGE_CUSTOMER,
   CANCEL_MESSAGE_RESTAURANT,
@@ -46,6 +47,7 @@ export class OrderLifecycleService {
   constructor(
     private readonly mongo: MongoDataService,
     private readonly fcm: FcmService,
+    private readonly refund: RefundService,
   ) {}
 
   // ── Audit log ───────────────────────────────────────────────────────────
@@ -110,10 +112,23 @@ export class OrderLifecycleService {
       return { ok: false, skipped: true, reason: `already_${order.order_status}` };
     }
     const toStatus = reason === 'restaurant_not_responded' ? 'auto_cancelled' : 'canceled';
-    // Prepaid order → start + complete the refund automatically (credit wallet).
-    let refundStatus = this.refundStatusForCancel(order);
-    if (refundStatus === REFUND_STATUS.PENDING) {
-      refundStatus = await this.processRefund(order);
+    // Refund money follows the cancellation matrix (Refund & Cancellation PDF):
+    let refundStatus: string;
+    if (by === 'customer') {
+      // Rows 1–3: full refund BEFORE the restaurant accepts; ZERO refund once
+      // accepted, with the restaurant (+ DM, if assigned) credited their normal
+      // cycle. Delegated to the refund engine so the matrix lives in one place.
+      const scenarioKey = scenarioForUserCancel(String(order.order_status ?? ''), order.mysql_delivery_man_id != null);
+      const res = await this.refund.applyCustomerCancellation(orderId, scenarioKey);
+      refundStatus = res.refund_status;
+    } else {
+      // Restaurant / admin / system cancel → full prepaid refund to the customer.
+      // Any partner penalty is proposed separately for admin review; no credit
+      // note here (every lifecycle-handled cancel row is "Credit note N/A").
+      refundStatus = this.refundStatusForCancel(order);
+      if (refundStatus === REFUND_STATUS.PENDING) {
+        refundStatus = await this.processRefund(order);
+      }
     }
     await this.mongo.updateOne('orders', { mysql_id: Number(orderId) }, {
       order_status: toStatus,
@@ -274,21 +289,9 @@ export class OrderLifecycleService {
       });
       const tok = await this.tokenForUser(uid);
       await this.push(tok, 'Refund processed', `₹${amount.toFixed(2)} refunded to your wallet`, Number(order.mysql_id), 'refund');
-      // Raise the credit note (accounting document) for this cancellation refund.
-      // issueCreditNote carries the order's OBR/ETFU invoice numbers as the
-      // Reference Invoice no and is idempotent on refund_id, so the same refund
-      // never double-issues. Best-effort: a credit-note failure must NOT flip the
-      // (already-completed) wallet refund to FAILED — hence its own try/catch.
-      try {
-        await issueCreditNote(this.mongo, {
-          orderId: Number(order.mysql_id),
-          refundId: rid,
-          amount,
-          reason: 'order_cancelled',
-        });
-      } catch (cnErr) {
-        this.logger.warn(`credit note failed for order ${order.mysql_id}: ${cnErr instanceof Error ? cnErr.message : String(cnErr)}`);
-      }
+      // No credit note here: every lifecycle-handled cancellation (restaurant
+      // reject / auto-cancel) is "Credit note N/A" in the matrix. Admin fault
+      // cases that DO need a credit note go through RefundService.apply().
       return REFUND_STATUS.PROCESSED;
     } catch (e) {
       this.logger.warn(`refund failed for order ${order.mysql_id}: ${e instanceof Error ? e.message : String(e)}`);

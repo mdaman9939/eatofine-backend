@@ -1,12 +1,14 @@
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { FcmService } from '../notifications/fcm.service';
+import { RefundService } from '../refund/refund.service';
 import { type CancelReason } from './order-lifecycle.constants';
 type Actor = 'customer' | 'restaurant' | 'admin' | 'delivery_partner' | 'system';
 export declare class OrderLifecycleService {
     private readonly mongo;
     private readonly fcm;
+    private readonly refund;
     private readonly logger;
-    constructor(mongo: MongoDataService, fcm: FcmService);
+    constructor(mongo: MongoDataService, fcm: FcmService, refund: RefundService);
     log(orderId: number, fromStatus: string | undefined, toStatus: string, by: Actor, reason?: string | null): Promise<void>;
     private tokenForUser;
     private tokenForRestaurant;

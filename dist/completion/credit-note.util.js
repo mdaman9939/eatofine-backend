@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.ensureOrderInvoice = ensureOrderInvoice;
 exports.issueCreditNote = issueCreditNote;
 function fyCode(dt) {
     const sy = dt.getMonth() + 1 >= 4 ? dt.getFullYear() : dt.getFullYear() - 1;
@@ -13,6 +14,16 @@ async function ensureInvoiceNumber(mongo, order, field, prefix, fy) {
     const number = `${prefix}${fy}-${String(seq).padStart(4, '0')}`;
     await mongo.updateOne('orders', { mysql_id: Number(order.mysql_id) }, { [field]: number });
     return number;
+}
+async function ensureOrderInvoice(mongo, orderId) {
+    const order = await mongo.findByMysqlId('orders', Number(orderId));
+    if (!order)
+        return null;
+    const invDate = new Date((order.delivered ?? order.created_at_legacy ?? order.created_at) ?? new Date());
+    const fy = fyCode(invDate);
+    const obr = await ensureInvoiceNumber(mongo, order, 'customer_invoice_number', 'OBR', fy);
+    const etu = await ensureInvoiceNumber(mongo, order, 'eatofine_invoice_number', 'ETFU', fy);
+    return { obr, etu };
 }
 async function issueCreditNote(mongo, input) {
     const orderId = Number(input.orderId);

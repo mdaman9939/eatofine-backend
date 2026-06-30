@@ -12,17 +12,20 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.OrderLifecycleService = void 0;
 const common_1 = require("@nestjs/common");
 const mongo_data_service_1 = require("../mongo/mongo-data.service");
-const credit_note_util_1 = require("../completion/credit-note.util");
 const fcm_service_1 = require("../notifications/fcm.service");
+const refund_service_1 = require("../refund/refund.service");
+const refund_policy_1 = require("../refund/refund-policy");
 const order_lifecycle_constants_1 = require("./order-lifecycle.constants");
 const r2 = (n) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
 let OrderLifecycleService = class OrderLifecycleService {
     mongo;
     fcm;
+    refund;
     logger = new common_1.Logger('OrderLifecycle');
-    constructor(mongo, fcm) {
+    constructor(mongo, fcm, refund) {
         this.mongo = mongo;
         this.fcm = fcm;
+        this.refund = refund;
     }
     async log(orderId, fromStatus, toStatus, by, reason) {
         try {
@@ -81,9 +84,17 @@ let OrderLifecycleService = class OrderLifecycleService {
             return { ok: false, skipped: true, reason: `already_${order.order_status}` };
         }
         const toStatus = reason === 'restaurant_not_responded' ? 'auto_cancelled' : 'canceled';
-        let refundStatus = this.refundStatusForCancel(order);
-        if (refundStatus === order_lifecycle_constants_1.REFUND_STATUS.PENDING) {
-            refundStatus = await this.processRefund(order);
+        let refundStatus;
+        if (by === 'customer') {
+            const scenarioKey = (0, refund_policy_1.scenarioForUserCancel)(String(order.order_status ?? ''), order.mysql_delivery_man_id != null);
+            const res = await this.refund.applyCustomerCancellation(orderId, scenarioKey);
+            refundStatus = res.refund_status;
+        }
+        else {
+            refundStatus = this.refundStatusForCancel(order);
+            if (refundStatus === order_lifecycle_constants_1.REFUND_STATUS.PENDING) {
+                refundStatus = await this.processRefund(order);
+            }
         }
         await this.mongo.updateOne('orders', { mysql_id: Number(orderId) }, {
             order_status: toStatus,
@@ -212,17 +223,6 @@ let OrderLifecycleService = class OrderLifecycleService {
             });
             const tok = await this.tokenForUser(uid);
             await this.push(tok, 'Refund processed', `₹${amount.toFixed(2)} refunded to your wallet`, Number(order.mysql_id), 'refund');
-            try {
-                await (0, credit_note_util_1.issueCreditNote)(this.mongo, {
-                    orderId: Number(order.mysql_id),
-                    refundId: rid,
-                    amount,
-                    reason: 'order_cancelled',
-                });
-            }
-            catch (cnErr) {
-                this.logger.warn(`credit note failed for order ${order.mysql_id}: ${cnErr instanceof Error ? cnErr.message : String(cnErr)}`);
-            }
             return order_lifecycle_constants_1.REFUND_STATUS.PROCESSED;
         }
         catch (e) {
@@ -264,6 +264,7 @@ exports.OrderLifecycleService = OrderLifecycleService;
 exports.OrderLifecycleService = OrderLifecycleService = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [mongo_data_service_1.MongoDataService,
-        fcm_service_1.FcmService])
+        fcm_service_1.FcmService,
+        refund_service_1.RefundService])
 ], OrderLifecycleService);
 //# sourceMappingURL=order-lifecycle.service.js.map

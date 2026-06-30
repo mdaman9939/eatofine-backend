@@ -8,7 +8,9 @@ export interface OrderMoney {
     delivery_charge: number;
     packaging_amount: number;
     additional_charge: number;
+    situational_charge: number;
     admin_commission: number;
+    admin_commission_gst: number;
     grand_total: number;
 }
 export interface OrderStage {
@@ -50,5 +52,6 @@ export interface RefundEffects {
 export declare const SCENARIOS: Record<ScenarioKey, ScenarioDefinition>;
 export declare function listScenarios(): Array<Pick<ScenarioDefinition, 'key' | 'cancelled_by' | 'label'>>;
 export declare function scenarioForRestaurantReject(preStatus: string, hasDeliveryMan: boolean): ScenarioKey;
+export declare function scenarioForUserCancel(preStatus: string, hasDeliveryMan: boolean): ScenarioKey;
 export declare function getScenario(key: ScenarioKey): ScenarioDefinition | null;
 export declare function applicableScenarios(stage: OrderStage): Array<Pick<ScenarioDefinition, 'key' | 'cancelled_by' | 'label'>>;

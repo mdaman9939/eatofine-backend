@@ -2010,10 +2010,10 @@ export declare class AdminService {
             customer_name: string | null;
             restaurant: string | null;
             order_type: string;
-            earning_restaurant: number;
-            earning_delivery: number;
+            commission: number;
+            commission_gst: number;
             earning_additional: number;
-            earning_situational: number;
+            admin_discount: number;
             total_earning: number;
         }[];
     }>;
@@ -2139,16 +2139,16 @@ export declare class AdminService {
         };
     }>;
     restaurantEarningDetailed(opts?: ReportFilterOpts): Promise<{
-        transactions: {
-            earnings: Record<string, unknown>[];
-            expenses: Record<string, unknown>[];
-            subscription: {
-                txn_id: string;
-                date: {} | null;
-                restaurant: string | null;
-                transaction_type: string;
-                amount: number;
-            }[];
+        earnings: Record<string, unknown>[];
+        expenses: Record<string, unknown>[];
+        totals: {
+            orders: number;
+            item_value: number;
+            total_earning: number;
+            admin_fee: number;
+            discount: number;
+            tds: number;
+            total_expense: number;
         };
     }>;
     restaurantEarnings(limit?: number, opts?: ReportFilterOpts): Promise<{
@@ -2456,6 +2456,7 @@ declare module './admin.service' {
         adminEarningReport(days: number, opts?: ReportFilterOpts): Promise<unknown>;
         customerReport(limit: number, opts?: ReportFilterOpts): Promise<unknown>;
         deliverymanEarningReport(limit: number, opts?: ReportFilterOpts): Promise<unknown>;
+        deliverymanEarningDetail(opts?: ReportFilterOpts, limit?: number): Promise<unknown>;
     }
 }
 export interface ListOpts {
@@ -2468,4 +2469,5 @@ export interface ReportFilterOpts {
     to?: string;
     zoneId?: number;
     restaurantId?: number;
+    deliveryManId?: number;
 }
