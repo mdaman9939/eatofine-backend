@@ -345,6 +345,9 @@ let RefundService = class RefundService {
         const restaurant = await this.mongo.findByMysqlId('restaurants', Number(o.mysql_restaurant_id ?? 0));
         const commissionPct = Math.max(0, Number(restaurant?.comission ?? 0));
         const commission = round2(Math.max(0, itemTotal - restDiscount) * (commissionPct / 100));
+        const svcDocs = await this.mongo.findMany('business_settings', { key: { $in: ['service_invoice_cgst_rate', 'service_invoice_sgst_rate'] } });
+        const svcVal = (k, d) => { const row = svcDocs.find((x) => x.key === k); const n = parseFloat(String(row?.value ?? row?.key_value ?? '')); return Number.isFinite(n) && n >= 0 ? n : d; };
+        const serviceGstRate = svcVal('service_invoice_cgst_rate', 9) + svcVal('service_invoice_sgst_rate', 9);
         return {
             item_total: round2(itemTotal),
             tax: round2(tax),
@@ -353,7 +356,7 @@ let RefundService = class RefundService {
             additional_charge: round2(additional),
             situational_charge: round2(situational),
             admin_commission: commission,
-            admin_commission_gst: round2(commission * 0.18),
+            admin_commission_gst: round2(commission * (serviceGstRate / 100)),
             grand_total: round2(grandTotal),
         };
     }

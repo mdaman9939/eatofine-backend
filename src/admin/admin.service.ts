@@ -4553,7 +4553,7 @@ export class AdminService {
     // Platform rates.
     const gstDoc = await this.mongo.findOne<{ value?: string; key_value?: string }>('business_settings', { key: 'food_gst_rate' });
     const gstRate = (() => { const n = parseFloat(String(gstDoc?.value ?? gstDoc?.key_value ?? '5')); return Number.isFinite(n) && n >= 0 ? n : 5; })();
-    const commGstRate = 18; // GST on the platform's commission/PPO fee.
+    const commGstRate = await readServiceGstRate(this.mongo); // service GST (CGST+SGST) — Invoice Setup, default 18
     const tdsDoc = await this.mongo.findOne<{ default_rate?: number; status?: number | boolean }>('tds_settings', {});
     const tdsRate = tdsDoc && (tdsDoc.status === 1 || tdsDoc.status === true) ? (Number(tdsDoc.default_rate) || 0) : 0;
 
@@ -4673,7 +4673,7 @@ export class AdminService {
 
     const gstDoc = await this.mongo.findOne<{ value?: string; key_value?: string }>('business_settings', { key: 'food_gst_rate' });
     const foodGstRate = (() => { const n = parseFloat(String(gstDoc?.value ?? gstDoc?.key_value ?? '5')); return Number.isFinite(n) && n >= 0 ? n : 5; })();
-    const SERVICE_GST = 18; // delivery / additional / situational / commission(PPO)
+    const SERVICE_GST = await readServiceGstRate(this.mongo); // delivery / additional / situational / commission(PPO) — Invoice Setup, default 18
 
     const num = (v: unknown) => (v == null ? 0 : Number(v) || 0);
     const r2 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
@@ -4887,7 +4887,7 @@ export class AdminService {
     const num = (v: unknown) => (v == null ? 0 : Number(v) || 0);
     const r2 = (n: number) => Math.round(n * 100) / 100;
     const status_counts: Record<string, number> = {};
-    const serviceRate = 18; // platform service GST (9% + 9%); additional charge & delivery are stored GST-inclusive
+    const serviceRate = await readServiceGstRate(this.mongo); // platform service GST (CGST+SGST) — Invoice Setup, default 18; additional/delivery stored GST-inclusive
     const extractGst = (gross: number) => r2((gross * serviceRate) / (100 + serviceRate));
 
     const rows = orders.map((o) => {
@@ -4986,6 +4986,7 @@ export class AdminService {
     const userMap = new Map(users.map((u) => [Number(u.mysql_id), u]));
     const num = (v: unknown) => (v == null ? 0 : Number(v) || 0);
     const r2 = (n: number) => Math.round(n * 100) / 100;
+    const svcGst = await readServiceGstRate(this.mongo); // service GST (CGST+SGST) — Invoice Setup, default 18
 
     const rows = orders.map((o) => {
       const orderAmount = num(o.order_amount);
@@ -5004,7 +5005,7 @@ export class AdminService {
       // charges, minus any admin-funded discount. Delivery fee + situational/surge
       // are the DELIVERY MAN's earning (settled to the rider) — NOT admin income.
       const commission = r2((itemAmount * commissionRate) / 100);
-      const commissionGst = r2(commission * 0.18);
+      const commissionGst = r2(commission * (svcGst / 100));
       const total = r2(commission + commissionGst + additional - adminDiscount);
       const user = userMap.get(Number(o.mysql_user_id ?? 0));
       return {
@@ -5276,6 +5277,7 @@ export class AdminService {
     const rests = restIds.length ? await this.mongo.findMany<{ mysql_id: number; name?: string; comission?: number }>('restaurants', { mysql_id: { $in: restIds } }) : [];
     const restMap = new Map(rests.map((r) => [Number(r.mysql_id), r]));
 
+    const svcGst = await readServiceGstRate(this.mongo); // service GST (CGST+SGST) — Invoice Setup, default 18
     let orderCommission = 0, additionalCharge = 0, deliveryCharge = 0, couponExp = 0, prodDiscExp = 0;
     const earningTxns: Array<Record<string, unknown>> = [];
     const expenseTxns: Array<Record<string, unknown>> = [];
@@ -5286,7 +5288,7 @@ export class AdminService {
       if (itemAmount <= 0) itemAmount = r2(Math.max(0, orderAmount - tax - delivery)) || orderAmount;
       const rest = restMap.get(Number(o.mysql_restaurant_id ?? 0));
       const commission = r2((itemAmount * (num(rest?.comission) || 10)) / 100);
-      const adminFee = r2(commission + commission * 0.18); // PPO/commission + 18% GST (admin's commission income)
+      const adminFee = r2(commission + commission * (svcGst / 100)); // PPO/commission + 18% GST (admin's commission income)
       orderCommission += adminFee; additionalCharge += extra; deliveryCharge += delivery; couponExp += coupon; prodDiscExp += restDiscount;
       const oid = Number(o.mysql_id);
       if (adminFee > 0) earningTxns.push({ txn_id: `TXN ${oid}`, date: o.created_at ?? null, source: rest?.name ?? null, source_type: 'Restaurant', earning_source: `#ORD ${oid}`, amount: adminFee });
@@ -5369,6 +5371,7 @@ export class AdminService {
     const tdsDoc = await this.mongo.findOne<{ default_rate?: number; status?: number | boolean }>('tds_settings', {});
     const tdsRate = tdsDoc && (tdsDoc.status === 1 || tdsDoc.status === true) ? (Number(tdsDoc.default_rate) || 0) : 0;
 
+    const svcGst = await readServiceGstRate(this.mongo); // service GST (CGST+SGST) — Invoice Setup, default 18
     const earnings: Array<Record<string, unknown>> = [];
     const expenses: Array<Record<string, unknown>> = [];
     const totals = { ...emptyTotals };
@@ -5388,7 +5391,7 @@ export class AdminService {
       const restDiscountCoupon = r2(restDiscount + coupon);
       const netItemValue = r2(Math.max(0, itemAmount - restDiscountCoupon - adminDiscount));
       const commission = r2((netItemValue * commPct) / 100);
-      const commissionGst = r2(commission * 0.18);
+      const commissionGst = r2(commission * (svcGst / 100));
       const adminFee = r2(commission + commissionGst);                     // Admin Fee (PPO + GST)
       const restaurantIncome = r2(itemAmount - restDiscountCoupon - adminFee);
       const tds = r2((Math.max(0, restaurantIncome) * tdsRate) / 100);
@@ -5434,6 +5437,7 @@ export class AdminService {
       const tdsDoc = await this.mongo.findOne<{ default_rate?: number; status?: number | boolean }>('tds_settings', {});
       const tdsRate = tdsDoc && (tdsDoc.status === 1 || tdsDoc.status === true) ? (Number(tdsDoc.default_rate) || 0) : 0;
 
+      const svcGst = await readServiceGstRate(this.mongo); // service GST (CGST+SGST) — Invoice Setup, default 18
       const agg = new Map<number, { orders: number; revenue: number; admin_commission: number; restaurant_take: number }>();
       for (const o of orders) {
         const rid = Number(o.mysql_restaurant_id ?? 0);
@@ -5447,7 +5451,7 @@ export class AdminService {
         const restDiscountCoupon = r2(restDiscount + coupon);
         const netItemValue = r2(Math.max(0, itemAmount - restDiscountCoupon - adminDiscount));
         const commission = r2((netItemValue * commPct) / 100);
-        const adminFee = r2(commission + commission * 0.18);                 // PPO + 18% GST
+        const adminFee = r2(commission + commission * (svcGst / 100));                 // PPO + 18% GST
         const restaurantIncome = r2(itemAmount - restDiscountCoupon - adminFee);
         const tds = r2((Math.max(0, restaurantIncome) * tdsRate) / 100);
         const cur = agg.get(rid) ?? { orders: 0, revenue: 0, admin_commission: 0, restaurant_take: 0 };
@@ -5747,6 +5751,24 @@ function personLabel(r: Record<string, unknown>): string {
 }
 
 export interface ReportFilterOpts { from?: string; to?: string; zoneId?: number; restaurantId?: number; deliveryManId?: number }
+
+/** Service GST rate (%) for the PLATFORM's service charges — commission/PPO,
+ *  delivery fee, additional + situational charges. Read from Invoice Setup as
+ *  CGST + SGST (`service_invoice_cgst_rate` + `service_invoice_sgst_rate`,
+ *  default 9 + 9 = 18), so a single admin setting drives EVERY income report +
+ *  the refund penalty engine + the tax invoice consistently. Falls back to 18
+ *  when the settings are absent, so existing behaviour is unchanged. */
+async function readServiceGstRate(mongo: MongoDataService): Promise<number> {
+  const docs = await mongo.findMany<{ key?: string; value?: string; key_value?: string }>(
+    'business_settings', { key: { $in: ['service_invoice_cgst_rate', 'service_invoice_sgst_rate'] } },
+  );
+  const val = (k: string, d: number) => {
+    const row = docs.find((x) => x.key === k);
+    const n = parseFloat(String(row?.value ?? row?.key_value ?? ''));
+    return Number.isFinite(n) && n >= 0 ? n : d;
+  };
+  return val('service_invoice_cgst_rate', 9) + val('service_invoice_sgst_rate', 9);
+}
 
 /** Mongo $match for delivered+paid orders, optionally constrained by a date
  *  range / zone / restaurant — shared by every order-aggregating report. */
@@ -8406,6 +8428,7 @@ AdminService.prototype.adminEarningReport = async function (this: AdminService, 
     const tdsDoc = await this['mongo'].findOne<{ default_rate?: number; status?: number | boolean }>('tds_settings', {});
     const tdsRate = tdsDoc && (tdsDoc.status === 1 || tdsDoc.status === true) ? (Number(tdsDoc.default_rate) || 0) : 0;
 
+    const svcGst = await readServiceGstRate(this['mongo']); // service GST (CGST+SGST) — Invoice Setup, default 18
     let gross = 0, tax = 0, deliveryCharges = 0, adminCommission = 0, restaurantTake = 0, deliveredOrders = 0;
     for (const o of ordersList) {
       const orderAmount = num(o.order_amount), t = num(o.total_tax_amount), delivery = num(o.delivery_charge);
@@ -8418,7 +8441,7 @@ AdminService.prototype.adminEarningReport = async function (this: AdminService, 
       const restDiscountCoupon = r2x(restDiscount + coupon);
       const netItemValue = r2x(Math.max(0, itemAmount - restDiscountCoupon - adminDiscount));
       const commission = r2x((netItemValue * commPct) / 100);
-      const adminFee = r2x(commission + commission * 0.18);
+      const adminFee = r2x(commission + commission * (svcGst / 100));
       const restaurantIncome = r2x(itemAmount - restDiscountCoupon - adminFee);
       const tds = r2x((Math.max(0, restaurantIncome) * tdsRate) / 100);
       adminCommission = r2x(adminCommission + adminFee);

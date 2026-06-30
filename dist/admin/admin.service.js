@@ -4021,7 +4021,7 @@ let AdminService = class AdminService {
         const userMap = new Map(users.map((u) => [Number(u.mysql_id), u]));
         const gstDoc = await this.mongo.findOne('business_settings', { key: 'food_gst_rate' });
         const gstRate = (() => { const n = parseFloat(String(gstDoc?.value ?? gstDoc?.key_value ?? '5')); return Number.isFinite(n) && n >= 0 ? n : 5; })();
-        const commGstRate = 18;
+        const commGstRate = await readServiceGstRate(this.mongo);
         const tdsDoc = await this.mongo.findOne('tds_settings', {});
         const tdsRate = tdsDoc && (tdsDoc.status === 1 || tdsDoc.status === true) ? (Number(tdsDoc.default_rate) || 0) : 0;
         const num = (v) => (v == null ? 0 : Number(v) || 0);
@@ -4123,7 +4123,7 @@ let AdminService = class AdminService {
         const restMap = new Map(rests.map((r) => [Number(r.mysql_id), r]));
         const gstDoc = await this.mongo.findOne('business_settings', { key: 'food_gst_rate' });
         const foodGstRate = (() => { const n = parseFloat(String(gstDoc?.value ?? gstDoc?.key_value ?? '5')); return Number.isFinite(n) && n >= 0 ? n : 5; })();
-        const SERVICE_GST = 18;
+        const SERVICE_GST = await readServiceGstRate(this.mongo);
         const num = (v) => (v == null ? 0 : Number(v) || 0);
         const r2 = (n) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
         const summary = { ...emptySummary };
@@ -4319,7 +4319,7 @@ let AdminService = class AdminService {
         const num = (v) => (v == null ? 0 : Number(v) || 0);
         const r2 = (n) => Math.round(n * 100) / 100;
         const status_counts = {};
-        const serviceRate = 18;
+        const serviceRate = await readServiceGstRate(this.mongo);
         const extractGst = (gross) => r2((gross * serviceRate) / (100 + serviceRate));
         const rows = orders.map((o) => {
             const orderAmount = num(o.order_amount);
@@ -4413,6 +4413,7 @@ let AdminService = class AdminService {
         const userMap = new Map(users.map((u) => [Number(u.mysql_id), u]));
         const num = (v) => (v == null ? 0 : Number(v) || 0);
         const r2 = (n) => Math.round(n * 100) / 100;
+        const svcGst = await readServiceGstRate(this.mongo);
         const rows = orders.map((o) => {
             const orderAmount = num(o.order_amount);
             const tax = num(o.total_tax_amount);
@@ -4427,7 +4428,7 @@ let AdminService = class AdminService {
             const rest = restMap.get(Number(o.mysql_restaurant_id ?? 0));
             const commissionRate = num(rest?.comission) || 10;
             const commission = r2((itemAmount * commissionRate) / 100);
-            const commissionGst = r2(commission * 0.18);
+            const commissionGst = r2(commission * (svcGst / 100));
             const total = r2(commission + commissionGst + additional - adminDiscount);
             const user = userMap.get(Number(o.mysql_user_id ?? 0));
             return {
@@ -4684,6 +4685,7 @@ let AdminService = class AdminService {
         const restIds = Array.from(new Set(orders.map((o) => Number(o.mysql_restaurant_id ?? 0)).filter((n) => n > 0)));
         const rests = restIds.length ? await this.mongo.findMany('restaurants', { mysql_id: { $in: restIds } }) : [];
         const restMap = new Map(rests.map((r) => [Number(r.mysql_id), r]));
+        const svcGst = await readServiceGstRate(this.mongo);
         let orderCommission = 0, additionalCharge = 0, deliveryCharge = 0, couponExp = 0, prodDiscExp = 0;
         const earningTxns = [];
         const expenseTxns = [];
@@ -4695,7 +4697,7 @@ let AdminService = class AdminService {
                 itemAmount = r2(Math.max(0, orderAmount - tax - delivery)) || orderAmount;
             const rest = restMap.get(Number(o.mysql_restaurant_id ?? 0));
             const commission = r2((itemAmount * (num(rest?.comission) || 10)) / 100);
-            const adminFee = r2(commission + commission * 0.18);
+            const adminFee = r2(commission + commission * (svcGst / 100));
             orderCommission += adminFee;
             additionalCharge += extra;
             deliveryCharge += delivery;
@@ -4766,6 +4768,7 @@ let AdminService = class AdminService {
         const userMap = new Map(users.map((u) => [Number(u.mysql_id), `${u.f_name ?? ''} ${u.l_name ?? ''}`.trim()]));
         const tdsDoc = await this.mongo.findOne('tds_settings', {});
         const tdsRate = tdsDoc && (tdsDoc.status === 1 || tdsDoc.status === true) ? (Number(tdsDoc.default_rate) || 0) : 0;
+        const svcGst = await readServiceGstRate(this.mongo);
         const earnings = [];
         const expenses = [];
         const totals = { ...emptyTotals };
@@ -4782,7 +4785,7 @@ let AdminService = class AdminService {
             const restDiscountCoupon = r2(restDiscount + coupon);
             const netItemValue = r2(Math.max(0, itemAmount - restDiscountCoupon - adminDiscount));
             const commission = r2((netItemValue * commPct) / 100);
-            const commissionGst = r2(commission * 0.18);
+            const commissionGst = r2(commission * (svcGst / 100));
             const adminFee = r2(commission + commissionGst);
             const restaurantIncome = r2(itemAmount - restDiscountCoupon - adminFee);
             const tds = r2((Math.max(0, restaurantIncome) * tdsRate) / 100);
@@ -4817,6 +4820,7 @@ let AdminService = class AdminService {
             const restMap = new Map(rests.map((r) => [Number(r.mysql_id), r]));
             const tdsDoc = await this.mongo.findOne('tds_settings', {});
             const tdsRate = tdsDoc && (tdsDoc.status === 1 || tdsDoc.status === true) ? (Number(tdsDoc.default_rate) || 0) : 0;
+            const svcGst = await readServiceGstRate(this.mongo);
             const agg = new Map();
             for (const o of orders) {
                 const rid = Number(o.mysql_restaurant_id ?? 0);
@@ -4832,7 +4836,7 @@ let AdminService = class AdminService {
                 const restDiscountCoupon = r2(restDiscount + coupon);
                 const netItemValue = r2(Math.max(0, itemAmount - restDiscountCoupon - adminDiscount));
                 const commission = r2((netItemValue * commPct) / 100);
-                const adminFee = r2(commission + commission * 0.18);
+                const adminFee = r2(commission + commission * (svcGst / 100));
                 const restaurantIncome = r2(itemAmount - restDiscountCoupon - adminFee);
                 const tds = r2((Math.max(0, restaurantIncome) * tdsRate) / 100);
                 const cur = agg.get(rid) ?? { orders: 0, revenue: 0, admin_commission: 0, restaurant_take: 0 };
@@ -4964,6 +4968,15 @@ async function nameMapFor(mongo, collection, ids, fmt) {
 function personLabel(r) {
     const name = `${r.f_name ?? ''} ${r.l_name ?? ''}`.trim();
     return name || r.name || r.phone || r.email || '—';
+}
+async function readServiceGstRate(mongo) {
+    const docs = await mongo.findMany('business_settings', { key: { $in: ['service_invoice_cgst_rate', 'service_invoice_sgst_rate'] } });
+    const val = (k, d) => {
+        const row = docs.find((x) => x.key === k);
+        const n = parseFloat(String(row?.value ?? row?.key_value ?? ''));
+        return Number.isFinite(n) && n >= 0 ? n : d;
+    };
+    return val('service_invoice_cgst_rate', 9) + val('service_invoice_sgst_rate', 9);
 }
 function orderReportMatch(opts = {}) {
     const match = { order_status: 'delivered', payment_status: 'paid' };
@@ -7477,6 +7490,7 @@ AdminService.prototype.adminEarningReport = async function (days, opts = {}) {
         const restMap = new Map(rests.map((r) => [Number(r.mysql_id), r]));
         const tdsDoc = await this['mongo'].findOne('tds_settings', {});
         const tdsRate = tdsDoc && (tdsDoc.status === 1 || tdsDoc.status === true) ? (Number(tdsDoc.default_rate) || 0) : 0;
+        const svcGst = await readServiceGstRate(this['mongo']);
         let gross = 0, tax = 0, deliveryCharges = 0, adminCommission = 0, restaurantTake = 0, deliveredOrders = 0;
         for (const o of ordersList) {
             const orderAmount = num(o.order_amount), t = num(o.total_tax_amount), delivery = num(o.delivery_charge);
@@ -7493,7 +7507,7 @@ AdminService.prototype.adminEarningReport = async function (days, opts = {}) {
             const restDiscountCoupon = r2x(restDiscount + coupon);
             const netItemValue = r2x(Math.max(0, itemAmount - restDiscountCoupon - adminDiscount));
             const commission = r2x((netItemValue * commPct) / 100);
-            const adminFee = r2x(commission + commission * 0.18);
+            const adminFee = r2x(commission + commission * (svcGst / 100));
             const restaurantIncome = r2x(itemAmount - restDiscountCoupon - adminFee);
             const tds = r2x((Math.max(0, restaurantIncome) * tdsRate) / 100);
             adminCommission = r2x(adminCommission + adminFee);

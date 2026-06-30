@@ -515,6 +515,14 @@ export class RefundService {
     );
     const commissionPct = Math.max(0, Number(restaurant?.comission ?? 0));
     const commission = round2(Math.max(0, itemTotal - restDiscount) * (commissionPct / 100));
+    // Service GST rate (CGST + SGST) from Invoice Setup — the SAME setting the
+    // income reports + tax invoice read (default 9 + 9 = 18), so the "PPO + GST"
+    // penalty component stays consistent if the admin ever changes the rate.
+    const svcDocs = await this.mongo.findMany<{ key?: string; value?: string; key_value?: string }>(
+      'business_settings', { key: { $in: ['service_invoice_cgst_rate', 'service_invoice_sgst_rate'] } },
+    );
+    const svcVal = (k: string, d: number) => { const row = svcDocs.find((x) => x.key === k); const n = parseFloat(String(row?.value ?? row?.key_value ?? '')); return Number.isFinite(n) && n >= 0 ? n : d; };
+    const serviceGstRate = svcVal('service_invoice_cgst_rate', 9) + svcVal('service_invoice_sgst_rate', 9);
 
     return {
       item_total: round2(itemTotal),
@@ -524,9 +532,9 @@ export class RefundService {
       additional_charge: round2(additional),
       situational_charge: round2(situational),
       admin_commission: commission,
-      // 18% GST on the platform's commission (PPO charge) — the "PPO charge & GST"
-      // penalty component in the spec's restaurant-fault / reject-after-accept rows.
-      admin_commission_gst: round2(commission * 0.18),
+      // GST on the platform's commission (PPO charge) at the configured service
+      // rate (CGST+SGST, default 18%) — the "PPO charge & GST" penalty component.
+      admin_commission_gst: round2(commission * (serviceGstRate / 100)),
       grand_total: round2(grandTotal),
     };
   }
