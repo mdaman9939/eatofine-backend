@@ -5003,12 +5003,14 @@ export class AdminService {
       if (itemAmount <= 0) itemAmount = r2(Math.max(0, orderAmount - tax - delivery)) || orderAmount;
       const rest = restMap.get(Number(o.mysql_restaurant_id ?? 0));
       const commissionRate = num(rest?.comission) || 10; // PPO / commission %
-      // Admin income ONLY: PPO/commission + 18% GST on it + platform/additional
-      // charges, minus any admin-funded discount. Delivery fee + situational/surge
-      // are the DELIVERY MAN's earning (settled to the rider) — NOT admin income.
+      // ADMIN REAL INCOME (kept) = PPO/commission + net platform/additional charges
+      // − admin-funded discount. GST is NEVER admin income — the 18% GST on the
+      // commission belongs to the GOVERNMENT (it shows only in the GST Report;
+      // `commission_gst` below is carried for reference/cross-check, NOT added to
+      // income). Delivery fee + situational/surge are the DELIVERY MAN's earning.
       const commission = r2((itemAmount * commissionRate) / 100);
-      const commissionGst = r2(commission * (svcGst / 100));
-      const total = r2(commission + commissionGst + additional - adminDiscount);
+      const commissionGst = r2(commission * (svcGst / 100)); // → Government (GST Report), NOT admin income
+      const total = r2(commission + additional - adminDiscount);
       const user = userMap.get(Number(o.mysql_user_id ?? 0));
       return {
         order_id: Number(o.mysql_id),
