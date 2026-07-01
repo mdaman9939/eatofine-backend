@@ -5010,17 +5010,24 @@ export class AdminService {
       // income). Delivery fee + situational/surge are the DELIVERY MAN's earning.
       const commission = r2((itemAmount * commissionRate) / 100);
       const commissionGst = r2(commission * (svcGst / 100)); // → Government (GST Report), NOT admin income
-      const total = r2(commission + additional - adminDiscount);
+      const total = r2(commission + additional - adminDiscount); // admin income FROM RESTAURANT
+      // "Admin Earning from Delivery Men" = the USER delivery fee admin keeps. The
+      // rider is paid the delivery-partner SLAB amount out of this (see settlement);
+      // admin's delivery margin = user fee − partner payout.
+      const otype = String(o.order_type ?? 'delivery');
+      const isDelivery = otype === 'delivery' || otype === 'home_delivery';
+      const earningFromDelivery = isDelivery ? r2(delivery) : 0;
       const user = userMap.get(Number(o.mysql_user_id ?? 0));
       return {
         order_id: Number(o.mysql_id),
         customer_name: user ? `${user.f_name ?? ''} ${user.l_name ?? ''}`.trim() || null : null,
         restaurant: rest?.name ?? null,
-        order_type: String(o.order_type ?? 'delivery'),
+        order_type: otype,
         commission,
         commission_gst: commissionGst,
         earning_additional: additional,
         admin_discount: adminDiscount,
+        earning_from_delivery: earningFromDelivery,
         total_earning: total,
       };
     });
@@ -5058,6 +5065,14 @@ export class AdminService {
     const num = (v: unknown) => (v == null ? 0 : Number(v) || 0);
     const r2 = (n: number) => Math.round(n * 100) / 100;
 
+    // What admin ACTUALLY pays each rider = the delivery-partner SLAB payout,
+    // recorded on the settlement (NOT the user delivery fee — that's admin income).
+    const orderIds = orders.map((o) => Number(o.mysql_id));
+    const settlements = orderIds.length
+      ? await this.mongo.findMany<{ mysql_order_id: number; partner_payout?: number; deliveryman_earning?: number }>('settlements', { mysql_order_id: { $in: orderIds } })
+      : [];
+    const payoutByOrder = new Map(settlements.map((s) => [Number(s.mysql_order_id), Number(s.partner_payout ?? s.deliveryman_earning ?? 0)]));
+
     const rows = orders.map((o) => {
       const orderType = String(o.order_type ?? 'delivery');
       const isDelivery = orderType === 'delivery' || orderType === 'home_delivery';
@@ -5067,8 +5082,10 @@ export class AdminService {
       const situational = num(o.situational_charge);
       // Discounts the platform funds (admin side): coupon offers + admin discount.
       const expenseDiscount = r2(coupon + adminDiscount);
-      // Delivery fee is paid out to the rider on delivery orders.
-      const expenseDelivery = isDelivery ? delivery : 0;
+      // Rider payout = partner-slab amount from settlement; fall back to the user
+      // fee for orders not yet settled (matches the settlement engine's fallback).
+      const settledPayout = payoutByOrder.get(Number(o.mysql_id));
+      const expenseDelivery = isDelivery ? r2(settledPayout != null && settledPayout > 0 ? settledPayout : delivery) : 0;
       // Per-order rider bonus / incentive budget (delivery orders): 5 / 10 / 15 / 20.
       const expenseBonus = isDelivery ? 5 + (Number(o.mysql_id) % 4) * 5 : 0;
       // Surge orders carry a situational rider incentive (half the surge charge).

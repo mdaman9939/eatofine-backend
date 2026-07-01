@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { MongoDataService } from '../mongo/mongo-data.service';
 import { DmWalletService } from '../wallet/dm-wallet.service';
+import { DmChargesService } from '../enhancements/dm-charges.service';
 
 /**
  * Pay-Per-Order settlement engine (Zomato/Swiggy/Stripe style).
@@ -36,6 +37,7 @@ interface OrderDoc {
   order_amount?: number;
   total_tax_amount?: number;
   delivery_charge?: number;
+  distance?: number | null;
   additional_charge?: number;
   extra_packaging_amount?: number;
   coupon_discount_amount?: number;
@@ -73,14 +75,17 @@ export interface SettlementBreakdown {
   gross_order_amount: number;   // alias of customer_payment (BRD wording)
   tax_amount: number;
   delivery_charge: number;
+  user_delivery_fee: number;    // what the customer paid for delivery → ADMIN keeps it
+  partner_payout: number;       // rider's distance-slab payout, funded FROM admin
+  admin_delivery_margin: number;// user_delivery_fee − partner_payout (may be negative)
   platform_fee: number;
   admin_commission: number;
   admin_markup: number;
   admin_discount: number;       // admin-funded discount (promo expense)
   restaurant_discount: number;  // restaurant-funded discount
-  platform_revenue: number;     // commission + platform fee (+ undelivered delivery)
-  deliveryman_earning: number;
-  admin_net: number;            // platform_revenue − admin_discount (admin cash)
+  platform_revenue: number;     // commission + platform fee + markup + user delivery fee
+  deliveryman_earning: number;  // = partner_payout (rider base)
+  admin_net: number;            // platform_revenue − admin_discount − partner_payout (admin cash)
   restaurant_earning: number;   // residual → keeps the identity exact
   identity_ok: boolean;
 }
@@ -93,6 +98,7 @@ export class SettlementService {
   constructor(
     private readonly mongo: MongoDataService,
     private readonly dmWallet: DmWalletService,
+    private readonly dmCharges: DmChargesService,
   ) {}
 
   private async ensureIndexes(): Promise<void> {
@@ -149,10 +155,11 @@ export class SettlementService {
     restaurant: RestaurantDoc | null,
     foodAmount: number,
     discounts: { admin: number; restaurant: number },
+    riderPartnerPayout: number,   // rider's slab-based payout, funded FROM admin
   ): SettlementBreakdown {
     const customerPayment = r2(num(order.order_amount));
     const tax = r2(num(order.total_tax_amount));
-    const deliveryCharge = r2(num(order.delivery_charge));
+    const deliveryCharge = r2(num(order.delivery_charge));   // USER delivery fee
     const platformFee = r2(num(order.additional_charge));
     const hasDeliveryMan = order.mysql_delivery_man_id != null && Number(order.mysql_delivery_man_id) > 0;
 
@@ -164,24 +171,30 @@ export class SettlementService {
     const adminCommission = r2((commissionBase * commissionPct) / 100);
     const adminMarkup = r2(num(restaurant?.admin_markup));
 
-    // Delivery fee is the deliveryman's earning; if no DM is attached it stays
-    // with the platform (so nothing is lost).
-    const deliverymanEarning = hasDeliveryMan ? deliveryCharge : 0;
-    const undeliveredDelivery = hasDeliveryMan ? 0 : deliveryCharge;
+    // ── DELIVERY MODEL ────────────────────────────────────────────────
+    // The USER delivery fee is ADMIN income (admin keeps what the customer paid
+    // for delivery). The RIDER is paid the DELIVERY-PARTNER SLAB amount, funded
+    // FROM admin (admin wallet → rider wallet). Admin's delivery margin = user fee
+    // − rider payout (may be negative on long trips — admin subsidises, standard).
+    const userDeliveryFee = deliveryCharge;                                   // → admin (0 for take-away/dine-in)
+    const deliverymanEarning = hasDeliveryMan ? r2(riderPartnerPayout) : 0;   // admin → rider (slab)
+    const adminDeliveryMargin = r2(userDeliveryFee - deliverymanEarning);
 
-    const platformRevenue = r2(adminCommission + platformFee + adminMarkup + undeliveredDelivery);
+    // platform_revenue = admin's gross claim on the customer payment: commission +
+    // additional + markup + the user delivery fee. The rider payout is paid OUT of
+    // this (admin → rider) and so is NOT part of the residual identity below.
+    const platformRevenue = r2(adminCommission + platformFee + adminMarkup + userDeliveryFee);
 
-    // Restaurant earning is the RESIDUAL — guarantees the identity holds and no
-    // money is ever lost:
-    //   customer_payment + admin_discount
-    //     = restaurant_earning + platform_revenue + deliveryman_earning + tax
-    const restaurantEarning = r2(
-      customerPayment + discounts.admin - platformRevenue - deliverymanEarning - tax,
-    );
-    const adminNet = r2(platformRevenue - discounts.admin);
+    // Restaurant earning is the RESIDUAL of the customer payment (identity-exact):
+    //   customer_payment + admin_discount = restaurant_earning + platform_revenue + tax
+    const restaurantEarning = r2(customerPayment + discounts.admin - platformRevenue - tax);
+    // Admin cash kept = gross claim − admin-funded discount − the rider payout.
+    const adminNet = r2(platformRevenue - discounts.admin - deliverymanEarning);
 
+    // Every rupee lands in exactly one wallet: the four legs sum to customerPayment.
+    //   restaurant_earning + admin_net + deliveryman_earning + tax = customer_payment
     const lhs = r2(customerPayment + discounts.admin);
-    const rhs = r2(restaurantEarning + platformRevenue + deliverymanEarning + tax);
+    const rhs = r2(restaurantEarning + platformRevenue + tax);
     const identityOk = Math.abs(lhs - rhs) < 0.01;
 
     return {
@@ -190,6 +203,9 @@ export class SettlementService {
       gross_order_amount: customerPayment,
       tax_amount: tax,
       delivery_charge: deliveryCharge,
+      user_delivery_fee: userDeliveryFee,
+      partner_payout: deliverymanEarning,
+      admin_delivery_margin: adminDeliveryMargin,
       platform_fee: platformFee,
       admin_commission: adminCommission,
       admin_markup: adminMarkup,
@@ -301,7 +317,29 @@ export class SettlementService {
     const foodAmount = r2(details.reduce((s, d) => s + num(d.price) * num(d.quantity), 0));
     const restaurant = await this.mongo.findByMysqlId<RestaurantDoc>('restaurants', restaurantId);
     const discounts = await this.resolveDiscounts(order);
-    const b = this.computeBreakdown(order, restaurant, foodAmount, discounts);
+
+    // RIDER payout = delivery-partner distance-slab amount (funded FROM admin).
+    // SAFE FALLBACK: if no active slab matches the trip (e.g. partner slabs not
+    // configured yet, or the order carries no distance) the rider is paid the user
+    // delivery fee — exactly as before — so a rider is NEVER left unpaid; admin's
+    // delivery margin is then simply 0.
+    const hasDm = order.mysql_delivery_man_id != null && Number(order.mysql_delivery_man_id) > 0;
+    const deliveryFee = r2(num(order.delivery_charge));
+    let riderPartnerPayout = 0;
+    if (hasDm) {
+      const dist = Number(order.distance);
+      let slabTotal = 0;
+      if (Number.isFinite(dist) && dist > 0) {
+        try {
+          slabTotal = Number((await this.dmCharges.calculate({ distance_km: dist })).total) || 0;
+        } catch {
+          slabTotal = 0;
+        }
+      }
+      riderPartnerPayout = slabTotal > 0 ? r2(slabTotal) : deliveryFee;
+    }
+
+    const b = this.computeBreakdown(order, restaurant, foodAmount, discounts, riderPartnerPayout);
 
     if (!b.identity_ok) {
       this.logger.warn(`Order ${orderId}: accounting identity mismatch — stored anyway for audit.`);
@@ -358,6 +396,9 @@ export class SettlementService {
       admin_commission: b.admin_commission,
       platform_fee: b.platform_fee,
       admin_markup: b.admin_markup,
+      user_delivery_fee: b.user_delivery_fee,
+      partner_payout: b.partner_payout,
+      admin_delivery_margin: b.admin_delivery_margin,
       platform_revenue: b.platform_revenue,
       admin_net: b.admin_net,
     });
