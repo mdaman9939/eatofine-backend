@@ -4593,16 +4593,18 @@ export class AdminService {
       const commissionRate = num(rest?.comission) || 10;
       const commission = r2((Math.max(0, netItemValue) * commissionRate) / 100);
       const commissionGst = r2((commission * commGstRate) / 100);
-      const adminFee = r2(commission + commissionGst); // PPO/Commission + GST
-      // Restaurant income = item cost − restaurant discount − admin fee.
+      const adminFee = r2(commission + commissionGst); // charged to the restaurant: PPO + its 18% GST
+      // Restaurant income = item cost − restaurant discount − (commission + its GST).
       const restaurantIncome = r2(itemAmount - restDiscountCoupon - adminFee);
       const tds = r2((Math.max(0, restaurantIncome) * tdsRate) / 100);
       const restaurantNetIncome = r2(restaurantIncome - tds);
-      const adminIncomeFromRestaurant = adminFee;
-      // Admin keeps ONLY the additional charges (platform / packaging / convenience).
-      // The delivery fee + situational/surge are the DELIVERY MAN's earning (settled
-      // to the rider's wallet) — a pass-through for the platform, so NOT admin income.
-      const adminIncomeFromUser = r2(additionalCharge - adminDiscount);
+      // ADMIN INCOME EXCLUDES GST — the 18% commission GST is the GOVERNMENT's
+      // (see the GST Report / the commission_gst column), never kept by admin.
+      const adminIncomeFromRestaurant = commission; // PPO / commission ONLY
+      // Admin now KEEPS the user delivery fee (the rider is paid the delivery-partner
+      // SLAB out of it — see settlement) PLUS the platform/packaging/convenience
+      // charges, minus any admin-funded discount. GST on these → govt, not here.
+      const adminIncomeFromUser = r2(additionalCharge + delivery - adminDiscount);
 
       const status = String(o.order_status ?? '');
       const user = userMap.get(Number(o.mysql_user_id ?? 0));
